@@ -6,9 +6,9 @@
 <title>z8lua → submodule — pico-e32 worklog</title>
 <style>
   :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
-        --ok:#1a7f4b;--warn:#a86300;--codebg:#eef1f6;--line:#c4ccd8}
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
   @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
-        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--codebg:#1b2230;--line:#3a4553}}
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
   .wrap{max-width:860px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
@@ -34,6 +34,8 @@
   .diagram{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.2rem;margin:1.4rem 0;overflow-x:auto}
   .cap{color:var(--muted);font-size:.85rem;margin:.4rem 0 0;text-align:center}
   .note{color:var(--muted);font-size:.92rem}
+  .cross{color:var(--bad);font-weight:700}
+  .check{color:var(--ok);font-weight:700}
   svg{display:block;margin:0 auto;max-width:100%;height:auto}
   .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 </style>
@@ -46,121 +48,96 @@
 
   <div class="tldr">
     <span class="pill ok">✓ done</span>
-    &nbsp;<code>components/z8lua</code> is now a submodule tracking branch
-    <code>pico-e32</code> of <strong>teapotlaboratories/z8lua</strong> (a fork of
-    jtothebell/z8lua) at <code>101a0c4</code>. Host build verified; parent-repo wiring ships as a PR.
+    &nbsp;<code>components/z8lua</code> is a submodule tracking branch <code>pico-e32</code> of
+    <strong>teapotlaboratories/z8lua</strong> at <code>d10747d</code>. The vendored tree is
+    <strong>byte-identical to upstream except one <code>fix32.h</code> patch</strong>; all ESP-IDF
+    integration lives in the build files. Host build verified.
   </div>
 
-  <h2>Why it needed a fork, not a plain submodule</h2>
-  <p>z8lua is PICO-8's fixed-point Lua 5.2 dialect (<code>LUA_NUMBER = z8::fix32</code>). The
-  vendored copy carried <strong>two deliberate patches</strong> without which it will not build
-  for the ESP32-S3 — so a submodule pointing straight at upstream would silently drop them and
-  break the build. The patches have to live in a fork we control.</p>
+  <h2>The core problem: a C++ dialect shipped as <code>.c</code></h2>
+  <p>z8lua is PICO-8's fixed-point Lua 5.2 dialect — <code>LUA_NUMBER = z8::fix32</code>, a C++ type —
+  so the Lua core must compile <strong>as C++</strong>. The whole question was <em>how</em> to make
+  that happen while touching upstream as little as possible.</p>
+
   <div class="card">
-    <h3 style="margin-top:0">The two divergences</h3>
-    <ul>
-      <li><strong>.c → .cpp rename.</strong> <code>fix32</code> is a C++ type, so every compiled
-      translation unit must be C++.</li>
-      <li><strong>fix32.h ctor patch.</strong> On xtensa-esp-elf <code>int32_t</code> is
-      <code>long</code>, leaving plain <code>int</code> uncovered → <code>int → fix32</code> was
-      <em>ambiguous</em> under <code>-std=gnu++2b</code>. Added an implicit <code>int</code> /
-      <code>unsigned int</code> constructor (no-op on x86, where <code>int == int32_t</code>).</li>
-    </ul>
+    <h3 style="margin-top:0">Two tries</h3>
+    <p style="margin:.2rem 0"><span class="cross">✗ First attempt (wrong).</span> Rename all 30
+    compiled <code>.c</code> files to <code>.cpp</code>, and delete the units we don't compile. It
+    builds, but it rewrites the entire vendored tree, turns every upstream rebase into a rename war,
+    and buries the real divergence. <em>"Nobody renames a <code>.c</code> to <code>.cpp</code> just to
+    integrate."</em></p>
+    <p style="margin:.6rem 0 .2rem"><span class="check">✓ Correct approach.</span> Leave the tree
+    byte-identical to upstream; tell the <strong>build</strong> to use the C++ compiler — which is
+    exactly what upstream's own makefile does (<code>CC = g++</code>).</p>
   </div>
 
-  <h2>The transformation</h2>
   <div class="diagram">
-    <svg viewBox="0 0 820 430" role="img" aria-label="Diagram: upstream commit plus three patch commits form the pico-e32 branch, which the parent repo references as a submodule gitlink.">
-      <defs>
-        <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
-          <path d="M0,0 L7,3 L0,6 Z" fill="var(--line)"/>
-        </marker>
-      </defs>
-      <!-- upstream base -->
-      <circle cx="70" cy="120" r="15" fill="none" stroke="var(--muted)" stroke-width="2"/>
-      <text x="70" y="160" text-anchor="middle" fill="var(--muted)" font-size="12" class="mono">4cf7de4</text>
-      <text x="70" y="176" text-anchor="middle" fill="var(--muted)" font-size="11">upstream</text>
-      <text x="70" y="92" text-anchor="middle" fill="var(--muted)" font-size="11">jtothebell/z8lua</text>
+    <svg viewBox="0 0 820 300" role="img" aria-label="Diagram: the same .c source compiled two ways. The rename approach rewrites the tree; the build approach keeps it byte-identical and sets LANGUAGE CXX.">
+      <!-- source file -->
+      <rect x="40" y="120" width="150" height="56" rx="9" fill="var(--codebg)" stroke="var(--border)"/>
+      <text x="115" y="146" text-anchor="middle" fill="var(--fg)" font-size="13" class="mono">lapi.c</text>
+      <text x="115" y="164" text-anchor="middle" fill="var(--muted)" font-size="11">upstream, unchanged</text>
 
-      <!-- three patch commits -->
-      <line x1="85" y1="120" x2="205" y2="120" stroke="var(--line)" stroke-width="2" marker-end="url(#ar)"/>
-      <circle cx="230" cy="120" r="15" fill="var(--surface)" stroke="var(--accent)" stroke-width="2.5"/>
-      <text x="230" y="155" text-anchor="middle" fill="var(--fg)" font-size="12" class="mono">37b905b</text>
-      <text x="230" y="171" text-anchor="middle" fill="var(--muted)" font-size="10.5">.c→.cpp ×30</text>
+      <!-- wrong branch -->
+      <line x1="190" y1="140" x2="300" y2="80" stroke="var(--bad)" stroke-width="2" stroke-dasharray="5 3"/>
+      <rect x="300" y="52" width="220" height="56" rx="9" fill="none" stroke="var(--bad)" stroke-width="2"/>
+      <text x="410" y="76" text-anchor="middle" fill="var(--bad)" font-size="13" class="mono">rename → lapi.cpp</text>
+      <text x="410" y="94" text-anchor="middle" fill="var(--muted)" font-size="11">tree rewritten · rebase war</text>
+      <text x="533" y="84" fill="var(--bad)" font-size="18" font-weight="700">✗</text>
 
-      <line x1="245" y1="120" x2="335" y2="120" stroke="var(--line)" stroke-width="2" marker-end="url(#ar)"/>
-      <circle cx="360" cy="120" r="15" fill="var(--surface)" stroke="var(--accent)" stroke-width="2.5"/>
-      <text x="360" y="155" text-anchor="middle" fill="var(--fg)" font-size="12" class="mono">6b6926f</text>
-      <text x="360" y="171" text-anchor="middle" fill="var(--muted)" font-size="10.5">fix32.h</text>
+      <!-- right branch -->
+      <line x1="190" y1="156" x2="300" y2="216" stroke="var(--ok)" stroke-width="2"/>
+      <rect x="300" y="188" width="260" height="56" rx="9" fill="none" stroke="var(--ok)" stroke-width="2"/>
+      <text x="430" y="210" text-anchor="middle" fill="var(--fg)" font-size="12.5" class="mono">build: LANGUAGE CXX / -x c++</text>
+      <text x="430" y="228" text-anchor="middle" fill="var(--muted)" font-size="11">file stays lapi.c · compiled as C++</text>
+      <text x="573" y="220" fill="var(--ok)" font-size="18" font-weight="700">✓</text>
 
-      <line x1="375" y1="120" x2="465" y2="120" stroke="var(--line)" stroke-width="2" marker-end="url(#ar)"/>
-      <circle cx="490" cy="120" r="16" fill="var(--surface)" stroke="var(--accent)" stroke-width="3"/>
-      <text x="490" y="156" text-anchor="middle" fill="var(--fg)" font-size="12" class="mono">101a0c4</text>
-      <text x="490" y="172" text-anchor="middle" fill="var(--muted)" font-size="10.5">esp-idf wiring</text>
-
-      <!-- branch label -->
-      <rect x="150" y="40" width="360" height="26" rx="13" fill="none" stroke="var(--accent)" stroke-dasharray="4 3"/>
-      <text x="330" y="58" text-anchor="middle" fill="var(--accent)" font-size="12" class="mono">branch: pico-e32  →  teapotlaboratories/z8lua</text>
-      <line x1="330" y1="66" x2="490" y2="103" stroke="var(--accent)" stroke-dasharray="4 3" stroke-width="1.3"/>
-
-      <!-- gitlink down to parent repo -->
-      <line x1="490" y1="137" x2="490" y2="250" stroke="var(--line)" stroke-width="2" marker-end="url(#ar)"/>
-      <text x="505" y="197" fill="var(--muted)" font-size="11">gitlink (submodule ref)</text>
-
-      <!-- parent repo box -->
-      <rect x="70" y="262" width="680" height="128" rx="12" fill="var(--surface)" stroke="var(--border)" stroke-width="1.5"/>
-      <text x="90" y="288" fill="var(--fg)" font-size="13" font-weight="700">parent repo — teapotlaboratories/pico-e32</text>
-      <rect x="90" y="302" width="300" height="34" rx="7" fill="var(--codebg)" stroke="var(--border)"/>
-      <text x="104" y="324" fill="var(--fg)" font-size="12" class="mono">components/z8lua @101a0c4</text>
-      <rect x="410" y="302" width="320" height="34" rx="7" fill="var(--codebg)" stroke="var(--border)"/>
-      <text x="424" y="324" fill="var(--fg)" font-size="12" class="mono">vendor/esp-idf @f5c3654</text>
-      <text x="90" y="362" fill="var(--muted)" font-size="11.5">.gitmodules — both submodules; branch = pico-e32 pins z8lua to our fork</text>
-      <text x="90" y="380" fill="var(--muted)" font-size="11.5">re-pull upstream later = rebase the 3 commits onto the new base</text>
+      <text x="115" y="250" text-anchor="middle" fill="var(--muted)" font-size="11">same bytes on disk</text>
     </svg>
-    <p class="cap">Upstream <span class="mono">4cf7de4</span> + 3 patch commits = branch <span class="mono">pico-e32</span>;
-    the parent repo references its tip as a submodule gitlink.</p>
+    <p class="cap">Same source, two integrations. The build-layer one keeps the file byte-identical to upstream.</p>
   </div>
 
-  <h2>Findings — checked, not from memory</h2>
+  <h2>How the build does it</h2>
   <ul>
-    <li>All <strong>30 <code>.cpp</code> files are byte-identical</strong> to upstream <code>.c</code>
-      → the rename is pure, no smuggled edits.</li>
-    <li><strong>Only <code>fix32.h</code></strong> carries a content edit — exactly the documented hunk.</li>
-    <li><strong><code>bench.h</code> did not belong to z8lua.</strong> It was a stale duplicate of the
-      canonical <code>firmware/pico-e32-luabench/bench/bench.h</code> (z8lua copy declared only
-      <code>run_bench</code>; the real one also declares <code>run_cases</code>). The host Makefile's
-      <code>-I</code> order made the build accidentally pick the stale copy — it compiled only because
-      <code>host_main.cpp</code> calls just <code>run_bench</code>. Dropping it makes both builds resolve
-      to the canonical header.</li>
+    <li><strong>ESP-IDF</strong> (<code>CMakeLists.txt</code>): register the core <code>.c</code> files and
+      <code>set_source_files_properties(… PROPERTIES LANGUAGE CXX)</code> so CMake invokes the C++ compiler;
+      <code>LUA_USE_LONGJMP</code> keeps setjmp/longjmp error handling (C++ exceptions off).</li>
+    <li><strong>Host</strong> (<code>Makefile</code>): compile the same <code>.c</code> with <code>g++ -x c++</code>.</li>
+    <li><strong>Excluded units</strong> <code>liolib</code>/<code>loslib</code>/<code>loadlib</code>/<code>ltests</code>
+      (host OS / <code>dlopen</code> deps <code>linit</code> never opens) are <strong>left out of the source
+      list</strong>, not deleted.</li>
   </ul>
 
-  <h2>Commits on the fork branch</h2>
+  <h2>Fork branch — 2 clean commits atop <code>4cf7de4</code></h2>
   <table>
     <thead><tr><th>commit</th><th>change</th></tr></thead>
     <tbody>
-      <tr><td><code>37b905b</code></td><td>Compile the Lua core as C++: rename 30 <code>.c</code> → <code>.cpp</code> (pure renames)</td></tr>
-      <tr><td><code>6b6926f</code></td><td><code>fix32.h</code>: implicit <code>int</code>/<code>unsigned int</code> ctor for xtensa</td></tr>
-      <tr><td><code>101a0c4</code></td><td>ESP-IDF component wiring; drop unused upstream units (<code>liolib</code>/<code>loslib</code>/<code>loadlib</code>/<code>ltests</code>, <code>makefile</code>, <code>README</code>, <code>*.dontcompile</code>)</td></tr>
+      <tr><td><code>7f91ff0</code></td><td><code>fix32.h</code>: implicit <code>int</code>/<code>unsigned int</code>
+        ctor for toolchains where <code>int != int32_t</code> (xtensa). Type-safe <code>enable_if</code>, no-op on
+        x86; mirrors upstream's <code>long</code> template. The <strong>only</strong> source edit.</td></tr>
+      <tr><td><code>d10747d</code></td><td>ESP-IDF component build (<code>CMakeLists.txt</code> compiling the
+        <code>.c</code> as C++, <code>UPSTREAM_SHA.txt</code>, <code>LOCAL_PATCHES.md</code>). No renames, no deletions.</td></tr>
     </tbody>
   </table>
+  <p class="note">Diff vs upstream: 3 files added, 1 modified, <strong>0 renamed, 0 deleted</strong>.</p>
 
   <h2>Verification</h2>
   <ul>
-    <li><strong>Tree parity:</strong> fork branch ≡ old vendored <code>components/z8lua/</code>, the only
-      intended difference being the dropped stray <code>bench.h</code>. Upstream's <code>.gitignore</code>
-      is retained (build-invisible — the CMake glob is <code>*.cpp</code>).</li>
-    <li><strong>Compiles + runs:</strong> luabench host benchmark built through its real Makefile against
-      the submodule — clean build, <code>bench.h</code> resolves to <code>../bench/bench.h</code>,
-      benchmark ran (fixed-point ~176&nbsp;ms, sin/cos ~38&nbsp;ms, table churn ~74&nbsp;ms).</li>
-    <li class="note"><strong>Caveat:</strong> the host is x86, so it can't exercise the xtensa
-      <code>fix32</code> int fix. That belongs to the on-device Gate <code>#2</code> run.</li>
+    <li><strong>Zero-divergence:</strong> <code>git diff --name-status 4cf7de4 HEAD</code> shows only
+      <code>A CMakeLists.txt</code>, <code>A LOCAL_PATCHES.md</code>, <code>A UPSTREAM_SHA.txt</code>,
+      <code>M fix32.h</code> — no <code>R</code>/<code>D</code>.</li>
+    <li><strong>Compiles + runs:</strong> luabench host benchmark built through its real Makefile
+      (<code>g++ -x c++</code> over the 30 core <code>.c</code> files) — clean build, ran ~305&nbsp;ms
+      (30 fps budget = 33 ms/frame; Gate <code>#2</code> is on-device).</li>
+    <li class="note"><strong>Caveat:</strong> x86 host can't exercise the xtensa <code>fix32</code> fix — that's the on-device Gate <code>#2</code>.</li>
   </ul>
 
-  <h2>Next</h2>
+  <h2>Also</h2>
   <ul>
-    <li>Merge the parent-repo submodule-wiring PR.</li>
-    <li>Phase-0 hardware bring-up: Gate <code>#1</code> (ILI9488 ≥ 30 fps @ 256²) and Gate
-      <code>#2</code> (z8lua throughput ≤ 33 ms/frame) on the real board.</li>
+    <li>Dropped the stray <code>components/z8lua/bench.h</code> (stale duplicate of the canonical
+      <code>firmware/pico-e32-luabench/bench/bench.h</code>).</li>
+    <li>Rule added to <code>.ai/AGENTS.md</code>: <strong>least-destructive vendor edits</strong> — never rename
+      an upstream file to change how it compiles (set the language in the build), never delete to exclude.</li>
   </ul>
 </div>
 </body>
