@@ -37,9 +37,10 @@ Most important rules:
   new-code ↔ upstream mapping (`file:line` ↔ `file:line`) + a deliberate-divergences
   section, with every cited line grepped in both trees, never from memory. See
   [AGENTS.md → Porting / adapting upstream code](AGENTS.md#porting--adapting-upstream-code).
-- **Least-destructive vendor edits** — when adapting vendored/upstream code, exclude at the
-  build layer (e.g. keep an uncompiled unit as `.c` so a `*.cpp` glob skips it) or guard
-  behind a compile flag; don't delete files just to keep them out of the build. See
+- **Least-destructive vendor edits** — keep the tree byte-identical to upstream and push
+  integration into the build: never rename a file to change how it compiles (set the language
+  in the build, e.g. `LANGUAGE CXX` / `-x c++`), and never delete a file just to exclude it
+  (leave it out of the source list, or guard behind a compile flag). See
   [AGENTS.md → Porting / adapting upstream code](AGENTS.md#porting--adapting-upstream-code).
 - **Keep a worklog and update it AS YOU GO** — for any non-trivial, multi-step
   investigation/implementation, maintain `docs/worklog/YYYY-MM-DD-<slug>.md` and append each
