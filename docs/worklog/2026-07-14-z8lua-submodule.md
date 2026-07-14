@@ -56,7 +56,8 @@ Fork branch `pico-e32` = upstream `4cf7de4` + 3 commits, authored as the project
 |--------|--------|
 | `37b905b` | Compile the Lua core as C++: rename 30 `.c` → `.cpp` (pure renames) |
 | `6b6926f` | `fix32.h`: implicit `int`/`unsigned int` ctor for xtensa |
-| `101a0c4` | ESP-IDF component wiring (`CMakeLists.txt`, `UPSTREAM_SHA.txt`, `LOCAL_PATCHES.md`); drop unused upstream units (`liolib`/`loslib`/`loadlib`/`ltests`, `makefile`, `README`, `*.dontcompile`) |
+| `101a0c4` | ESP-IDF component wiring (`CMakeLists.txt`, `UPSTREAM_SHA.txt`, `LOCAL_PATCHES.md`); *(originally also dropped the uncompiled upstream units — reverted in `346ddf0`, see follow-up)* |
+| `346ddf0` | Keep excluded upstream units in-tree; exclude them via the `*.cpp` glob rather than deleting (least-destructive vendoring) |
 
 Parent repo: `git submodule add -b pico-e32` → `components/z8lua`, alongside the existing
 `vendor/esp-idf` submodule.
@@ -77,3 +78,25 @@ Parent repo: `git submodule add -b pico-e32` → `components/z8lua`, alongside t
 - Open the parent-repo submodule-wiring PR (this change).
 - Phase-0 hardware bring-up still pending: Gate `#1` (ILI9488 ≥ 30 fps @ 256²) and
   Gate `#2` (z8lua throughput ≤ 33 ms/frame) on the real board.
+
+## Follow-up (2026-07-14) — keep excluded units instead of deleting them
+
+Revisited commit `101a0c4`, which *deleted* the units we don't compile
+(`liolib`/`loslib`/`loadlib`/`ltests`) plus upstream's build files
+(`makefile`/`README`/`*.dontcompile`). Deleting vendor code just to keep it out of the build
+is more destructive than necessary — both build systems compile **only `*.cpp`**
+(`file(GLOB … "*.cpp")` in `CMakeLists.txt`; `$(wildcard …/*.cpp)` in the host Makefile), so
+leaving those units at their upstream `.c` extension already excludes them. No `#define`
+guard needed.
+
+- **Fork commit `346ddf0`** restores all 8 files and rewrites `LOCAL_PATCHES.md` §3 to
+  document the convention: `.cpp` = a unit we compile; `.c` = an upstream unit intentionally
+  left uncompiled. Done as a *forward* commit (not a history rewrite) so the already-merged
+  `101a0c4` stays reachable.
+- **Verified:** host build's compiled set is unchanged (the restored `.c` files never enter
+  the source list); benchmark still runs (~298 ms total).
+- **Rule added** to `.ai/AGENTS.md` → *Porting / adapting upstream code*: **least-destructive
+  vendor edits** — exclude at the build layer or guard behind a compile flag; deletion is a
+  last resort, always recorded in the vendoring notes.
+
+Submodule pointer bumped `101a0c4` → `346ddf0`.

@@ -48,7 +48,7 @@
     <span class="pill ok">✓ done</span>
     &nbsp;<code>components/z8lua</code> is now a submodule tracking branch
     <code>pico-e32</code> of <strong>teapotlaboratories/z8lua</strong> (a fork of
-    jtothebell/z8lua) at <code>101a0c4</code>. Host build verified; parent-repo wiring ships as a PR.
+    jtothebell/z8lua) at <code>346ddf0</code>. Host build verified; parent-repo wiring ships as a PR.
   </div>
 
   <h2>Why it needed a fork, not a plain submodule</h2>
@@ -111,7 +111,7 @@
       <rect x="70" y="262" width="680" height="128" rx="12" fill="var(--surface)" stroke="var(--border)" stroke-width="1.5"/>
       <text x="90" y="288" fill="var(--fg)" font-size="13" font-weight="700">parent repo — teapotlaboratories/pico-e32</text>
       <rect x="90" y="302" width="300" height="34" rx="7" fill="var(--codebg)" stroke="var(--border)"/>
-      <text x="104" y="324" fill="var(--fg)" font-size="12" class="mono">components/z8lua @101a0c4</text>
+      <text x="104" y="324" fill="var(--fg)" font-size="12" class="mono">components/z8lua @346ddf0</text>
       <rect x="410" y="302" width="320" height="34" rx="7" fill="var(--codebg)" stroke="var(--border)"/>
       <text x="424" y="324" fill="var(--fg)" font-size="12" class="mono">vendor/esp-idf @f5c3654</text>
       <text x="90" y="362" fill="var(--muted)" font-size="11.5">.gitmodules — both submodules; branch = pico-e32 pins z8lua to our fork</text>
@@ -140,9 +140,28 @@
     <tbody>
       <tr><td><code>37b905b</code></td><td>Compile the Lua core as C++: rename 30 <code>.c</code> → <code>.cpp</code> (pure renames)</td></tr>
       <tr><td><code>6b6926f</code></td><td><code>fix32.h</code>: implicit <code>int</code>/<code>unsigned int</code> ctor for xtensa</td></tr>
-      <tr><td><code>101a0c4</code></td><td>ESP-IDF component wiring; drop unused upstream units (<code>liolib</code>/<code>loslib</code>/<code>loadlib</code>/<code>ltests</code>, <code>makefile</code>, <code>README</code>, <code>*.dontcompile</code>)</td></tr>
+      <tr><td><code>101a0c4</code></td><td>ESP-IDF component wiring <span class="note">(originally also dropped the uncompiled upstream units — reverted in <code>346ddf0</code>)</span></td></tr>
+      <tr><td><code>346ddf0</code></td><td>Keep excluded upstream units in-tree; exclude via the <code>*.cpp</code> glob, not deletion</td></tr>
     </tbody>
   </table>
+
+  <div class="card" style="border-left:4px solid var(--accent)">
+    <h3 style="margin-top:0">Follow-up — keep, don't delete</h3>
+    <p style="margin:.2rem 0 .5rem">Commit <code>101a0c4</code> first <em>deleted</em> the units we don't
+    compile (<code>liolib</code>/<code>loslib</code>/<code>loadlib</code>/<code>ltests</code>) and upstream's
+    build files. Deleting vendor code just to keep it out of the build is more destructive than needed:
+    both build systems compile <strong>only <code>*.cpp</code></strong>
+    (<code>file(GLOB … "*.cpp")</code> / <code>$(wildcard …/*.cpp)</code>), so leaving those units at their
+    upstream <code>.c</code> extension already excludes them — no <code>#define</code> guard required.</p>
+    <ul style="margin:.3rem 0 0">
+      <li>Fork commit <code>346ddf0</code> restores all 8 files (a forward commit, so merged
+        <code>101a0c4</code> stays reachable) and documents the convention: <code>.cpp</code> = compiled
+        here; <code>.c</code> = upstream unit intentionally left uncompiled.</li>
+      <li>Verified: the compiled set is unchanged; benchmark still runs (~298&nbsp;ms).</li>
+      <li>New rule in <code>.ai/AGENTS.md</code>: <strong>least-destructive vendor edits</strong> — exclude
+        at the build layer or guard behind a compile flag; deletion is a last resort.</li>
+    </ul>
+  </div>
 
   <h2>Verification</h2>
   <ul>
