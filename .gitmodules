@@ -1,0 +1,8 @@
+[submodule "vendor/esp-idf"]
+	path = vendor/esp-idf
+	url = https://github.com/espressif/esp-idf.git
+	shallow = true
+[submodule "components/z8lua"]
+	path = components/z8lua
+	url = https://github.com/teapotlaboratories/z8lua.git
+	branch = pico-e32

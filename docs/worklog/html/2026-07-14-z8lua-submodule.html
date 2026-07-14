@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>z8lua → submodule — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--codebg:#eef1f6;--line:#c4ccd8}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--codebg:#1b2230;--line:#3a4553}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:860px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)}
+  .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  h3{margin:1.4rem 0 .4rem;font-size:1.02rem}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;
+       font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .pill{display:inline-block;font-size:.78rem;font-weight:600;padding:.16em .6em;border-radius:999px;border:1px solid var(--border)}
+  .pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1rem 1.2rem;margin:1rem 0}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--accent);
+        border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem}
+  li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .6rem;text-align:left;vertical-align:top}
+  th{background:var(--codebg)}
+  td code{white-space:nowrap}
+  .diagram{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.2rem;margin:1.4rem 0;overflow-x:auto}
+  .cap{color:var(--muted);font-size:.85rem;margin:.4rem 0 0;text-align:center}
+  .note{color:var(--muted);font-size:.92rem}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <p class="date">2026-07-14</p>
+  <h1>z8lua: vendored copy → git submodule</h1>
+
+  <div class="tldr">
+    <span class="pill ok">✓ done</span>
+    &nbsp;<code>components/z8lua</code> is now a submodule tracking branch
+    <code>pico-e32</code> of <strong>teapotlaboratories/z8lua</strong> (a fork of
+    jtothebell/z8lua) at <code>101a0c4</code>. Host build verified; parent-repo wiring ships as a PR.
+  </div>
+
+  <h2>Why it needed a fork, not a plain submodule</h2>
+  <p>z8lua is PICO-8's fixed-point Lua 5.2 dialect (<code>LUA_NUMBER = z8::fix32</code>). The
+  vendored copy carried <strong>two deliberate patches</strong> without which it will not build
+  for the ESP32-S3 — so a submodule pointing straight at upstream would silently drop them and
+  break the build. The patches have to live in a fork we control.</p>
+  <div class="card">
+    <h3 style="margin-top:0">The two divergences</h3>
+    <ul>
+      <li><strong>.c → .cpp rename.</strong> <code>fix32</code> is a C++ type, so every compiled
+      translation unit must be C++.</li>
+      <li><strong>fix32.h ctor patch.</strong> On xtensa-esp-elf <code>int32_t</code> is
+      <code>long</code>, leaving plain <code>int</code> uncovered → <code>int → fix32</code> was
+      <em>ambiguous</em> under <code>-std=gnu++2b</code>. Added an implicit <code>int</code> /
+      <code>unsigned int</code> constructor (no-op on x86, where <code>int == int32_t</code>).</li>
+    </ul>
+  </div>
+
+  <h2>The transformation</h2>
+  <div class="diagram">
+    <svg viewBox="0 0 820 430" role="img" aria-label="Diagram: upstream commit plus three patch commits form the pico-e32 branch, which the parent repo references as a submodule gitlink.">
+      <defs>
+        <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="var(--line)"/>
+        </marker>
+      </defs>
+      <!-- upstream base -->
+      <circle cx="70" cy="120" r="15" fill="none" stroke="var(--muted)" stroke-width="2"/>
+      <text x="70" y="160" text-anchor="middle" fill="var(--muted)" font-size="12" class="mono">4cf7de4</text>
+      <text x="70" y="176" text-anchor="middle" fill="var(--muted)" font-size="11">upstream</text>
+      <text x="70" y="92" text-anchor="middle" fill="var(--muted)" font-size="11">jtothebell/z8lua</text>
+
+      <!-- three patch commits -->
+      <line x1="85" y1="120" x2="205" y2="120" stroke="var(--line)" stroke-width="2" marker-end="url(#ar)"/>
+      <circle cx="230" cy="120" r="15" fill="var(--surface)" stroke="var(--accent)" stroke-width="2.5"/>
+      <text x="230" y="155" text-anchor="middle" fill="var(--fg)" font-size="12" class="mono">37b905b</text>
+      <text x="230" y="171" text-anchor="middle" fill="var(--muted)" font-size="10.5">.c→.cpp ×30</text>
+
+      <line x1="245" y1="120" x2="335" y2="120" stroke="var(--line)" stroke-width="2" marker-end="url(#ar)"/>
+      <circle cx="360" cy="120" r="15" fill="var(--surface)" stroke="var(--accent)" stroke-width="2.5"/>
+      <text x="360" y="155" text-anchor="middle" fill="var(--fg)" font-size="12" class="mono">6b6926f</text>
+      <text x="360" y="171" text-anchor="middle" fill="var(--muted)" font-size="10.5">fix32.h</text>
+
+      <line x1="375" y1="120" x2="465" y2="120" stroke="var(--line)" stroke-width="2" marker-end="url(#ar)"/>
+      <circle cx="490" cy="120" r="16" fill="var(--surface)" stroke="var(--accent)" stroke-width="3"/>
+      <text x="490" y="156" text-anchor="middle" fill="var(--fg)" font-size="12" class="mono">101a0c4</text>
+      <text x="490" y="172" text-anchor="middle" fill="var(--muted)" font-size="10.5">esp-idf wiring</text>
+
+      <!-- branch label -->
+      <rect x="150" y="40" width="360" height="26" rx="13" fill="none" stroke="var(--accent)" stroke-dasharray="4 3"/>
+      <text x="330" y="58" text-anchor="middle" fill="var(--accent)" font-size="12" class="mono">branch: pico-e32  →  teapotlaboratories/z8lua</text>
+      <line x1="330" y1="66" x2="490" y2="103" stroke="var(--accent)" stroke-dasharray="4 3" stroke-width="1.3"/>
+
+      <!-- gitlink down to parent repo -->
+      <line x1="490" y1="137" x2="490" y2="250" stroke="var(--line)" stroke-width="2" marker-end="url(#ar)"/>
+      <text x="505" y="197" fill="var(--muted)" font-size="11">gitlink (submodule ref)</text>
+
+      <!-- parent repo box -->
+      <rect x="70" y="262" width="680" height="128" rx="12" fill="var(--surface)" stroke="var(--border)" stroke-width="1.5"/>
+      <text x="90" y="288" fill="var(--fg)" font-size="13" font-weight="700">parent repo — teapotlaboratories/pico-e32</text>
+      <rect x="90" y="302" width="300" height="34" rx="7" fill="var(--codebg)" stroke="var(--border)"/>
+      <text x="104" y="324" fill="var(--fg)" font-size="12" class="mono">components/z8lua @101a0c4</text>
+      <rect x="410" y="302" width="320" height="34" rx="7" fill="var(--codebg)" stroke="var(--border)"/>
+      <text x="424" y="324" fill="var(--fg)" font-size="12" class="mono">vendor/esp-idf @f5c3654</text>
+      <text x="90" y="362" fill="var(--muted)" font-size="11.5">.gitmodules — both submodules; branch = pico-e32 pins z8lua to our fork</text>
+      <text x="90" y="380" fill="var(--muted)" font-size="11.5">re-pull upstream later = rebase the 3 commits onto the new base</text>
+    </svg>
+    <p class="cap">Upstream <span class="mono">4cf7de4</span> + 3 patch commits = branch <span class="mono">pico-e32</span>;
+    the parent repo references its tip as a submodule gitlink.</p>
+  </div>
+
+  <h2>Findings — checked, not from memory</h2>
+  <ul>
+    <li>All <strong>30 <code>.cpp</code> files are byte-identical</strong> to upstream <code>.c</code>
+      → the rename is pure, no smuggled edits.</li>
+    <li><strong>Only <code>fix32.h</code></strong> carries a content edit — exactly the documented hunk.</li>
+    <li><strong><code>bench.h</code> did not belong to z8lua.</strong> It was a stale duplicate of the
+      canonical <code>firmware/pico-e32-luabench/bench/bench.h</code> (z8lua copy declared only
+      <code>run_bench</code>; the real one also declares <code>run_cases</code>). The host Makefile's
+      <code>-I</code> order made the build accidentally pick the stale copy — it compiled only because
+      <code>host_main.cpp</code> calls just <code>run_bench</code>. Dropping it makes both builds resolve
+      to the canonical header.</li>
+  </ul>
+
+  <h2>Commits on the fork branch</h2>
+  <table>
+    <thead><tr><th>commit</th><th>change</th></tr></thead>
+    <tbody>
+      <tr><td><code>37b905b</code></td><td>Compile the Lua core as C++: rename 30 <code>.c</code> → <code>.cpp</code> (pure renames)</td></tr>
+      <tr><td><code>6b6926f</code></td><td><code>fix32.h</code>: implicit <code>int</code>/<code>unsigned int</code> ctor for xtensa</td></tr>
+      <tr><td><code>101a0c4</code></td><td>ESP-IDF component wiring; drop unused upstream units (<code>liolib</code>/<code>loslib</code>/<code>loadlib</code>/<code>ltests</code>, <code>makefile</code>, <code>README</code>, <code>*.dontcompile</code>)</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Verification</h2>
+  <ul>
+    <li><strong>Tree parity:</strong> fork branch ≡ old vendored <code>components/z8lua/</code>, the only
+      intended difference being the dropped stray <code>bench.h</code>. Upstream's <code>.gitignore</code>
+      is retained (build-invisible — the CMake glob is <code>*.cpp</code>).</li>
+    <li><strong>Compiles + runs:</strong> luabench host benchmark built through its real Makefile against
+      the submodule — clean build, <code>bench.h</code> resolves to <code>../bench/bench.h</code>,
+      benchmark ran (fixed-point ~176&nbsp;ms, sin/cos ~38&nbsp;ms, table churn ~74&nbsp;ms).</li>
+    <li class="note"><strong>Caveat:</strong> the host is x86, so it can't exercise the xtensa
+      <code>fix32</code> int fix. That belongs to the on-device Gate <code>#2</code> run.</li>
+  </ul>
+
+  <h2>Next</h2>
+  <ul>
+    <li>Merge the parent-repo submodule-wiring PR.</li>
+    <li>Phase-0 hardware bring-up: Gate <code>#1</code> (ILI9488 ≥ 30 fps @ 256²) and Gate
+      <code>#2</code> (z8lua throughput ≤ 33 ms/frame) on the real board.</li>
+  </ul>
+</div>
+</body>
+</html>
