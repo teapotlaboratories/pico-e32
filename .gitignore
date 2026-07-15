@@ -23,3 +23,7 @@ assets/celeste_cart.h
 
 # editor / OS cruft
 .DS_Store
+
+# bench-camera local config + captured frames (churn/binaries)
+tools/bench_cam.env
+captures/
