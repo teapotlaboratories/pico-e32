@@ -1,0 +1,3 @@
+# App-level config for pico-e32-display-test. Board/target/PSRAM come from
+# boards/<BOARD>/sdkconfig.defaults (layered first by the top-level Makefile).
+CONFIG_COMPILER_OPTIMIZATION_PERF=y

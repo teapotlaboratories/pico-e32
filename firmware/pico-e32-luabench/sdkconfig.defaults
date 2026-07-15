@@ -1,0 +1,10 @@
+# App-level config for pico-e32-luabench. Board/target/PSRAM come from
+# boards/<BOARD>/sdkconfig.defaults (layered first by the top-level Makefile).
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+CONFIG_COMPILER_OPTIMIZATION_PERF=y   # -O2; -Os measured no better for the z8lua VM (worklog 2026-07-14 gate2)
+
+# This is a throughput benchmark: the timed loop runs Lua flat-out in app_main
+# without yielding, which starves the idle task and trips the Task Watchdog (~5 s).
+# The WDT is irrelevant to the measurement and its backtrace print would corrupt the
+# timed case it fires in, so disable it for this harness.
+CONFIG_ESP_TASK_WDT_INIT=n

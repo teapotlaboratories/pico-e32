@@ -1,0 +1,4 @@
+# App-level config for pico-e32-host. Board/target/PSRAM come from
+# boards/<BOARD>/sdkconfig.defaults (layered first by the top-level Makefile).
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
