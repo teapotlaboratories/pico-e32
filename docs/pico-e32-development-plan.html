@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PICO-8 on ESP32-S3 — Development Plan</title>
+<style>
+  :root{
+    --bg:#f6f8fb; --surface:#ffffff; --surface2:#eef1f6; --fg:#181c23; --muted:#5a6472;
+    --border:#e1e6ee; --accent:#356ad4; --accent2:#7a4bd4;
+    --ok:#159a55; --ok-bg:#e5f6ec; --warn:#b9790a; --warn-bg:#fbf1dd; --bug:#d23f3f; --bug-bg:#fbe8e8;
+    --code:#2b3a55; --code-bg:#eef1f6; --shadow:0 1px 3px rgba(20,30,50,.08),0 6px 20px rgba(20,30,50,.06);
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0d1117; --surface:#161b22; --surface2:#1d232c; --fg:#e6edf3; --muted:#9aa5b1;
+      --border:#2a323d; --accent:#5b8bf0; --accent2:#b08bf5;
+      --ok:#3fb950; --ok-bg:#12241a; --warn:#e3b341; --warn-bg:#241d0e; --bug:#f0645b; --bug-bg:#2a1416;
+      --code:#c9d6e6; --code-bg:#1c232c; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#f6f8fb; --surface:#ffffff; --surface2:#eef1f6; --fg:#181c23; --muted:#5a6472;
+    --border:#e1e6ee; --accent:#356ad4; --accent2:#7a4bd4;
+    --ok:#159a55; --ok-bg:#e5f6ec; --warn:#b9790a; --warn-bg:#fbf1dd; --bug:#d23f3f; --bug-bg:#fbe8e8;
+    --code:#2b3a55; --code-bg:#eef1f6; --shadow:0 1px 3px rgba(20,30,50,.08),0 6px 20px rgba(20,30,50,.06);
+  }
+  :root[data-theme="dark"]{
+    --bg:#0d1117; --surface:#161b22; --surface2:#1d232c; --fg:#e6edf3; --muted:#9aa5b1;
+    --border:#2a323d; --accent:#5b8bf0; --accent2:#b08bf5;
+    --ok:#3fb950; --ok-bg:#12241a; --warn:#e3b341; --warn-bg:#241d0e; --bug:#f0645b; --bug-bg:#2a1416;
+    --code:#c9d6e6; --code-bg:#1c232c; --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--bg);color:var(--fg);
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  code,.mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:.86em}
+  code{background:var(--code-bg);color:var(--code);padding:.1em .4em;border-radius:5px}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  h2{font-size:1.5rem;margin:0 0 .2em;letter-spacing:-.01em}
+  h3{font-size:1.08rem;margin:1.4em 0 .5em}
+  small{color:var(--muted)}
+
+  /* top bar */
+  .topbar{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--surface) 88%,transparent);
+    backdrop-filter:blur(10px);border-bottom:1px solid var(--border);}
+  .topbar-inner{max-width:1000px;margin:0 auto;padding:.7rem 1.2rem;display:flex;align-items:center;gap:.8rem}
+  .brand{font-weight:700;letter-spacing:-.02em}
+  .brand .chip{color:var(--accent)}
+  .spacer{flex:1}
+  .toggle{cursor:pointer;border:1px solid var(--border);background:var(--surface2);color:var(--fg);
+    border-radius:999px;padding:.3rem .7rem;font-size:.8rem;display:inline-flex;gap:.35rem;align-items:center}
+  .toggle:hover{border-color:var(--accent)}
+
+  .wrap{max-width:1000px;margin:0 auto;padding:0 1.2rem 5rem}
+
+  /* hero */
+  .hero{padding:2.6rem 0 1rem}
+  .hero h1{font-size:2.15rem;line-height:1.15;letter-spacing:-.025em;margin:.2em 0 .3em}
+  .hero .sub{font-size:1.12rem;color:var(--muted);max-width:70ch}
+  .pills{display:flex;flex-wrap:wrap;gap:.5rem;margin:1.1rem 0 0}
+  .pill{font-size:.78rem;font-weight:600;padding:.3rem .7rem;border-radius:999px;border:1px solid var(--border);
+    background:var(--surface);display:inline-flex;gap:.4rem;align-items:center}
+  .pill.accent{border-color:transparent;background:var(--accent);color:#fff}
+  .dot{width:.5rem;height:.5rem;border-radius:50%;background:var(--ok)}
+
+  section{margin:2.6rem 0}
+  .lead{color:var(--muted);max-width:74ch;margin:.2em 0 1.2em}
+
+  /* cards + callouts */
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.1rem 1.2rem;box-shadow:var(--shadow)}
+  .callout{border:1px solid var(--border);border-left-width:4px;border-radius:10px;padding:.85rem 1.05rem;margin:1rem 0;background:var(--surface)}
+  .callout.ok{border-left-color:var(--ok);background:var(--ok-bg)}
+  .callout.warn{border-left-color:var(--warn);background:var(--warn-bg)}
+  .callout.bug{border-left-color:var(--bug);background:var(--bug-bg)}
+  .callout .k{font-weight:700;display:block;margin-bottom:.15rem}
+  .callout p{margin:.3rem 0 0}
+
+  /* stat grid */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:.8rem}
+  .stat{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:.9rem 1rem}
+  .stat .n{font-size:1.5rem;font-weight:750;letter-spacing:-.02em;line-height:1.1}
+  .stat .l{font-size:.8rem;color:var(--muted);margin-top:.25rem}
+  .stat .n.ok{color:var(--ok)} .stat .n.warn{color:var(--warn)} .stat .n.acc{color:var(--accent)}
+
+  .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+  /* datapath diagram */
+  .dp{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+  .dp-col{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1rem;display:flex;flex-direction:column;gap:.55rem}
+  .dp-col.safe{border-top:3px solid var(--ok)}
+  .dp-col.risk{border-top:3px solid var(--bug)}
+  .dp-head{display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.2rem}
+  .dp-head b{font-size:1rem}
+  .tag{font-size:.7rem;font-weight:700;padding:.2rem .5rem;border-radius:6px;text-transform:uppercase;letter-spacing:.04em}
+  .tag.ok{background:var(--ok);color:#fff} .tag.bug{background:var(--bug);color:#fff}
+  .node{border:1px solid var(--border);border-radius:9px;padding:.5rem .65rem;background:var(--surface2);font-size:.86rem}
+  .node b{display:block;font-size:.9rem}
+  .node.psram{border-style:dashed}
+  .node.gram{background:color-mix(in srgb,var(--ok) 14%,var(--surface))}
+  .node.hot{background:color-mix(in srgb,var(--accent) 12%,var(--surface))}
+  .node.danger{background:color-mix(in srgb,var(--bug) 12%,var(--surface));border-color:color-mix(in srgb,var(--bug) 40%,var(--border))}
+  .flowline{display:flex;align-items:center;gap:.5rem;color:var(--muted);font-size:.76rem;padding-left:.3rem}
+  .flowline .ar{color:var(--accent);font-weight:700}
+  .flowline.bad .ar{color:var(--bug)}
+  .flowline.contend{color:var(--bug);font-weight:600}
+
+  /* memory bars */
+  .membar{margin:.7rem 0 1.1rem}
+  .membar .top{display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:.3rem}
+  .membar .top b{font-weight:700}
+  .bar{display:flex;height:34px;border-radius:8px;overflow:hidden;border:1px solid var(--border);font-size:.72rem;font-weight:600}
+  .seg{display:flex;align-items:center;justify-content:center;color:#fff;padding:0 .3rem;text-align:center;white-space:nowrap;overflow:hidden}
+  .seg.s1{background:var(--accent)} .seg.s2{background:var(--accent2)} .seg.s3{background:#6b7686}
+  .seg.free{background:repeating-linear-gradient(45deg,var(--surface2),var(--surface2) 7px,var(--border) 7px,var(--border) 8px);color:var(--muted)}
+  .seg.heap{background:var(--ok)}
+
+  /* gate lanes */
+  .lanes{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+  .lane{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1rem}
+  .lane h4{margin:0 0 .5rem;font-size:.95rem;display:flex;align-items:center;gap:.5rem}
+  .lane .step{font-size:.85rem;color:var(--fg);padding:.35rem 0;border-bottom:1px dashed var(--border)}
+  .lane .step:last-of-type{border-bottom:none}
+  .gate{margin-top:.7rem;border-radius:10px;padding:.6rem .75rem;font-size:.84rem;background:var(--ok-bg);border:1px solid color-mix(in srgb,var(--ok) 35%,var(--border))}
+  .gate b{color:var(--ok)}
+  .badge{font-size:.72rem;font-weight:700;padding:.12rem .5rem;border-radius:6px;background:var(--surface2);border:1px solid var(--border)}
+
+  /* timeline */
+  .timeline{display:flex;gap:.6rem;min-width:640px}
+  .ph{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:.8rem .8rem;position:relative;display:flex;flex-direction:column}
+  .ph .pn{font-size:.72rem;font-weight:800;letter-spacing:.05em;color:var(--accent);text-transform:uppercase}
+  .ph .pt{font-weight:700;margin:.15rem 0 .35rem;font-size:.95rem}
+  .ph .pd{font-size:.8rem;color:var(--muted);flex:1}
+  .ph .pg{margin-top:.55rem;font-size:.74rem;font-weight:700;padding:.25rem .5rem;border-radius:6px;background:var(--ok-bg);color:var(--ok);border:1px solid color-mix(in srgb,var(--ok) 30%,var(--border))}
+  .ph .pg.risk{background:var(--warn-bg);color:var(--warn);border-color:color-mix(in srgb,var(--warn) 30%,var(--border))}
+  .ph .board{position:absolute;top:.7rem;right:.7rem;font-size:.66rem;font-weight:700;padding:.1rem .4rem;border-radius:5px}
+  .board35{background:color-mix(in srgb,var(--ok) 16%,var(--surface));color:var(--ok)}
+  .board40{background:color-mix(in srgb,var(--warn) 16%,var(--surface));color:var(--warn)}
+
+  /* host layer */
+  .host{display:grid;grid-template-columns:1fr;gap:.5rem}
+  .host .row{display:grid;grid-template-columns:1.1fr auto 1.3fr;gap:.6rem;align-items:center}
+  .host .cell{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:.45rem .6rem;font-size:.82rem}
+  .host .cell.sig{font-family:ui-monospace,monospace;font-size:.76rem}
+  .host .to{color:var(--accent);font-weight:800;text-align:center}
+
+  /* generic table */
+  table{width:100%;border-collapse:collapse;font-size:.86rem;min-width:520px}
+  th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--border);vertical-align:top}
+  th{font-size:.74rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  tr:last-child td{border-bottom:none}
+  .yes{color:var(--ok);font-weight:700} .opt{color:var(--muted)}
+
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+  .board-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+  .board-card .bh{padding:.8rem 1rem;font-weight:700;display:flex;align-items:center;justify-content:space-between}
+  .board-card.first .bh{background:var(--ok-bg);border-bottom:1px solid color-mix(in srgb,var(--ok) 30%,var(--border))}
+  .board-card.later .bh{background:var(--warn-bg);border-bottom:1px solid color-mix(in srgb,var(--warn) 30%,var(--border))}
+  .board-card ul{margin:.6rem 0;padding:0 1rem 0 2.1rem;font-size:.85rem}
+  .board-card li{margin:.25rem 0}
+
+  hr{border:none;border-top:1px solid var(--border);margin:2.4rem 0}
+  .foot{color:var(--muted);font-size:.85rem}
+  .foot a{font-weight:600}
+
+  @media (max-width:760px){
+    .stats{grid-template-columns:repeat(2,1fr)}
+    .dp,.lanes,.two{grid-template-columns:1fr}
+    .hero h1{font-size:1.7rem}
+    .host .row{grid-template-columns:1fr;gap:.3rem}
+    .host .to{text-align:left}
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-inner">
+    <span class="brand">pico&#8209;<span class="chip">e32</span></span>
+    <span style="color:var(--muted);font-size:.85rem">ESP32&#8209;S3 · development plan</span>
+    <span class="spacer"></span>
+    <button class="toggle" id="themeBtn" aria-label="Toggle theme">🌗 <span id="themeLbl">Theme</span></button>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <header class="hero">
+    <h1>Building a PICO-8 handheld<br>on the ESP32-S3</h1>
+    <p class="sub">A verified, decision-locked development plan. Native PICO-8 is <b>128×128, 16 colours</b>;
+      the goal is to run real carts on cheap ESP32-S3 hardware — starting on the board already in hand.</p>
+    <div class="pills">
+      <span class="pill accent"><span class="dot" style="background:#fff"></span> First device: 3.5″ ILI9488 (i80)</span>
+      <span class="pill">Runtime: fake-08 port</span>
+      <span class="pill">Target: 30 fps baseline</span>
+      <span class="pill">Status: planning</span>
+    </div>
+  </header>
+
+  <div class="callout ok">
+    <span class="k">First plan — build entirely on the 3.5″ ILI9488 board.</span>
+    <p>Phases 0–1 use only the ILI9488 + an ESP-EYE camera for screen verification. Get the runtime,
+      display, input and audio working on the i80 board first. The ordered 4.0″ ST7701 board is a
+      <b>later</b> option, parked behind a hardware drift test (Gate&nbsp;#5).</p>
+  </div>
+
+  <section>
+    <div class="stats">
+      <div class="stat"><div class="n acc">128²</div><div class="l">PICO-8 native framebuffer (4-bpp, 8&nbsp;KB)</div></div>
+      <div class="stat"><div class="n ok">2× = 256²</div><div class="l">Max clean integer scale on the 320-short-axis panel</div></div>
+      <div class="stat"><div class="n">~2 MB</div><div class="l">PSRAM free for the Lua heap (no framebuffer in PSRAM)</div></div>
+      <div class="stat"><div class="n warn">Lua VM</div><div class="l">The real bottleneck — not the display</div></div>
+    </div>
+  </section>
+
+  <hr>
+
+  <!-- CORE INSIGHT -->
+  <section id="insight">
+    <h2>The core insight: interface class &gt; screen size</h2>
+    <p class="lead">The one decision that shapes everything is <b>how the panel is wired</b>, not how big it is.
+      A GRAM-backed <b>i80/SPI</b> panel takes bounded, on-demand pushes. An <b>RGB</b> panel has no frame
+      memory, so the ESP must stream the whole framebuffer out of PSRAM <i>continuously</i> — and the S3 has
+      no hardware arbitration to protect that stream.</p>
+
+    <div class="dp scroll">
+      <div class="dp-col safe">
+        <div class="dp-head"><b>3.5″ ILI9488 · i80</b><span class="tag ok">Safe</span></div>
+        <div class="node hot"><b>Internal SRAM · 512 KB</b>128×128 indexed fb (8 KB) · RGB565 line buffer · hot Lua state</div>
+        <div class="flowline"><span class="ar">→</span> i80 DMA — bounded, on-demand</div>
+        <div class="node gram"><b>Panel GRAM</b>The panel <i>holds</i> the image on-glass</div>
+        <div class="node psram"><b>PSRAM · 2 MB</b>Lua heap + cart data only — <b>display never touches it</b></div>
+        <div class="callout ok" style="margin:.4rem 0 0;padding:.55rem .7rem">
+          <p style="margin:0"><b>No framebuffer in PSRAM</b> → the full ~2 MB is free for the heap, and the
+            display can't be starved. Deterministic FPS.</p>
+        </div>
+      </div>
+      <div class="dp-col risk">
+        <div class="dp-head"><b>4.0″ ST7701 · RGB</b><span class="tag bug">Drift risk</span></div>
+        <div class="node danger"><b>PSRAM · 8 MB octal</b>Full 480×480 framebuffer <b>+</b> Lua heap (spills here)</div>
+        <div class="flowline bad"><span class="ar">⇒</span> GDMA <b>continuous</b> scanout — no hardware QoS</div>
+        <div class="node"><b>Panel — no GRAM</b>Must be refreshed from PSRAM every frame</div>
+        <div class="flowline contend">⚠ CPU also hits PSRAM (heap spill, code fetch, SD) → contention</div>
+        <div class="callout bug" style="margin:.4rem 0 0;padding:.55rem .7rem">
+          <p style="margin:0">CPU + scanout share the PSRAM port → <b>permanent screen drift</b>, reproduced on
+            this exact panel. Perverse: the heavy carts that need the 8 MB are the ones that drift it.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MEMORY MAP -->
+  <section id="memory">
+    <h2>Where the bytes live (ILI9488 i80 path)</h2>
+    <p class="lead">Because the panel holds the image in its own GRAM, the ESP keeps only small buffers in fast
+      SRAM and hands the entire PSRAM to the interpreter. This is why <b>2 MB is enough to start</b> — and for
+      the large majority of carts.</p>
+
+    <div class="card">
+      <div class="membar">
+        <div class="top"><b>Internal SRAM — 512 KB</b><small>fast, low-latency; keep the hot set here</small></div>
+        <div class="bar">
+          <div class="seg s1" style="flex:0 0 16%">128² fb ×2</div>
+          <div class="seg s2" style="flex:0 0 16%">line buf</div>
+          <div class="seg s3" style="flex:0 0 20%">audio + DMA desc</div>
+          <div class="seg heap" style="flex:0 0 24%">hot Lua / GC nursery</div>
+          <div class="seg free" style="flex:1 1 auto">headroom</div>
+        </div>
+      </div>
+      <div class="membar" style="margin-bottom:0">
+        <div class="top"><b>PSRAM — 2 MB (quad)</b><small>the whole port is the interpreter's — display never touches it</small></div>
+        <div class="bar">
+          <div class="seg heap" style="flex:0 0 82%">Lua heap &nbsp;·&nbsp; most carts use a fraction of PICO-8's 2 MB ceiling (~130 KB typical)</div>
+          <div class="seg s3" style="flex:1 1 auto">cart data</div>
+        </div>
+      </div>
+    </div>
+    <div class="callout warn">
+      <span class="k">The one limit</span>
+      <p>Only a cart pushing near PICO-8's full <b>2 MB Lua ceiling</b> runs short of GC headroom on a 2 MB part —
+        a minority of the library, and a <i>later</i> concern already covered by the ordered 8 MB (4″) board.
+        No module to buy to begin.</p>
+    </div>
+  </section>
+
+  <hr>
+
+  <!-- PHASE 0 GATES -->
+  <section id="phase0">
+    <h2>Phase 0 — the two project-killers</h2>
+    <p class="lead">Everything hinges on two questions, both answerable on the ILI9488 for <b>$0</b>. Run them
+      before buying parts or designing anything.</p>
+
+    <div class="lanes">
+      <div class="lane">
+        <h4>🅐 &nbsp;Display path <span class="badge">esp_lcd i80 → ILI9488</span></h4>
+        <div class="step"><b>A1</b> — Flash an i80 example, get colour bars on the panel (ESP-EYE-verified).</div>
+        <div class="step"><b>A2</b> — Blit a 128×128 indexed image → palette-expand to RGB565 → <b>2× scale to 256²</b>, letterboxed → i80 DMA; time the flush loop.</div>
+        <div class="gate">🚦 <b>Gate #1</b> — ≥ 30 fps sustained. <small>(Bus theoretical ≈ 130 fps; expected to pass easily.)</small></div>
+      </div>
+      <div class="lane">
+        <h4>🅑 &nbsp;Lua throughput <span class="badge">the actual risk</span></h4>
+        <div class="step"><b>B1</b> — Build <code>z8lua</code> (fix32, Lua 5.2) as an ESP-IDF component, <b>compiled as C++</b> (fix32 is a C++ type) with <code>-DLUA_USE_LONGJMP</code>.</div>
+        <div class="step"><b>B2</b> — Micro-benchmark: fixed-point loop, <code>sin()</code> sweep, table churn — heap in SRAM vs PSRAM, timed with <code>esp_timer</code>.</div>
+        <div class="gate">🚦 <b>Gate #2</b> — Lua within ~2–3× of PICO-8's ~4.2 M inst/s budget (≤ 33 ms/frame). <small>PicoPico ran Celeste at ~9 ms/frame on a slower LX6 — a safe lower bound.</small></div>
+      </div>
+    </div>
+    <div class="callout ok">
+      <span class="k">Then Gate #3 — a trivial cart</span>
+      <p>A minimal <code>ESP32Host</code> (draw + timing only) runs a hand-written moving-sprite <code>.p8</code>
+        at ≥ 30 fps on the panel. That closes the loop end-to-end on the safe i80 board.</p>
+    </div>
+  </section>
+
+  <!-- TIMELINE -->
+  <section id="timeline">
+    <h2>The phased plan</h2>
+    <p class="lead">Phases 0–1 are entirely on the ILI9488. The 4″ RGB board doesn't enter until Phase 2, and
+      only if it clears the drift soak test.</p>
+    <div class="scroll">
+      <div class="timeline">
+        <div class="ph"><span class="board board35">3.5″</span><span class="pn">Phase 0</span><span class="pt">De-risk</span>
+          <span class="pd">i80 blit FPS + z8lua throughput on the LX7.</span><span class="pg">Gates #1 · #2</span></div>
+        <div class="ph"><span class="board board35">3.5″</span><span class="pn">Phase 0.5</span><span class="pt">First cart</span>
+          <span class="pd">Minimal host, trivial cart from flash.</span><span class="pg">Gate #3</span></div>
+        <div class="ph"><span class="board board35">3.5″</span><span class="pn">Phase 1</span><span class="pt">Playable</span>
+          <span class="pd">Full host: I²C-expander input, I²S audio, SD carts. A real cart, with sound.</span><span class="pg">Gate #4</span></div>
+        <div class="ph"><span class="board board40">4.0″</span><span class="pn">Phase 2</span><span class="pt">RGB validation</span>
+          <span class="pd">Port to the ST7701 RGB path; onboard audio + charging; run the drift soak test.</span><span class="pg risk">Gate #5</span></div>
+        <div class="ph"><span class="board board40">final</span><span class="pn">Phase 3</span><span class="pt">Enclosure</span>
+          <span class="pd">Enclosure + (only if custom) a PCB with the display that survived Gate #5.</span><span class="pg">Ship</span></div>
+      </div>
+    </div>
+  </section>
+
+  <hr>
+
+  <!-- RUNTIME -->
+  <section id="runtime">
+    <h2>The runtime — port fake-08, write one host layer</h2>
+    <p class="lead"><b>fake-08</b> (MIT) is a clean-room PICO-8 runtime with the highest open API coverage. Its VM
+      is portable and bare-metal-clean; all OS coupling sits behind a single <code>Host</code> class. You write
+      one <code>ESP32Host</code> — the VM is reused as-is.</p>
+
+    <div class="card host">
+      <div class="row"><div class="cell" style="text-align:center;font-weight:700;background:color-mix(in srgb,var(--accent) 12%,var(--surface))">fake-08 VM<br><small>portable C++ · z8lua (fix32)</small></div><div class="to">Host&nbsp;seam →</div><div class="cell" style="font-weight:700">ESP32Host — 5 responsibilities</div></div>
+      <div class="row"><div class="cell sig">drawFrame(picoFb, palette, mode)</div><div class="to">→</div><div class="cell">nibble → RGB565 line expand, 2× scale, i80 DMA</div></div>
+      <div class="row"><div class="cell sig">Audio::FillAudioBuffer() @ 22050 Hz</div><div class="to">→</div><div class="cell">ESP-IDF I²S feeder task (pull path)</div></div>
+      <div class="row"><div class="cell sig">scanInput() → 8-bit mask</div><div class="to">→</div><div class="cell">read I²C GPIO expander, OR the button bits</div></div>
+      <div class="row"><div class="cell sig">getFileContents / listcarts …</div><div class="to">→</div><div class="cell">SD (FatFs) / LittleFS via VFS</div></div>
+      <div class="row"><div class="cell sig">setTargetFps / waitForTargetFps</div><div class="to">→</div><div class="cell"><code>esp_timer</code> + <code>vTaskDelay</code></div></div>
+    </div>
+
+    <div class="two" style="margin-top:1rem">
+      <div class="callout ok" style="margin:0">
+        <span class="k">Verified low-risk on the VM axis</span>
+        <p>Heap grows dynamically (no static 2 MB reservation); interpreter needs only malloc + setjmp/longjmp;
+          fix32 keeps all cart math off the FPU. Place the Lua heap in PSRAM via a <code>heap_caps</code> allocator;
+          keep hot state in SRAM. Split cores: Lua on core 0, display + audio on core 1.</p>
+      </div>
+      <div class="callout warn" style="margin:0">
+        <span class="k">The open risk (Gate #2)</span>
+        <p>No one has run fake-08 on an ESP32 yet — the proven ESP32 PICO-8 runtimes are <i>tac08</i> and
+          <i>PicoPico</i>. fake-08 is the better <b>base</b>; Phase 0 converts "should work" into "does work."</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- BOM -->
+  <section id="bom">
+    <h2>What to buy for the ILI9488 build</h2>
+    <p class="lead">Owned already: the 3.5″ ILI9488 board, the 4.0″ ST7701 board (ordered, for later), and an
+      ESP-EYE camera. The list to make the ILI9488 a working handheld is small.</p>
+    <div class="card scroll">
+      <table>
+        <thead><tr><th>Part</th><th>Price</th><th>Phase</th><th>Role</th></tr></thead>
+        <tbody>
+          <tr><td><b>I²C GPIO expander</b> (PCF8574 / MCP23017)</td><td>$3–7</td><td class="yes">1 · essential</td><td>Buttons on the I²C bus (<code>SDA 38 / SCL 39</code>), addr ≠ 0x38. The only clean input path (~1 free GPIO).</td></tr>
+          <tr><td>Tactile buttons / NES silicone pads</td><td>$2.50–9</td><td class="yes">1 · essential</td><td>D-pad + O/X + menu (7 inputs)</td></tr>
+          <tr><td><b>MAX98357A I²S amp + 4 Ω speaker</b></td><td>$3–10</td><td class="yes">1 · essential</td><td>Audio out — the ILI9488 board has none. BCLK/LRCK/DIN on <code>GPIO40 + 43/44</code>.</td></tr>
+          <tr><td>microSD 8–32 GB</td><td>$8–10</td><td>1</td><td>Cart storage (reuse a spare if you have one)</td></tr>
+          <tr><td>LiPo 2000 mAh + TP4056 charger</td><td class="opt">$13–15</td><td class="opt">2 · portable</td><td>Only for a battery build (board is USB-powered)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout ok"><p style="margin:0"><b>Tethered Phase-0/1 bring-up ≈ $6–16</b> (expander + buttons; +~$8 for audio).
+      The 4″ board later deletes the amp, speaker, charger and SD — they're all onboard.</p></div>
+  </section>
+
+  <hr>
+
+  <!-- TWO BOARDS -->
+  <section id="boards">
+    <h2>The two boards</h2>
+    <div class="two">
+      <div class="board-card first">
+        <div class="bh">3.5″ ILI9488 · i80 <span class="tag ok">First / primary</span></div>
+        <ul>
+          <li>ESP32-S3-WROOM-1-<b>N16R2</b> — 16 MB flash / <b>2 MB</b> quad PSRAM</li>
+          <li>320×480, 16-bit i80 parallel, RGB565, GRAM-backed</li>
+          <li>FT6236 touch · microSD (SPI) · USB-C 5 V (no battery)</li>
+          <li><b>Structurally immune</b> to RGB drift · deterministic FPS</li>
+          <li>~1 free GPIO → buttons via I²C expander</li>
+        </ul>
+      </div>
+      <div class="board-card later">
+        <div class="bh">4.0″ ST7701 · RGB <span class="tag" style="background:var(--warn);color:#fff">Later</span></div>
+        <ul>
+          <li>ESP32-S3-WROOM-1-<b>N16R8</b> — 16 MB / <b>8 MB</b> octal PSRAM</li>
+          <li>480×480, RGB565 (no GRAM) → continuous PSRAM scanout</li>
+          <li>Onboard <b>MAX98357A + speaker</b>, <b>LiPo charger</b>, 16 GB SD, GT911 touch</li>
+          <li>Clean <b>3× = 384²</b> big square image (~2.26″)</li>
+          <li>⚠ backlight PWM needs an R28/R29 solder mod · <b>must pass Gate #5</b></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- RISKS -->
+  <section id="risks">
+    <h2>Gate #5 &amp; the fallback ladder</h2>
+    <div class="callout bug">
+      <span class="k">Gate #5 — the 4″ RGB drift soak test (hardware, not arithmetic)</span>
+      <p>Promote the 4″ board to target only if all three hold: (1) sustained ≥ 30 fps for minutes with bounce
+        buffers + <code>RGB_RESTART_IN_VSYNC</code> + XIP-from-PSRAM, at a PCLK above the ~40 Hz IPS flicker floor;
+        (2) a cart with a <b>~1.5–2 MB heap spilled to PSRAM</b> still holds the refresh deadline; (3) a live SD
+        cart-load causes no drift. If it fails → ship the 4″ for light/moderate carts, or go custom
+        (N16R8 module + a GRAM-backed i80/SPI panel).</p>
+    </div>
+    <div class="callout warn">
+      <span class="k">If even the LX7 is too slow (Gate #2 fails badly)</span>
+      <p>Fallback ladder: 30 fps baseline → restrict the cart list → bytecode precompile + SRAM-arena allocator →
+        <b>ESP32-P4</b> (≈2× single-thread Lua headroom) as the nuclear option. Honest non-MCU floor: a Raspberry
+        Pi Zero 2 W running the official PICO-8 binary.</p>
+    </div>
+  </section>
+
+  <hr>
+  <p class="foot">Rendered from <a href="pico-e32-development-plan.md">pico-e32-development-plan.md</a> —
+    the working development plan. Full evidence base:
+    <a href="design-specification/pico-e32-runtime-feasibility.md">runtime feasibility</a> ·
+    <a href="design-specification/pico-e32-silicon-decision.md">silicon decision (P4 vs S3)</a>.
+    Licensing: fake-08 is a clean-room MIT runtime — ship the device empty; users add their own carts.</p>
+
+</div>
+
+<script>
+  (function(){
+    var root=document.documentElement, btn=document.getElementById('themeBtn'), lbl=document.getElementById('themeLbl');
+    function cur(){ return root.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'); }
+    function apply(t){ root.setAttribute('data-theme',t); lbl.textContent = t==='dark'?'Light':'Dark'; }
+    apply(cur());
+    btn.addEventListener('click',function(){ apply(cur()==='dark'?'light':'dark'); });
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phase-0 Gate #1: ILI9488 blit FPS — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:860px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)} .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:10px;padding:.8rem 1rem;overflow-x:auto;font-size:.82rem;line-height:1.5}
+  .pill{display:inline-block;font-size:.78rem;font-weight:600;padding:.16em .6em;border-radius:999px;border:1px solid var(--border)}
+  .pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+  .pill.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--warn);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  .note{color:var(--muted);font-size:.92rem}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .diagram{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.2rem;margin:1.4rem 0;overflow-x:auto}
+  .cap{color:var(--muted);font-size:.85rem;margin:.4rem 0 0;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <p class="date">2026-07-14</p>
+  <h1>Phase-0 Gate #1: ILI9488 i80 scaled-blit FPS</h1>
+
+  <div class="tldr">
+    <span class="pill ok">✓ FPS criterion passed (288 fps)</span> <span class="pill warn">⚠ visual unverified</span><br>
+    The 256×256 scaled blit runs at <strong>288 fps</strong> on the ILI9488 (16-bit i80) — ~10× the
+    ≥30 fps gate, and physically credible (~94% of the 20 MHz×16-bit bus). But the <strong>bench camera is
+    unavailable</strong>, so I measured throughput, not that the correct pixels are on the glass.
+  </div>
+
+  <h2>Result (UART)</h2>
+  <pre>I (837)  trackA: palette bars drawn at (32,112) 256x256
+I (5847) trackA: ==== Gate #1: 1441 frames in 5.00s = 288.0 fps (256x256 blit) ====
+I (5847) trackA: PASS if >= 30 fps.</pre>
+
+  <h2>Is 288 fps real? (yes)</h2>
+  <div class="diagram">
+    <svg viewBox="0 0 720 150" role="img" aria-label="288 fps equals 37.7 MB/s, which is 94% of the 40 MB/s i80 bus ceiling.">
+      <text x="10" y="30" fill="var(--fg)" font-size="13">i80 bus ceiling — 20 MHz × 16-bit = <tspan font-weight="700">40 MB/s</tspan> (~305 fps)</text>
+      <rect x="10" y="42" width="680" height="26" rx="5" fill="none" stroke="var(--line)"/>
+      <rect x="10" y="42" width="642" height="26" rx="5" fill="var(--ok)" opacity="0.85"/>
+      <text x="20" y="60" fill="#fff" font-size="12" font-weight="700">measured 288 fps = 37.7 MB/s (94%)</text>
+      <text x="10" y="100" fill="var(--muted)" font-size="12">Each frame blocks on DMA completion (semaphore from the color-done ISR),</text>
+      <text x="10" y="118" fill="var(--muted)" font-size="12">so this is a true completed-transfer rate — not a spinning loop.</text>
+    </svg>
+    <p class="cap">288 fps sits right against the bus ceiling → a genuine transfer rate.</p>
+  </div>
+  <p>256×256×2 B × 288 = <strong>37.7 MB/s</strong> vs the 40 MB/s bus → ~94% utilization. Init ran with no
+  <code>ESP_ERROR_CHECK</code> abort (the app reached the loop), so the bus + panel IO are configured right.
+  The real workload (128×128 → 2× letterboxed at 30 fps) needs only ~10% of this — huge margin.</p>
+
+  <h2>⚠ Blocker: visual correctness not verified</h2>
+  <p>Per <code>.ai/AGENTS.md</code>, display changes are confirmed by the bench camera — and it's
+  <strong>unavailable</strong>: no <code>/dev/video*</code>, no capture tooling, no <code>docs/hardware/</code>
+  capture doc; the plan's intended cam is an <strong>ESP-EYE</strong> not set up here. The driver is
+  explicitly UNVERIFIED, so a broken init could still clock DMA at 288 fps into a <em>blank</em> screen.</p>
+  <ul>
+    <li><strong>Confirmed:</strong> bus/DMA throughput; init didn't fault.</li>
+    <li><strong>Not confirmed:</strong> colours, RGB/BGR order (<code>SWAP_COLOR_BYTES</code>), MADCTL
+      orientation, panel not blank/garbled.</li>
+  </ul>
+
+  <h2>Follow-up: driver extracted to a reusable component</h2>
+  <p>The inline ILI9488 driver is now <code>components/ili9488</code> (<code>ili9488_init/blit/fill/rgb565</code>,
+  board specifics via a config struct) so Gate #3 and the future <code>ESP32Host</code> share one driver.
+  Rebuilt + reflashed → <strong>identical 288.0 fps</strong>, so the refactor is behavior-preserving (verified
+  without the camera).</p>
+
+  <h2>Next</h2>
+  <ul>
+    <li>Set up a capture camera (ESP-EYE or USB webcam) + a <code>docs/hardware/</code> capture doc; then
+      flash → capture → inspect the palette bars; fix colour/orientation if needed. Only then is Gate #1 fully passed.</li>
+    <li>After visual confirmation: Gate #3 (trivial cart end-to-end on the panel), reusing <code>components/ili9488</code>.</li>
+  </ul>
+</div>
+</body>
+</html>

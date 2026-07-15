@@ -1,0 +1,1921 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PICO-8 on ESP32-S3 — Feasibility &amp; Development Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400..700&family=Silkscreen:wght@400;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   TOKENS — the 16 colours of the PICO-8 palette. Nothing else.
+   Each one is assigned a job, not a mood.
+   ============================================================ */
+:root{
+  /* PICO-8 system palette, 0–15 */
+  --p0:#000000;  /* black       — the screen itself   */
+  --p1:#1D2B53;  /* dark-blue   — the page field      */
+  --p2:#7E2553;  /* dark-purple — chart fill          */
+  --p3:#008751;  /* dark-green  — chart fill          */
+  --p4:#AB5236;  /* brown       — chart fill          */
+  --p5:#5F574F;  /* dark-grey   — hairlines, borders  */
+  --p6:#C2C3C7;  /* light-grey  — secondary text      */
+  --p7:#FFF1E8;  /* white       — primary text        */
+  --p8:#FF004D;  /* red         — STOP / hard limit   */
+  --p9:#FFA300;  /* orange      — CAUTION / verify    */
+  --p10:#FFEC27; /* yellow      — TIME / frame budget */
+  --p11:#00E436; /* green       — GO / measured-good  */
+  --p12:#29ADFF; /* blue        — the ESP32-S3        */
+  --p13:#83769C; /* lavender    — PSRAM / meta        */
+  --p14:#FF77A8; /* pink        — PICO-8 software     */
+  --p15:#FFCCAA; /* peach       — highlight           */
+
+  --font-display:'Pixelify Sans', 'Courier New', monospace;
+  --font-pixel:'Silkscreen', 'Courier New', monospace;
+  --font-body:'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --font-mono:'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
+
+  /* 8px grid. Everything snaps. */
+  --u:8px;
+  --measure:70ch;
+  --rail:224px;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation:none !important;transition:none !important}
+}
+
+body{
+  margin:0;
+  background:var(--p1);
+  color:var(--p7);
+  font-family:var(--font-body);
+  font-size:17px;
+  line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+}
+
+/* Chunky pixel focus ring — no blur anywhere on this page */
+a:focus-visible,button:focus-visible{
+  outline:3px solid var(--p10);
+  outline-offset:3px;
+}
+
+::selection{background:var(--p10);color:var(--p0)}
+
+.visually-hidden{
+  position:absolute;
+  width:1px;height:1px;
+  padding:0;margin:-1px;
+  overflow:hidden;
+  clip-path:inset(50%);
+  white-space:nowrap;
+  border:0;
+}
+
+/* ============================================================
+   LAYOUT
+   ============================================================ */
+.shell{
+  display:block;
+  max-width:1360px;
+  margin:0 auto;
+  padding:0 calc(var(--u)*3);
+}
+
+.doc{
+  max-width:var(--measure);
+  margin:0 auto;
+}
+
+.bleed{
+  max-width:1180px;
+  margin-left:auto;
+  margin-right:auto;
+}
+
+/* ============================================================
+   HERO — the console boots
+   ============================================================ */
+.hero{
+  border-bottom:2px solid var(--p5);
+  padding:calc(var(--u)*8) 0 calc(var(--u)*6);
+}
+
+.hero__eyebrow{
+  font-family:var(--font-pixel);
+  font-size:11px;
+  letter-spacing:.14em;
+  color:var(--p13);
+  text-transform:uppercase;
+  margin:0 0 calc(var(--u)*3);
+  display:flex;
+  flex-wrap:wrap;
+  gap:calc(var(--u)*2);
+  align-items:center;
+}
+.hero__eyebrow span{display:inline-block}
+.hero__eyebrow .tick{color:var(--p5)}
+
+.hero__title{
+  font-family:var(--font-display);
+  font-weight:700;
+  font-size:clamp(38px,7vw,86px);
+  line-height:1;
+  letter-spacing:-.01em;
+  margin:0 0 calc(var(--u)*3);
+  color:var(--p7);
+  max-width:16ch;
+}
+.hero__title em{
+  font-style:normal;
+  color:var(--p14);
+}
+.hero__title strong{
+  font-weight:700;
+  color:var(--p12);
+}
+
+.hero__deck{
+  font-size:20px;
+  line-height:1.55;
+  color:var(--p6);
+  max-width:58ch;
+  margin:0 0 calc(var(--u)*6);
+}
+.hero__deck b{color:var(--p7);font-weight:600}
+
+/* the signature: PICO-8's own CPU meter, reporting on its own port */
+.meter{
+  background:var(--p0);
+  border:2px solid var(--p5);
+  box-shadow:6px 6px 0 var(--p0);
+  padding:calc(var(--u)*3);
+  margin-bottom:calc(var(--u)*5);
+}
+.meter svg{display:block;width:100%;height:auto}
+
+.meter__foot{
+  display:flex;
+  flex-wrap:wrap;
+  gap:calc(var(--u)*2) calc(var(--u)*4);
+  margin-top:calc(var(--u)*3);
+  padding-top:calc(var(--u)*2);
+  border-top:2px solid #1a1a1a;
+  font-family:var(--font-mono);
+  font-size:12.5px;
+  color:var(--p13);
+  line-height:1.5;
+}
+.meter__foot b{color:var(--p9);font-weight:500}
+
+/* palette strip — the page's colours are the subject's colours */
+.palette{
+  display:flex;
+  align-items:stretch;
+  border:2px solid var(--p5);
+  background:var(--p0);
+  margin-bottom:calc(var(--u)*5);
+}
+.palette__label{
+  font-family:var(--font-pixel);
+  font-size:10px;
+  letter-spacing:.12em;
+  color:var(--p13);
+  padding:calc(var(--u)*1.5) calc(var(--u)*2);
+  border-right:2px solid var(--p5);
+  display:flex;
+  align-items:center;
+  white-space:nowrap;
+  flex:none;
+}
+.palette__swatches{display:flex;flex:1 1 auto;min-width:0}
+.palette__sw{
+  flex:1 1 0;
+  min-width:0;
+  height:40px;
+  position:relative;
+}
+.palette__sw::after{
+  content:attr(data-n);
+  position:absolute;
+  inset:auto 0 3px 0;
+  text-align:center;
+  font-family:var(--font-pixel);
+  font-size:8px;
+  color:rgba(0,0,0,.55);
+}
+.palette__sw[data-dark]::after{color:rgba(255,241,232,.45)}
+
+/* verdict cards */
+.verdicts{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+  gap:calc(var(--u)*3);
+}
+.vcard{
+  background:var(--p0);
+  border:2px solid var(--p5);
+  padding:calc(var(--u)*3);
+}
+.vcard__tag{
+  font-family:var(--font-pixel);
+  font-size:10px;
+  letter-spacing:.12em;
+  padding:3px 7px;
+  display:inline-block;
+  color:var(--p0);
+  margin-bottom:calc(var(--u)*2);
+}
+.vcard--go .vcard__tag{background:var(--p11)}
+.vcard--buy .vcard__tag{background:var(--p12)}
+.vcard--risk .vcard__tag{background:var(--p8);color:var(--p7)}
+.vcard h3{
+  font-family:var(--font-display);
+  font-weight:700;
+  font-size:22px;
+  line-height:1.2;
+  margin:0 0 calc(var(--u)*1.5);
+  color:var(--p7);
+}
+.vcard p{
+  margin:0;
+  font-size:15px;
+  line-height:1.6;
+  color:var(--p6);
+}
+.vcard code{
+  font-family:var(--font-mono);
+  font-size:13px;
+  color:var(--p10);
+  background:none;
+  padding:0;
+}
+
+/* ============================================================
+   BODY GRID + STICKY RAIL
+   ============================================================ */
+.main{
+  display:block;
+  padding:calc(var(--u)*8) 0 calc(var(--u)*10);
+}
+@media (min-width:1120px){
+  .main{
+    display:grid;
+    grid-template-columns:var(--rail) minmax(0,1fr);
+    gap:calc(var(--u)*8);
+    align-items:start;
+  }
+}
+
+.rail{display:none}
+@media (min-width:1120px){
+  .rail{
+    display:block;
+    position:sticky;
+    top:calc(var(--u)*4);
+  }
+}
+.rail__head{
+  font-family:var(--font-pixel);
+  font-size:10px;
+  letter-spacing:.12em;
+  color:var(--p5);
+  margin:0 0 calc(var(--u)*2);
+  padding-bottom:calc(var(--u)*1);
+  border-bottom:2px solid var(--p5);
+}
+.rail__list{list-style:none;margin:0;padding:0}
+.rail__list li{margin:0}
+.rail__link{
+  display:flex;
+  gap:calc(var(--u)*1.5);
+  align-items:baseline;
+  padding:calc(var(--u)*1) 0;
+  color:var(--p13);
+  text-decoration:none;
+  font-size:13.5px;
+  line-height:1.35;
+  border-left:3px solid transparent;
+  padding-left:calc(var(--u)*1.5);
+  transition:color .12s steps(2), border-color .12s steps(2);
+}
+.rail__link:hover{color:var(--p7);border-left-color:var(--p5)}
+.rail__link.is-active{color:var(--p10);border-left-color:var(--p10)}
+.rail__num{
+  font-family:var(--font-pixel);
+  font-size:9px;
+  color:var(--p5);
+  flex:none;
+}
+.rail__link.is-active .rail__num{color:var(--p10)}
+
+/* ============================================================
+   SECTIONS
+   ============================================================ */
+.sec{
+  margin:0 0 calc(var(--u)*12);
+  scroll-margin-top:calc(var(--u)*4);
+}
+.sec__head{
+  border-top:2px solid var(--p5);
+  padding-top:calc(var(--u)*3);
+  margin-bottom:calc(var(--u)*4);
+  display:flex;
+  gap:calc(var(--u)*3);
+  align-items:baseline;
+  flex-wrap:wrap;
+}
+.sec__num{
+  font-family:var(--font-pixel);
+  font-size:12px;
+  color:var(--p10);
+  flex:none;
+  padding-top:6px;
+}
+.sec__title{
+  font-family:var(--font-display);
+  font-weight:700;
+  font-size:clamp(28px,3.6vw,42px);
+  line-height:1.1;
+  margin:0;
+  color:var(--p7);
+  flex:1 1 320px;
+}
+.sec__standfirst{
+  font-size:18px;
+  color:var(--p6);
+  max-width:64ch;
+  margin:0 0 calc(var(--u)*5);
+  line-height:1.6;
+}
+
+.sec p{max-width:var(--measure);margin:0 0 calc(var(--u)*3)}
+.sec p b,.sec li b{color:var(--p7);font-weight:600}
+.sec a{color:var(--p12);text-decoration:none;border-bottom:1px solid rgba(41,173,255,.35)}
+.sec a:hover{border-bottom-color:var(--p12);background:rgba(41,173,255,.1)}
+
+.sec h3{
+  font-family:var(--font-display);
+  font-weight:700;
+  font-size:24px;
+  line-height:1.25;
+  color:var(--p15);
+  margin:calc(var(--u)*6) 0 calc(var(--u)*2);
+}
+.sec h4{
+  font-family:var(--font-pixel);
+  font-size:11px;
+  letter-spacing:.1em;
+  color:var(--p13);
+  margin:calc(var(--u)*4) 0 calc(var(--u)*1.5);
+  text-transform:uppercase;
+}
+
+.sec ul{max-width:var(--measure);padding-left:0;list-style:none;margin:0 0 calc(var(--u)*3)}
+.sec ul li{
+  position:relative;
+  padding-left:calc(var(--u)*3);
+  margin-bottom:calc(var(--u)*1.5);
+}
+.sec ul li::before{
+  content:'';
+  position:absolute;
+  left:0;
+  top:.62em;
+  width:8px;
+  height:8px;
+  background:var(--p5);
+}
+.sec ul li.li--go::before{background:var(--p11)}
+.sec ul li.li--stop::before{background:var(--p8)}
+.sec ul li.li--warn::before{background:var(--p9)}
+
+code{
+  font-family:var(--font-mono);
+  font-size:.88em;
+  background:var(--p0);
+  color:var(--p15);
+  padding:2px 5px;
+  border:1px solid #2a2a2a;
+}
+
+/* figures */
+.fig{
+  margin:calc(var(--u)*6) 0;
+  background:var(--p0);
+  border:2px solid var(--p5);
+}
+.fig__head{
+  display:flex;
+  justify-content:space-between;
+  align-items:baseline;
+  gap:calc(var(--u)*2);
+  padding:calc(var(--u)*2) calc(var(--u)*3);
+  border-bottom:2px solid #1c1c1c;
+  flex-wrap:wrap;
+}
+.fig__title{
+  font-family:var(--font-pixel);
+  font-size:11px;
+  letter-spacing:.1em;
+  color:var(--p7);
+  margin:0;
+}
+.fig__meta{
+  font-family:var(--font-mono);
+  font-size:11px;
+  color:var(--p5);
+  margin:0;
+}
+.fig__body{padding:calc(var(--u)*3);overflow-x:auto}
+.fig__body svg{display:block;width:100%;height:auto;min-width:520px}
+.fig__note{
+  padding:calc(var(--u)*2) calc(var(--u)*3);
+  border-top:2px solid #1c1c1c;
+  font-family:var(--font-mono);
+  font-size:12.5px;
+  line-height:1.55;
+  color:var(--p13);
+  margin:0;
+  max-width:none;
+}
+.fig__note b{color:var(--p9);font-weight:500}
+.fig__note .ok{color:var(--p11)}
+.fig__note .bad{color:var(--p8)}
+
+/* tables */
+.tbl-wrap{
+  margin:calc(var(--u)*5) 0;
+  border:2px solid var(--p5);
+  background:var(--p0);
+  overflow-x:auto;
+}
+table{
+  border-collapse:collapse;
+  width:100%;
+  min-width:640px;
+  font-size:14px;
+}
+thead th{
+  font-family:var(--font-pixel);
+  font-size:9.5px;
+  letter-spacing:.1em;
+  color:var(--p13);
+  text-align:left;
+  padding:calc(var(--u)*1.5) calc(var(--u)*2);
+  border-bottom:2px solid var(--p5);
+  white-space:nowrap;
+  vertical-align:bottom;
+}
+tbody td{
+  padding:calc(var(--u)*1.5) calc(var(--u)*2);
+  border-bottom:1px solid #1c1c1c;
+  vertical-align:top;
+  color:var(--p6);
+  line-height:1.5;
+}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:#0b0b0b}
+td.t-name{color:var(--p7);font-weight:600;white-space:nowrap}
+td.t-mono{font-family:var(--font-mono);font-size:12.5px;color:var(--p15);white-space:nowrap}
+td.t-num{font-family:var(--font-mono);font-size:13px;color:var(--p10);text-align:right;white-space:nowrap}
+
+.pill{
+  font-family:var(--font-pixel);
+  font-size:8.5px;
+  letter-spacing:.08em;
+  padding:3px 6px;
+  display:inline-block;
+  white-space:nowrap;
+  color:var(--p0);
+}
+.pill--key{background:var(--p11)}
+.pill--base{background:var(--p12)}
+.pill--ref{background:var(--p13);color:var(--p0)}
+.pill--dead{background:var(--p8);color:var(--p7)}
+.pill--none{background:var(--p5);color:var(--p7)}
+
+/* callout */
+.call{
+  border:2px solid var(--p9);
+  border-left-width:8px;
+  background:var(--p0);
+  padding:calc(var(--u)*3);
+  margin:calc(var(--u)*5) 0;
+  max-width:var(--measure);
+}
+.call--stop{border-color:var(--p8)}
+.call--go{border-color:var(--p11)}
+.call__tag{
+  font-family:var(--font-pixel);
+  font-size:10px;
+  letter-spacing:.12em;
+  color:var(--p9);
+  display:block;
+  margin-bottom:calc(var(--u)*1);
+}
+.call--stop .call__tag{color:var(--p8)}
+.call--go .call__tag{color:var(--p11)}
+.call p{margin:0;font-size:15.5px;color:var(--p6);max-width:none}
+.call p + p{margin-top:calc(var(--u)*1.5)}
+.call b{color:var(--p7)}
+
+/* this-week checklist */
+.week{
+  border:2px solid var(--p11);
+  background:var(--p0);
+  padding:calc(var(--u)*4);
+  margin:calc(var(--u)*6) 0;
+}
+.week__head{
+  font-family:var(--font-display);
+  font-weight:700;
+  font-size:26px;
+  color:var(--p11);
+  margin:0 0 calc(var(--u)*1);
+}
+.week__sub{
+  font-family:var(--font-mono);
+  font-size:13px;
+  color:var(--p13);
+  margin:0 0 calc(var(--u)*3);
+}
+.week ol{list-style:none;counter-reset:w;margin:0;padding:0}
+.week ol li{
+  counter-increment:w;
+  display:flex;
+  gap:calc(var(--u)*2);
+  padding:calc(var(--u)*2) 0;
+  border-top:1px solid #1c1c1c;
+  align-items:flex-start;
+}
+.week ol li::before{
+  content:counter(w,decimal-leading-zero);
+  font-family:var(--font-pixel);
+  font-size:11px;
+  color:var(--p0);
+  background:var(--p11);
+  padding:4px 6px;
+  flex:none;
+  line-height:1;
+  margin-top:3px;
+}
+.week ol li div{font-size:15.5px;color:var(--p6);line-height:1.6}
+.week ol li b{color:var(--p7);display:block;font-weight:600;margin-bottom:2px}
+.week ol li .gate{
+  font-family:var(--font-mono);
+  font-size:12.5px;
+  color:var(--p10);
+  display:block;
+  margin-top:4px;
+}
+
+/* footer */
+.foot{
+  border-top:2px solid var(--p5);
+  padding:calc(var(--u)*6) 0 calc(var(--u)*10);
+  font-family:var(--font-mono);
+  font-size:12.5px;
+  color:var(--p5);
+  line-height:1.7;
+}
+.foot a{color:var(--p13);text-decoration:none;border-bottom:1px solid #2a2a2a}
+.foot a:hover{color:var(--p12)}
+.foot__grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:calc(var(--u)*4);
+  margin-bottom:calc(var(--u)*5);
+}
+.foot h5{
+  font-family:var(--font-pixel);
+  font-size:10px;
+  letter-spacing:.1em;
+  color:var(--p13);
+  margin:0 0 calc(var(--u)*1.5);
+}
+.foot ul{list-style:none;margin:0;padding:0}
+.foot li{margin-bottom:4px}
+
+/* ============================================================
+   MOTION — one orchestrated boot, then quiet.
+   ============================================================ */
+.reveal{
+  opacity:0;
+  transform:translateY(12px);
+  transition:opacity .45s steps(6), transform .45s steps(6);
+}
+.reveal.in{opacity:1;transform:none}
+
+.grow{
+  transform-box:fill-box;
+  transform-origin:left center;
+  transform:scaleX(0);
+  transition:transform .9s cubic-bezier(.2,.9,.25,1);
+}
+.in .grow, .meter.in .grow{transform:scaleX(1)}
+
+.pop{
+  transform-box:fill-box;
+  transform-origin:center center;
+  opacity:0;
+  transition:opacity .4s ease .5s;
+}
+.in .pop{opacity:1}
+
+@media (prefers-reduced-motion:reduce){
+  .reveal{opacity:1;transform:none}
+  .grow{transform:scaleX(1)}
+  .pop{opacity:1}
+}
+
+/* SVG text defaults */
+svg text{font-family:var(--font-mono);fill:var(--p6)}
+svg .lbl{font-family:var(--font-pixel);font-size:9px;letter-spacing:.06em;fill:var(--p13)}
+svg .lbl-w{fill:var(--p7)}
+svg .num{font-family:var(--font-mono);font-size:12px;fill:var(--p7)}
+svg .num-s{font-family:var(--font-mono);font-size:10.5px;fill:var(--p6)}
+svg .big{font-family:var(--font-display);font-weight:700;font-size:26px;fill:var(--p7)}
+svg .hair{stroke:#242424;stroke-width:1}
+</style>
+</head>
+<body>
+
+<!-- =========================================================
+     HERO
+     ========================================================= -->
+<header class="hero">
+  <div class="shell">
+    <p class="hero__eyebrow">
+      <span>Feasibility Report</span><span class="tick">/</span>
+      <span>Fantasy console on a microcontroller</span><span class="tick">/</span>
+      <span>Rev A</span>
+    </p>
+
+    <h1 class="hero__title">Running <em>PICO&#8209;8</em> carts on an <strong>ESP32&#8209;S3</strong></h1>
+
+    <p class="hero__deck">
+      The question isn't whether the chip can boot a Lua VM. It's whether <b>240&nbsp;MHz of Xtensa
+      and 84&nbsp;MB/s of PSRAM</b> can hold a 16.6&nbsp;millisecond frame. Here is what the
+      measurement says.
+    </p>
+
+    <!-- SIGNATURE: PICO-8's own stat(1) CPU meter, turned on its own port -->
+    <figure class="meter" id="hero-meter">
+      <svg viewBox="0 0 1000 250" role="img" aria-labelledby="mt">
+        <title id="mt">Frame budget meter: 9 ms measured against a 16.6 ms 60 fps budget and a 33.3 ms 30 fps budget.</title>
+
+        <!-- title -->
+        <text x="0" y="16" class="lbl lbl-w">FRAME BUDGET · MEASURED vs AVAILABLE</text>
+        <text x="1000" y="16" class="lbl" text-anchor="end">CELESTE · PICOPICO · ESP32 @240MHz</text>
+
+        <!-- zone labels -->
+        <text x="60" y="52" class="lbl" fill="#FFEC27">60 FPS &#8212; 16.7 ms</text>
+        <text x="480" y="52" class="lbl" fill="#FFA300">30 FPS &#8212; 33.3 ms</text>
+        <text x="900" y="52" class="lbl" fill="#FF004D">DROPPED</text>
+
+        <!-- zone backgrounds -->
+        <rect x="60" y="62" width="417" height="8" fill="#FFEC27" opacity=".28"/>
+        <rect x="479" y="62" width="416" height="8" fill="#FFA300" opacity=".28"/>
+        <rect x="897" y="62" width="63" height="8" fill="#FF004D" opacity=".4"/>
+
+        <!-- meter track: 36 one-millisecond cells, chunky like a pixel gauge -->
+        <rect x="60" y="86" width="900" height="64" fill="#0d0d0d" stroke="#5F574F" stroke-width="2"/>
+
+        <!-- measured fill: 9 ms = 225 px -->
+        <rect class="grow" x="62" y="88" width="223" height="60" fill="#00E436"/>
+
+        <!-- 1ms cell hairlines -->
+        <g class="hair" opacity=".9">
+          <line x1="85" y1="88" x2="85" y2="148"/><line x1="110" y1="88" x2="110" y2="148"/>
+          <line x1="135" y1="88" x2="135" y2="148"/><line x1="160" y1="88" x2="160" y2="148"/>
+          <line x1="185" y1="88" x2="185" y2="148"/><line x1="210" y1="88" x2="210" y2="148"/>
+          <line x1="235" y1="88" x2="235" y2="148"/><line x1="260" y1="88" x2="260" y2="148"/>
+          <line x1="310" y1="88" x2="310" y2="148"/><line x1="335" y1="88" x2="335" y2="148"/>
+          <line x1="360" y1="88" x2="360" y2="148"/><line x1="385" y1="88" x2="385" y2="148"/>
+          <line x1="410" y1="88" x2="410" y2="148"/><line x1="435" y1="88" x2="435" y2="148"/>
+          <line x1="460" y1="88" x2="460" y2="148"/>
+          <line x1="510" y1="88" x2="510" y2="148"/><line x1="560" y1="88" x2="560" y2="148"/>
+          <line x1="610" y1="88" x2="610" y2="148"/><line x1="660" y1="88" x2="660" y2="148"/>
+          <line x1="710" y1="88" x2="710" y2="148"/><line x1="760" y1="88" x2="760" y2="148"/>
+          <line x1="810" y1="88" x2="810" y2="148"/><line x1="860" y1="88" x2="860" y2="148"/>
+          <line x1="910" y1="88" x2="910" y2="148"/>
+        </g>
+
+        <!-- 60 fps wall -->
+        <line x1="477" y1="76" x2="477" y2="176" stroke="#FFEC27" stroke-width="3"/>
+        <!-- 30 fps wall -->
+        <line x1="893" y1="76" x2="893" y2="176" stroke="#FFA300" stroke-width="3"/>
+
+        <!-- measured marker -->
+        <g class="pop">
+          <line x1="285" y1="76" x2="285" y2="176" stroke="#00E436" stroke-width="3"/>
+          <rect x="285" y="182" width="230" height="26" fill="#00E436"/>
+          <text x="294" y="200" style="font-family:var(--font-pixel);font-size:11px;fill:#000000">9.0 ms MEASURED</text>
+        </g>
+
+        <!-- headroom bracket -->
+        <g class="pop">
+          <line x1="290" y1="166" x2="472" y2="166" stroke="#5F574F" stroke-width="2"/>
+          <line x1="290" y1="161" x2="290" y2="171" stroke="#5F574F" stroke-width="2"/>
+          <line x1="472" y1="161" x2="472" y2="171" stroke="#5F574F" stroke-width="2"/>
+          <text x="381" y="158" class="num-s" text-anchor="middle" fill="#C2C3C7">7.7 ms headroom</text>
+        </g>
+
+        <!-- axis -->
+        <text x="60" y="228" class="num-s">0 ms</text>
+        <text x="477" y="228" class="num-s" text-anchor="middle" fill="#FFEC27">16.7</text>
+        <text x="893" y="228" class="num-s" text-anchor="middle" fill="#FFA300">33.3</text>
+        <text x="960" y="228" class="num-s" text-anchor="end">36</text>
+
+        <!-- the vernacular readout -->
+        <text x="530" y="204" class="big" fill="#FFEC27">stat(1) &#8776; 0.54</text>
+      </svg>
+
+      <div class="meter__foot">
+        <span>PICO-8 reports CPU as a fraction of one frame. <b>0.54</b> means the cart used just over half its budget.</span>
+        <span>Source: DavidVentura/PicoPico &#8212; render on 2nd core, SFX included.</span>
+        <span><b>Caveat:</b> measured on ESP32 (LX6), not S3 (LX7). Same clock; parity expected, not proven.</span>
+      </div>
+    </figure>
+
+    <!-- palette strip: the page's colours ARE the subject's colours -->
+    <div class="palette" aria-hidden="true">
+      <div class="palette__label">SYSTEM PALETTE · 16</div>
+      <div class="palette__swatches">
+        <div class="palette__sw" data-dark style="background:#000000" data-n="0"></div>
+        <div class="palette__sw" data-dark style="background:#1D2B53" data-n="1"></div>
+        <div class="palette__sw" data-dark style="background:#7E2553" data-n="2"></div>
+        <div class="palette__sw" data-dark style="background:#008751" data-n="3"></div>
+        <div class="palette__sw" data-dark style="background:#AB5236" data-n="4"></div>
+        <div class="palette__sw" data-dark style="background:#5F574F" data-n="5"></div>
+        <div class="palette__sw" style="background:#C2C3C7" data-n="6"></div>
+        <div class="palette__sw" style="background:#FFF1E8" data-n="7"></div>
+        <div class="palette__sw" style="background:#FF004D" data-n="8"></div>
+        <div class="palette__sw" style="background:#FFA300" data-n="9"></div>
+        <div class="palette__sw" style="background:#FFEC27" data-n="10"></div>
+        <div class="palette__sw" style="background:#00E436" data-n="11"></div>
+        <div class="palette__sw" style="background:#29ADFF" data-n="12"></div>
+        <div class="palette__sw" style="background:#83769C" data-n="13"></div>
+        <div class="palette__sw" style="background:#FF77A8" data-n="14"></div>
+        <div class="palette__sw" style="background:#FFCCAA" data-n="15"></div>
+      </div>
+    </div>
+
+    <div class="verdicts">
+      <div class="vcard vcard--go">
+        <span class="vcard__tag">VERDICT</span>
+        <h3>Feasible. Ship 30 fps, treat 60 as a bonus.</h3>
+        <p>Real carts run &#8212; Celeste at 9 ms/frame on a slower LX6 core proves it. But the PSRAM
+        wall and the 2&nbsp;MB Lua heap mean heavy <code>_update60</code> carts will not lock. Design the
+        device around 30 fps and let the good carts overshoot.</p>
+      </div>
+      <div class="vcard vcard--buy">
+        <span class="vcard__tag">HARDWARE</span>
+        <h3>You need 8&nbsp;MB of Octal PSRAM.</h3>
+        <p>PICO-8's Lua heap is capped at 2&nbsp;MB. The board on your bench has exactly 2&nbsp;MB of PSRAM
+        total &#8212; zero margin. Target an <code>ESP32-S3-WROOM-1-N16R8</code>. Your 4-inch board already
+        has one, which is the right call.</p>
+      </div>
+      <div class="vcard vcard--risk">
+        <span class="vcard__tag">DE-RISK FIRST</span>
+        <h3>Two things can kill this. Test both this week.</h3>
+        <p>Lua-on-Xtensa throughput, and PSRAM framebuffer bandwidth. Everything else &#8212; audio, input,
+        power, enclosure &#8212; is solved engineering. Do not design a PCB until these two return green.</p>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- =========================================================
+     MAIN
+     ========================================================= -->
+<div class="shell">
+<div class="main">
+
+  <nav class="rail" aria-label="Contents">
+    <p class="rail__head">CONTENTS</p>
+    <ul class="rail__list">
+      <li><a class="rail__link" href="#prior"><span class="rail__num">01</span> Prior art</a></li>
+      <li><a class="rail__link" href="#budget"><span class="rail__num">02</span> Memory &amp; CPU budget</a></li>
+      <li><a class="rail__link" href="#bandwidth"><span class="rail__num">03</span> The PSRAM wall</a></li>
+      <li><a class="rail__link" href="#display"><span class="rail__num">04</span> Display &amp; scaling</a></li>
+      <li><a class="rail__link" href="#io"><span class="rail__num">05</span> Input, audio, power</a></li>
+      <li><a class="rail__link" href="#arch"><span class="rail__num">06</span> Software architecture</a></li>
+      <li><a class="rail__link" href="#plan"><span class="rail__num">07</span> The plan</a></li>
+      <li><a class="rail__link" href="#bom"><span class="rail__num">08</span> BOM &amp; enclosure</a></li>
+      <li><a class="rail__link" href="#legal"><span class="rail__num">09</span> Licensing</a></li>
+      <li><a class="rail__link" href="#caveats"><span class="rail__num">10</span> Caveats</a></li>
+    </ul>
+  </nav>
+
+  <main>
+
+  <!-- ===== 01 PRIOR ART ===== -->
+  <section class="sec" id="prior">
+    <div class="sec__head">
+      <span class="sec__num">01</span>
+      <h2 class="sec__title">Somebody already did the hard part</h2>
+    </div>
+    <p class="sec__standfirst">
+      Nobody has shipped a polished ESP32-S3 PICO-8 handheld. But two projects between them have
+      already answered the two questions that matter, and a third gives you a runtime you can port
+      instead of write.
+    </p>
+
+    <p><b>PicoPico</b> (DavidVentura) is the proof. It runs Sam Hocevar's <code>z8lua</code> &#8212; PICO-8's Lua
+    dialect with a native 16.16 fixed-point number type &#8212; on an ESP32 with 4&nbsp;MB of PSRAM, and reports
+    Celeste at roughly 9&nbsp;ms per frame with rendering on the second core and SFX included. It only works
+    because of three specific decisions you should copy: <b>precompile Lua to bytecode</b> (cart parse fell from
+    112&nbsp;ms to 18&nbsp;ms), <b>convert the audio synth to fixed point</b> (one SFX went from ~25&nbsp;ms to ~2&nbsp;ms),
+    and <b>put the Lua heap in PSRAM</b> &#8212; which is exactly why the RP2040 port was abandoned.</p>
+
+    <p><b>fake-08</b> (jtothebell, MIT) is the runtime you want. It is a clean-room C++ reimplementation of the
+    PICO-8 VM with genuinely broad cart compatibility, and it already runs on 3DS, Switch, Vita, Wii&nbsp;U, Miyoo
+    Mini and even the Nintendo DS. Critically, it isolates every platform assumption behind a host layer
+    (<code>SDL2Host.cpp</code>, <code>3dsHost.cpp</code>&#8230;). Your job is to write one more: <code>ESP32Host</code>.
+    It already runs on a 268&nbsp;MHz ARM11 &#8212; a fair proxy for a 240&nbsp;MHz Xtensa.</p>
+
+    <div class="tbl-wrap">
+      <table>
+        <caption class="visually-hidden">Prior art survey</caption>
+        <thead>
+          <tr>
+            <th>Project</th><th>VM / language</th><th>Target hardware</th><th>What it tells you</th><th>Role</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="t-name">PicoPico</td>
+            <td class="t-mono">C + z8lua (fix32)</td>
+            <td>ESP32 Wrover, 4&nbsp;MB PSRAM</td>
+            <td>Celeste ~9&nbsp;ms/frame. Bytecode precompile, fix32 synth, heap in PSRAM. RP2040 port abandoned for lack of RAM.</td>
+            <td><span class="pill pill--key">THE PROOF</span></td>
+          </tr>
+          <tr>
+            <td class="t-name">fake-08</td>
+            <td class="t-mono">C++ + z8lua</td>
+            <td>3DS, Switch, Vita, Wii&nbsp;U, Miyoo, DS</td>
+            <td>Most complete open runtime. MIT. Clean host abstraction. No ESP32 port exists yet.</td>
+            <td><span class="pill pill--base">PORT THIS</span></td>
+          </tr>
+          <tr>
+            <td class="t-name">yocto-8</td>
+            <td class="t-mono">C++20 + modded Lua</td>
+            <td>RP2040 (dead), RP2350 planned</td>
+            <td>Documented the 2&nbsp;MB-heap problem in depth. PSRAM-via-hardfault hack judged &#8220;too slow&#8221;.</td>
+            <td><span class="pill pill--ref">CAUTIONARY</span></td>
+          </tr>
+          <tr>
+            <td class="t-name">PeX Labs</td>
+            <td class="t-mono">C++ (tac08 fork)</td>
+            <td>ESP32 &#8594; custom ESP32-S2, FreeRTOS</td>
+            <td>Rewrote tac08's HAL for FreeRTOS. Got a simple controllable-sprite cart running. No published fps.</td>
+            <td><span class="pill pill--ref">REFERENCE</span></td>
+          </tr>
+          <tr>
+            <td class="t-name">zepto8</td>
+            <td class="t-mono">C++ + z8lua</td>
+            <td>Desktop</td>
+            <td>Source of fake-08's audio and PNG code. Origin of z8lua itself. Not embedded-targeted.</td>
+            <td><span class="pill pill--ref">UPSTREAM</span></td>
+          </tr>
+          <tr>
+            <td class="t-name">tac08</td>
+            <td class="t-mono">C++</td>
+            <td>Desktop</td>
+            <td>Runtime-only emulator. fake-08's sprite/cart code derives from it. PeX Labs' base.</td>
+            <td><span class="pill pill--ref">UPSTREAM</span></td>
+          </tr>
+          <tr>
+            <td class="t-name">picolove</td>
+            <td class="t-mono">Lua on L&Ouml;VE</td>
+            <td>Desktop</td>
+            <td>Needs the L&Ouml;VE framework. Not embeddable on an MCU. Dead end for you.</td>
+            <td><span class="pill pill--dead">NOT VIABLE</span></td>
+          </tr>
+          <tr>
+            <td class="t-name">retro-go</td>
+            <td class="t-mono">C (NES/GB/SMS)</td>
+            <td>ESP32 (Odroid-Go)</td>
+            <td>Not PICO-8, but sets the bar: 40&nbsp;MHz SPI display = 28&nbsp;fps full-frame, so it uses <b>partial updates</b> to hit 60.</td>
+            <td><span class="pill pill--base">TECHNIQUE</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="call call--go">
+      <span class="call__tag">DECISION</span>
+      <p><b>Port fake-08. Do not write a runtime.</b> Reimplementing the PICO-8 API surface, the .p8.png
+      steganography, and the PXA cart decompression is years of work that fake-08 already did. Write the
+      <code>ESP32Host</code> layer &#8212; framebuffer flush, audio callback, input bitmask, SD file access, timing &#8212;
+      and steal PicoPico's three optimisations wholesale.</p>
+    </div>
+  </section>
+
+  <!-- ===== 02 BUDGET ===== -->
+  <section class="sec" id="budget">
+    <div class="sec__head">
+      <span class="sec__num">02</span>
+      <h2 class="sec__title">Two memory maps, one of which does not fit</h2>
+    </div>
+    <p class="sec__standfirst">
+      PICO-8's addressable memory is a rounding error &#8212; 32&nbsp;KB, smaller than the S3's cache. The problem is
+      the memory PICO-8 <em>doesn't</em> put on the map: a Lua heap capped at 2&nbsp;MiB, entirely separate from
+      the 32&nbsp;KB, and checkable at runtime with <code>stat(0)</code>.
+    </p>
+
+    <figure class="fig bleed reveal">
+      <div class="fig__head">
+        <h3 class="fig__title">MEMORY MAP · WHAT LIVES WHERE</h3>
+        <p class="fig__meta">columns are not to a shared scale</p>
+      </div>
+      <div class="fig__body">
+        <svg viewBox="0 0 1100 560" role="img" aria-labelledby="mm">
+          <title id="mm">Left: PICO-8's 32KB memory map. Centre: ESP32-S3 512KB internal SRAM allocation. Right: 8MB PSRAM allocation, with the 2MB PSRAM board shown as insufficient.</title>
+
+          <!-- ============ COL 1 : PICO-8 32KB ============ -->
+          <text x="0" y="14" class="lbl" fill="#FF77A8">PICO-8 &#183; ADDRESSABLE RAM</text>
+          <text x="0" y="30" class="num" fill="#FF77A8">32 KB</text>
+          <rect x="0" y="42" width="300" height="470" fill="#0d0d0d" stroke="#5F574F" stroke-width="2"/>
+
+          <!-- 32KB over 470px => 14.69 px per KB -->
+          <!-- 0x0000 sprite sheet 4KB = 58.75 -->
+          <rect x="2" y="44" width="296" height="58" fill="#FF77A8" opacity=".85"/>
+          <text x="12" y="68" class="num-s" fill="#000">0x0000 &#183; Sprite sheet</text>
+          <text x="288" y="68" class="num-s" fill="#000" text-anchor="end">4 KB</text>
+
+          <rect x="2" y="103" width="296" height="58" fill="#FF77A8" opacity=".6"/>
+          <text x="12" y="127" class="num-s" fill="#000">0x1000 &#183; Sprite/Map (shared)</text>
+          <text x="288" y="127" class="num-s" fill="#000" text-anchor="end">4 KB</text>
+
+          <rect x="2" y="162" width="296" height="58" fill="#7E2553"/>
+          <text x="12" y="186" class="num-s" fill="#FFF1E8">0x2000 &#183; Map</text>
+          <text x="288" y="186" class="num-s" fill="#FFF1E8" text-anchor="end">4 KB</text>
+
+          <rect x="2" y="221" width="296" height="8" fill="#FFCCAA"/>
+          <rect x="2" y="230" width="296" height="8" fill="#FFCCAA" opacity=".6"/>
+          <text x="308" y="230" class="num-s" fill="#5F574F">0x3000 flags / 0x3100 music &#183; 256 B ea.</text>
+
+          <rect x="2" y="239" width="296" height="62" fill="#FFA300"/>
+          <text x="12" y="266" class="num-s" fill="#000">0x3200 &#183; SFX</text>
+          <text x="288" y="266" class="num-s" fill="#000" text-anchor="end">4.25 KB</text>
+
+          <rect x="2" y="302" width="296" height="99" fill="#5F574F"/>
+          <text x="12" y="340" class="num-s" fill="#C2C3C7">0x4300 &#183; General use / cart data</text>
+          <text x="288" y="340" class="num-s" fill="#C2C3C7" text-anchor="end">6.75 KB</text>
+          <text x="12" y="356" class="num-s" fill="#5F574F">0x5e00 persist &#183; 0x5f00 draw state &#183; 0x5f40 hw</text>
+
+          <rect x="2" y="392" width="296" height="118" fill="#00E436"/>
+          <text x="12" y="440" class="num-s" fill="#000">0x6000 &#183; Screen (128&#215;128 @ 4bpp)</text>
+          <text x="288" y="440" class="num-s" fill="#000" text-anchor="end">8 KB</text>
+          <text x="12" y="458" class="num-s" fill="#000" opacity=".55">this is the only buffer that must be fast</text>
+
+          <text x="0" y="534" class="num-s" fill="#5F574F">Separate and invisible on this map:</text>
+          <text x="0" y="551" class="num" fill="#FF004D">Lua heap &#8212; up to 2 MiB &#183; stat(0)</text>
+
+          <!-- arrow -->
+          <path d="M320 250 L360 250 M348 242 L360 250 L348 258" stroke="#5F574F" stroke-width="2" fill="none"/>
+
+          <!-- ============ COL 2 : SRAM 512KB ============ -->
+          <text x="380" y="14" class="lbl" fill="#29ADFF">ESP32-S3 &#183; INTERNAL SRAM</text>
+          <text x="380" y="30" class="num" fill="#29ADFF">512 KB &#8212; the fast lane</text>
+          <rect x="380" y="42" width="300" height="380" fill="#0d0d0d" stroke="#5F574F" stroke-width="2"/>
+
+          <rect x="382" y="44" width="296" height="66" fill="#00E436"/>
+          <text x="392" y="72" class="num-s" fill="#000">Indexed framebuffer &#215; 2</text>
+          <text x="668" y="72" class="num-s" fill="#000" text-anchor="end">16 KB</text>
+          <text x="392" y="90" class="num-s" fill="#000" opacity=".55">8 KB each &#183; double-buffered handoff</text>
+
+          <rect x="382" y="111" width="296" height="48" fill="#29ADFF"/>
+          <text x="392" y="132" class="num-s" fill="#000">Lua VM hot state (stack, frames)</text>
+          <text x="668" y="132" class="num-s" fill="#000" text-anchor="end">~64 KB</text>
+
+          <rect x="382" y="160" width="296" height="40" fill="#FFEC27"/>
+          <text x="392" y="185" class="num-s" fill="#000">RGB565 line-scale buffer</text>
+          <text x="668" y="185" class="num-s" fill="#000" text-anchor="end">~8 KB</text>
+
+          <rect x="382" y="201" width="296" height="44" fill="#FFA300"/>
+          <text x="392" y="228" class="num-s" fill="#000">Audio synth + I2S DMA buffers</text>
+          <text x="668" y="228" class="num-s" fill="#000" text-anchor="end">~16 KB</text>
+
+          <rect x="382" y="246" width="296" height="30" fill="#FF004D"/>
+          <text x="392" y="265" class="num-s" fill="#FFF1E8">DMA descriptors &#8212; CANNOT live in PSRAM</text>
+
+          <rect x="382" y="277" width="296" height="143" fill="#5F574F" opacity=".5"/>
+          <text x="392" y="345" class="num-s" fill="#C2C3C7">ESP-IDF + FreeRTOS + .data/.bss</text>
+          <text x="668" y="345" class="num-s" fill="#C2C3C7" text-anchor="end">the rest</text>
+
+          <text x="380" y="444" class="num-s" fill="#5F574F">Rule: if it is touched every frame, it lives here.</text>
+
+          <!-- ============ COL 3 : PSRAM 8MB ============ -->
+          <text x="760" y="14" class="lbl" fill="#83769C">EXTERNAL PSRAM &#183; N16R8</text>
+          <text x="760" y="30" class="num" fill="#83769C">8 MB &#8212; the slow lane</text>
+          <rect x="760" y="42" width="220" height="380" fill="#0d0d0d" stroke="#5F574F" stroke-width="2"/>
+
+          <!-- 8MB over 380px => 47.5px per MB -->
+          <rect x="762" y="44" width="216" height="95" fill="#FF004D"/>
+          <text x="772" y="80" class="num-s" fill="#FFF1E8">Lua heap</text>
+          <text x="968" y="80" class="num-s" fill="#FFF1E8" text-anchor="end">2 MB</text>
+          <text x="772" y="98" class="num-s" fill="#FFF1E8" opacity=".65">PICO-8's hard ceiling</text>
+
+          <rect x="762" y="140" width="216" height="43" fill="#83769C"/>
+          <text x="772" y="167" class="num-s" fill="#000">RGB565 framebuffer &#215;2</text>
+          <text x="968" y="167" class="num-s" fill="#000" text-anchor="end">900 KB</text>
+
+          <rect x="762" y="184" width="216" height="20" fill="#7E2553"/>
+          <text x="772" y="199" class="num-s" fill="#FFF1E8">Cart + bytecode &#183; ~256 KB</text>
+
+          <rect x="762" y="205" width="216" height="215" fill="#008751" opacity=".35"/>
+          <text x="772" y="315" class="num-s" fill="#00E436">Headroom &#183; ~4.9 MB</text>
+
+          <!-- the 2MB board overlay -->
+          <line x1="760" y1="139" x2="1000" y2="139" stroke="#FF004D" stroke-width="3" stroke-dasharray="6 4"/>
+          <text x="1000" y="133" class="lbl" fill="#FF004D" text-anchor="end">&#9650; YOUR 2 MB BOARD ENDS HERE</text>
+
+          <text x="760" y="444" class="num-s" fill="#FF004D">2 MB PSRAM = the Lua heap alone. Nothing left.</text>
+          <text x="760" y="461" class="num-s" fill="#5F574F">No framebuffer. No cart. No margin.</text>
+        </svg>
+      </div>
+      <p class="fig__note">
+        <b>Read this figure as the buy decision.</b> PICO-8's 32&nbsp;KB map fits in the S3's SRAM with room to spare &#8212;
+        that was never in doubt. The 2&nbsp;MiB Lua heap is what forces external PSRAM, and it is what killed both
+        RP2040 ports. <span class="bad">The ILI9488 board's 2&nbsp;MB PSRAM is exactly consumed by the heap</span>,
+        which is fine for bring-up and useless for a finished device. <span class="ok">Your 4-inch board's
+        N16R8 (8&nbsp;MB Octal) is correctly specified.</span>
+      </p>
+    </figure>
+
+    <h3>PICO-8's own performance model, and what it costs you</h3>
+    <p>PICO-8 defines a virtual CPU of 8,388,608 cycles per second (2<sup>23</sup>) &#8212; about
+    <b>139,810 cycles per frame at 60&nbsp;fps</b>, or 279,620 at 30. At roughly two cycles per Lua VM
+    instruction, that is a target of around <b>4.2&nbsp;million Lua VM instructions per second</b>.
+    That is a deliberately modest bar; Lexaloffle's own stated minimum spec is a ~700&nbsp;MHz Raspberry Pi.</p>
+
+    <p>The two things that would normally make this impossible on an MCU are both already solved:</p>
+
+    <ul>
+      <li class="li--go"><b>Float math.</b> z8lua redefines <code>LUA_NUMBER</code> as a 16.16 fixed-point type
+      (<code>z8::fix32</code>). Every arithmetic op in a cart therefore bypasses the FPU entirely. PicoPico's
+      microbenchmark: 32,000 <code>sin</code> calls dropped from ~735&nbsp;ms to ~135&nbsp;ms once fixed-point.</li>
+      <li class="li--go"><b>Cart parse time.</b> Precompile Lua source to bytecode at load. PicoPico: 112&nbsp;ms &#8594; 18&nbsp;ms.</li>
+      <li class="li--stop"><b>LuaJIT is not available.</b> There is no Xtensa backend. You are running the
+      standard Lua 5.x interpreter, and no amount of wishing changes that.</li>
+    </ul>
+  </section>
+
+  <!-- ===== 03 BANDWIDTH ===== -->
+  <section class="sec" id="bandwidth">
+    <div class="sec__head">
+      <span class="sec__num">03</span>
+      <h2 class="sec__title">The PSRAM wall</h2>
+    </div>
+    <p class="sec__standfirst">
+      Octal PSRAM at 80&nbsp;MHz DDR should deliver 160&nbsp;MB/s. Measured, once your working set exceeds the
+      cache, it delivers around 84. That single number decides your display architecture.
+    </p>
+
+    <figure class="fig bleed reveal">
+      <div class="fig__head">
+        <h3 class="fig__title">PSRAM BANDWIDTH BUDGET · TWO DISPLAY PATHS</h3>
+        <p class="fig__meta">demands derived from panel geometry; ceiling from measurement</p>
+      </div>
+      <div class="fig__body">
+        <svg viewBox="0 0 1080 400" role="img" aria-labelledby="bw">
+          <title id="bw">PSRAM bandwidth: 160 MB/s theoretical, 84 MB/s measured. The RGB panel path consumes about 55 MB/s of it; the i80 line-buffered path consumes almost none.</title>
+
+          <!-- scale: 0..160 MB/s over x 150..1040 => 5.5625 px per MB/s -->
+          <!-- ceiling markers -->
+          <line x1="617" y1="30" x2="617" y2="330" stroke="#FF004D" stroke-width="3"/>
+          <text x="609" y="24" class="lbl" fill="#FF004D" text-anchor="end">84 MB/s &#183; MEASURED WALL</text>
+
+          <line x1="1040" y1="30" x2="1040" y2="330" stroke="#5F574F" stroke-width="2" stroke-dasharray="5 4"/>
+          <text x="1032" y="24" class="lbl" fill="#5F574F" text-anchor="end">160 &#183; THEORETICAL</text>
+
+          <!-- ROW 1 : RGB path -->
+          <text x="0" y="62" class="lbl lbl-w">RGB PATH</text>
+          <text x="0" y="78" class="num-s" fill="#83769C">ST7701 480&#215;480</text>
+          <text x="0" y="94" class="num-s" fill="#83769C">4-inch board</text>
+
+          <rect x="150" y="50" width="890" height="56" fill="#0d0d0d" stroke="#5F574F" stroke-width="2"/>
+
+          <g class="grow">
+            <!-- panel continuous read: 27.6 MB/s = 153.5px -->
+            <rect x="152" y="52" width="153" height="52" fill="#83769C"/>
+            <!-- CPU composing framebuffer: 27.6 MB/s -->
+            <rect x="305" y="52" width="153" height="52" fill="#29ADFF"/>
+            <!-- lua heap: whatever's left up to the wall -->
+            <rect x="458" y="52" width="157" height="52" fill="#00E436" opacity=".55"/>
+          </g>
+
+          <text x="160" y="72" class="num-s" fill="#000">Panel streams FB</text>
+          <text x="160" y="88" class="num-s" fill="#000">27.6 MB/s</text>
+          <text x="313" y="72" class="num-s" fill="#000">CPU writes FB</text>
+          <text x="313" y="88" class="num-s" fill="#000">27.6 MB/s</text>
+          <text x="466" y="72" class="num-s" fill="#00E436">Lua heap</text>
+          <text x="466" y="88" class="num-s" fill="#00E436">~29 left</text>
+
+          <text x="640" y="82" class="num-s" fill="#FF004D">&#8592; ~66% of the wall gone before a single</text>
+          <text x="640" y="98" class="num-s" fill="#FF004D">&nbsp;&nbsp;&nbsp;line of Lua executes</text>
+
+          <!-- ROW 2 : i80 path -->
+          <text x="0" y="182" class="lbl lbl-w">i80 PATH</text>
+          <text x="0" y="198" class="num-s" fill="#00E436">ILI9488 320&#215;480</text>
+          <text x="0" y="214" class="num-s" fill="#00E436">board on your bench</text>
+
+          <rect x="150" y="170" width="890" height="56" fill="#0d0d0d" stroke="#5F574F" stroke-width="2"/>
+
+          <g class="grow">
+            <rect x="152" y="172" width="463" height="52" fill="#00E436" opacity=".55"/>
+          </g>
+          <text x="162" y="192" class="num-s" fill="#00E436">Lua heap &#8212; essentially the whole budget</text>
+          <text x="162" y="210" class="num-s" fill="#00E436">Framebuffer never touches PSRAM: 8 KB indexed in SRAM &#8594; palette-expand &#8594; line buffer &#8594; DMA</text>
+
+          <!-- axis -->
+          <line x1="150" y1="256" x2="1040" y2="256" stroke="#242424" stroke-width="1"/>
+          <text x="150" y="274" class="num-s" fill="#5F574F">0</text>
+          <text x="428" y="274" class="num-s" fill="#5F574F" text-anchor="middle">50</text>
+          <text x="617" y="274" class="num-s" fill="#FF004D" text-anchor="middle">84</text>
+          <text x="761" y="274" class="num-s" fill="#5F574F" text-anchor="middle">110</text>
+          <text x="1040" y="274" class="num-s" fill="#5F574F" text-anchor="end">160 MB/s</text>
+
+          <!-- the 50/50 rule -->
+          <rect x="150" y="300" width="890" height="80" fill="#1a0008" stroke="#FF004D" stroke-width="2"/>
+          <text x="166" y="326" class="lbl" fill="#FF004D">THE 50/50 RULE &#183; ESPRESSIF, ESP-IDF FORUM</text>
+          <text x="166" y="348" class="num-s" fill="#C2C3C7">When both the CPU and GDMA want PSRAM, bandwidth splits 50/50. The LCD's share is capped at ~42 MB/s</text>
+          <text x="166" y="366" class="num-s" fill="#C2C3C7">the moment the CPU touches the image. Exceed it and you get visible corruption, not just slowdown.</text>
+        </svg>
+      </div>
+      <p class="fig__note">
+        <b>This is the figure that should change your mind about the 4-inch board.</b> An RGB panel does not
+        &#8220;receive&#8221; a frame &#8212; it <em>continuously streams</em> the framebuffer out of PSRAM, forever, whether or not
+        anything changed. Add the CPU writing that same buffer and you have spent two-thirds of a measured
+        84&nbsp;MB/s before Lua runs. <span class="ok">The i80 path sidesteps this entirely</span>: keep the 8&nbsp;KB indexed
+        framebuffer in SRAM, expand and scale one line at a time into a small SRAM line buffer, and DMA that out.
+        PSRAM then only serves the Lua heap.
+      </p>
+    </figure>
+
+    <div class="call">
+      <span class="call__tag">CONSEQUENCE</span>
+      <p>The 480&#215;480 panel is the better <em>screen</em> and the worse <em>bus</em>. If Phase&nbsp;2 shows the RGB
+      stream starving the Lua heap, your options are: drop to 30&nbsp;fps panel refresh (halves the stream to
+      ~13.8&nbsp;MB/s), enable the 120&nbsp;MHz PSRAM option, or move to an i80/QSPI panel. Decide with a
+      measurement, not a preference.</p>
+    </div>
+  </section>
+
+  <!-- ===== 04 DISPLAY ===== -->
+  <section class="sec" id="display">
+    <div class="sec__head">
+      <span class="sec__num">04</span>
+      <h2 class="sec__title">128 pixels do not divide into everything</h2>
+    </div>
+    <p class="sec__standfirst">
+      A fantasy console with blurred pixels is a broken fantasy console. Integer scaling is not a preference here,
+      it is a requirement &#8212; and it disqualifies more panels than you would expect.
+    </p>
+
+    <figure class="fig bleed reveal">
+      <div class="fig__head">
+        <h3 class="fig__title">SCALING GEOMETRY · DRAWN TO SCALE</h3>
+        <p class="fig__meta">128&#215;128 native, integer multiples only</p>
+      </div>
+      <div class="fig__body">
+        <svg viewBox="0 0 1080 400" role="img" aria-labelledby="sc">
+          <title id="sc">Scale comparison: 480x480 fits a clean 3x at 384 pixels; 320x480 caps at 2x; 240x240 has no clean integer scale of 2x or more.</title>
+
+          <!-- scale 0.55 svg units per display px -->
+
+          <!-- ===== A: ST7701 480x480 => 264x264 ===== -->
+          <text x="0" y="16" class="lbl" fill="#00E436">A &#183; ST7701 480&#215;480 IPS &#183; the 4-inch board</text>
+          <rect x="0" y="30" width="264" height="264" fill="#0d0d0d" stroke="#00E436" stroke-width="2"/>
+          <!-- 3x = 384 => 211.2, centered: offset (264-211.2)/2 = 26.4 -->
+          <rect x="26.4" y="56.4" width="211.2" height="211.2" fill="#00E436" opacity=".2" stroke="#00E436" stroke-width="1"/>
+          <!-- native 128 => 70.4, centered -->
+          <rect x="96.8" y="126.8" width="70.4" height="70.4" fill="#00E436"/>
+          <text x="132" y="166" class="num-s" fill="#000" text-anchor="middle">128&#178;</text>
+
+          <text x="132" y="286" class="num-s" fill="#00E436" text-anchor="middle">3&#215; = 384&#215;384</text>
+          <text x="0" y="318" class="num" fill="#00E436">3&#215; &#183; CLEAN</text>
+          <text x="0" y="338" class="num-s">48 px border all round. Pixel-perfect.</text>
+          <text x="0" y="356" class="num-s" fill="#5F574F">3.75&#215; would fill the panel exactly &#8212; and blur</text>
+          <text x="0" y="372" class="num-s" fill="#5F574F">every pixel. Do not.</text>
+          <rect x="0" y="384" width="120" height="4" fill="#00E436"/>
+
+          <!-- ===== B: ILI9488 480x320 landscape => 264x176 ===== -->
+          <text x="360" y="16" class="lbl" fill="#FFA300">B &#183; ILI9488 480&#215;320 &#183; on your bench</text>
+          <rect x="360" y="30" width="264" height="176" fill="#0d0d0d" stroke="#FFA300" stroke-width="2"/>
+          <!-- 2x = 256 => 140.8. centered: x offset (264-140.8)/2=61.6 ; y (176-140.8)/2=17.6 -->
+          <rect x="421.6" y="47.6" width="140.8" height="140.8" fill="#FFA300" opacity=".2" stroke="#FFA300" stroke-width="1"/>
+          <rect x="456.8" y="82.8" width="70.4" height="70.4" fill="#FFA300"/>
+          <text x="492" y="122" class="num-s" fill="#000" text-anchor="middle">128&#178;</text>
+          <text x="492" y="198" class="num-s" fill="#FFA300" text-anchor="middle">2&#215; = 256&#215;256</text>
+
+          <!-- 3x overflow demo -->
+          <rect x="384" y="222" width="211.2" height="30" fill="none" stroke="#FF004D" stroke-width="2" stroke-dasharray="4 3"/>
+          <rect x="384" y="222" width="176" height="30" fill="#FF004D" opacity=".18"/>
+          <line x1="560" y1="216" x2="560" y2="258" stroke="#FF004D" stroke-width="2"/>
+          <text x="390" y="242" class="num-s" fill="#FF004D">3&#215; = 384 px &#8212; overflows the 320 px axis</text>
+
+          <text x="360" y="318" class="num" fill="#FFA300">2&#215; MAX</text>
+          <text x="360" y="338" class="num-s">The 320 px short axis is the ceiling.</text>
+          <text x="360" y="356" class="num-s" fill="#5F574F">32 px border short, 112 px long. Fine for</text>
+          <text x="360" y="372" class="num-s" fill="#5F574F">bring-up; small-feeling for a product.</text>
+          <rect x="360" y="384" width="120" height="4" fill="#FFA300"/>
+
+          <!-- ===== C: ST7789 240x240 => 132x132 ===== -->
+          <text x="800" y="16" class="lbl" fill="#FF004D">C &#183; ST7789 240&#215;240 &#183; the &#8220;save power&#8221; idea</text>
+          <rect x="800" y="30" width="132" height="132" fill="#0d0d0d" stroke="#FF004D" stroke-width="2"/>
+          <!-- 2x = 256 => 140.8 : OVERFLOWS 132 -->
+          <rect x="795.6" y="25.6" width="140.8" height="140.8" fill="none" stroke="#FF004D" stroke-width="2" stroke-dasharray="4 3"/>
+          <!-- native 128 => 70.4 centered in 132: offset 30.8 -->
+          <rect x="830.8" y="60.8" width="70.4" height="70.4" fill="#FF004D" opacity=".5"/>
+          <text x="866" y="100" class="num-s" fill="#FFF1E8" text-anchor="middle">128&#178;</text>
+          <text x="800" y="184" class="num-s" fill="#FF004D">2&#215; = 256 &#8212; does not fit in 240.</text>
+          <text x="800" y="202" class="num-s" fill="#FF004D">1&#215; leaves a 56 px border. Tiny.</text>
+
+          <text x="800" y="318" class="num" fill="#FF004D">NO CLEAN SCALE</text>
+          <text x="800" y="338" class="num-s">1.875&#215; fills it exactly &#8212; non-integer.</text>
+          <text x="800" y="356" class="num-s" fill="#5F574F">Correction to an earlier recommendation:</text>
+          <text x="800" y="372" class="num-s" fill="#5F574F">240&#215;240 is the wrong panel for PICO-8.</text>
+          <rect x="800" y="384" width="120" height="4" fill="#FF004D"/>
+        </svg>
+      </div>
+      <p class="fig__note">
+        <b>The panels that work are the ones divisible by 128.</b> <span class="ok">480&#215;480 gives you a clean
+        3&#215; with a 48&nbsp;px border &#8212; the best pixel-perfect fit of anything in this class, which vindicates your
+        4-inch purchase on the geometry axis even as it complicates the bandwidth one.</span> If you want a
+        smaller, lower-power panel later, the target to hunt for is <b>320&#215;320</b> (clean 2&#215;, 32&nbsp;px border),
+        not 240&#215;240.
+      </p>
+    </figure>
+
+    <h3>How to actually do the scale</h3>
+    <p>Never allocate a full-size RGB565 framebuffer if you can avoid it. The efficient pattern, and the one
+    PicoPico uses:</p>
+    <ul>
+      <li>Keep the native <b>128&#215;128 4-bit indexed framebuffer in SRAM</b> (8&nbsp;KB). This is what the PICO-8 API draws into.</li>
+      <li>Pre-encode the 16 palette entries as <code>uint16_t</code> RGB565 once, at boot.</li>
+      <li>Per output line: look up, expand, and horizontally replicate into a <b>small RGB565 line buffer in SRAM</b>.
+      Repeat each source line N times vertically for an N&#215; scale &#8212; no extra work, just re-send the buffer.</li>
+      <li>DMA the line buffer out over <code>esp_lcd</code>. PSRAM is never involved.</li>
+    </ul>
+    <p>On an RGB panel this is not possible &#8212; the peripheral demands a real, resident, full-size framebuffer &#8212;
+    which is precisely the bandwidth story in section 03.</p>
+  </section>
+
+  <!-- ===== 05 IO ===== -->
+  <section class="sec" id="io">
+    <div class="sec__head">
+      <span class="sec__num">05</span>
+      <h2 class="sec__title">Buttons, sound, and the thing that actually drains the battery</h2>
+    </div>
+    <p class="sec__standfirst">
+      A 16-bit parallel TFT eats your GPIO alive, and Octal PSRAM permanently locks five more. You need seven
+      buttons and you have roughly zero pins. Meanwhile the CPU you have been agonising over draws less current
+      than the backlight.
+    </p>
+
+    <figure class="fig bleed reveal">
+      <div class="fig__head">
+        <h3 class="fig__title">GPIO ALLOCATION · ESP32-S3-WROOM-1 WITH A 16-BIT PARALLEL TFT</h3>
+        <p class="fig__meta">~36 usable GPIO &#183; indicative, exact counts are board-specific</p>
+      </div>
+      <div class="fig__body">
+        <svg viewBox="0 0 1080 250" role="img" aria-labelledby="gp">
+          <title id="gp">GPIO allocation showing the parallel TFT, PSRAM, SD, I2S, USB and I2C consuming more pins than the module provides, leaving nothing for buttons.</title>
+
+          <!-- 38 pins over 900px => 23.68 px/pin. Budget line at 36 pins = 852.6 -->
+          <rect x="0" y="40" width="1000" height="56" fill="#0d0d0d" stroke="#5F574F" stroke-width="2"/>
+
+          <g class="grow">
+            <!-- TFT data 16 => 379 -->
+            <rect x="2" y="42" width="379" height="52" fill="#29ADFF"/>
+            <!-- TFT control 6 => 142 -->
+            <rect x="381" y="42" width="142" height="52" fill="#29ADFF" opacity=".6"/>
+            <!-- PSRAM 5 => 118 -->
+            <rect x="523" y="42" width="118" height="52" fill="#83769C"/>
+            <!-- SD 4 => 95 -->
+            <rect x="641" y="42" width="95" height="52" fill="#008751"/>
+            <!-- I2S 3 => 71 -->
+            <rect x="736" y="42" width="71" height="52" fill="#FFA300"/>
+            <!-- USB 2 => 47 -->
+            <rect x="807" y="42" width="47" height="52" fill="#7E2553"/>
+            <!-- I2C 2 => 47 -->
+            <rect x="854" y="42" width="47" height="52" fill="#FFCCAA"/>
+            <!-- overflow -->
+            <rect x="901" y="42" width="47" height="52" fill="#FF004D"/>
+          </g>
+
+          <!-- budget wall -->
+          <line x1="854" y1="26" x2="854" y2="112" stroke="#FF004D" stroke-width="3"/>
+          <text x="862" y="22" class="lbl" fill="#FF004D">36 PINS &#183; YOU ARE HERE</text>
+
+          <!-- labels -->
+          <text x="10" y="66" class="num-s" fill="#000">16-bit TFT data</text>
+          <text x="10" y="84" class="num-s" fill="#000">16 pins</text>
+          <text x="389" y="66" class="num-s" fill="#000">TFT ctrl</text>
+          <text x="389" y="84" class="num-s" fill="#000">6</text>
+          <text x="531" y="66" class="num-s" fill="#000">PSRAM</text>
+          <text x="531" y="84" class="num-s" fill="#000">33&#8211;37</text>
+          <text x="649" y="66" class="num-s" fill="#FFF1E8">SD</text>
+          <text x="649" y="84" class="num-s" fill="#FFF1E8">4</text>
+          <text x="744" y="66" class="num-s" fill="#000">I2S</text>
+          <text x="744" y="84" class="num-s" fill="#000">3</text>
+          <text x="815" y="66" class="num-s" fill="#FFF1E8">USB</text>
+          <text x="862" y="66" class="num-s" fill="#000">I2C</text>
+
+          <text x="120" y="136" class="num-s" fill="#5F574F">&#9660; the parallel bus alone is 22 of your 36 pins</text>
+          <text x="905" y="136" class="num-s" fill="#FF004D">&#9660; over budget</text>
+
+          <!-- verdict -->
+          <rect x="0" y="158" width="1000" height="76" fill="#001a0a" stroke="#00E436" stroke-width="2"/>
+          <text x="16" y="184" class="lbl" fill="#00E436">SOLUTION &#183; SEVEN BUTTONS, ZERO NEW PINS</text>
+          <text x="16" y="206" class="num-s" fill="#C2C3C7">MCP23017 (16 I/O) or PCF8574 (8 I/O) on the I2C bus the touch panel already uses. Costs nothing, gives you</text>
+          <text x="16" y="224" class="num-s" fill="#C2C3C7">interrupt-on-change for free. Fallback: a resistor ladder on one ADC pin &#8212; cheaper, but simultaneous presses need care.</text>
+        </svg>
+      </div>
+      <p class="fig__note">
+        <b>Do not plan on wiring buttons to GPIO.</b> The pin budget is already overdrawn before you add a
+        single control. This is not a problem you solve on the PCB &#8212; it is one you solve with an I&#178;C expander,
+        and you should design that in from the first prototype so the button code never changes.
+      </p>
+    </figure>
+
+    <figure class="fig bleed reveal">
+      <div class="fig__head">
+        <h3 class="fig__title">POWER · WHERE THE CURRENT ACTUALLY GOES</h3>
+        <p class="fig__meta">~200 mA average, gaming, moderate backlight</p>
+      </div>
+      <div class="fig__body">
+        <svg viewBox="0 0 1080 300" role="img" aria-labelledby="pw">
+          <title id="pw">Current draw breakdown showing the backlight dominating at 60 to 150 milliamps, and battery runtime for 1000, 2000 and 3000 mAh cells.</title>
+
+          <text x="0" y="16" class="lbl lbl-w">CURRENT DRAW</text>
+
+          <!-- stacked bar, 0..220 mA over 460px => 2.09 px/mA -->
+          <rect x="0" y="32" width="470" height="52" fill="#0d0d0d" stroke="#5F574F" stroke-width="2"/>
+          <g class="grow">
+            <!-- ESP32-S3 40mA => 84 -->
+            <rect x="2" y="34" width="84" height="48" fill="#29ADFF"/>
+            <!-- backlight 60-150, show 110 nominal => 230 -->
+            <rect x="86" y="34" width="230" height="48" fill="#FFEC27"/>
+            <!-- audio 20 => 42 -->
+            <rect x="316" y="34" width="42" height="48" fill="#FF77A8"/>
+            <!-- other 10 => 21 -->
+            <rect x="358" y="34" width="21" height="48" fill="#5F574F"/>
+          </g>
+          <!-- backlight range whisker -->
+          <line x1="86" y1="94" x2="211" y2="94" stroke="#FFEC27" stroke-width="2"/>
+          <line x1="86" y1="90" x2="86" y2="98" stroke="#FFEC27" stroke-width="2"/>
+          <line x1="399" y1="90" x2="399" y2="98" stroke="#FFEC27" stroke-width="2"/>
+          <line x1="211" y1="94" x2="399" y2="94" stroke="#FFEC27" stroke-width="2" stroke-dasharray="4 3"/>
+          <text x="90" y="112" class="num-s" fill="#FFEC27">backlight range: 60 &#8594; 150 mA depending on brightness</text>
+
+          <text x="8" y="132" class="num-s" fill="#29ADFF">&#9632; ESP32-S3, both cores, no WiFi &#183; ~40 mA</text>
+          <text x="8" y="150" class="num-s" fill="#FFEC27">&#9632; Backlight &#183; 60&#8211;150 mA</text>
+          <text x="8" y="168" class="num-s" fill="#FF77A8">&#9632; Audio amp &#183; ~20 mA</text>
+          <text x="8" y="186" class="num-s" fill="#5F574F">&#9632; SD, expander, regulators &#183; ~10 mA</text>
+
+          <!-- runtime bars -->
+          <text x="560" y="16" class="lbl lbl-w">RUNTIME @ ~200 mA AVERAGE</text>
+
+          <rect x="560" y="34" width="500" height="1" fill="#242424"/>
+
+          <text x="560" y="60" class="num-s">1000 mAh</text>
+          <rect x="660" y="44" width="400" height="22" fill="#0d0d0d" stroke="#242424" stroke-width="1"/>
+          <g class="grow"><rect x="661" y="45" width="133" height="20" fill="#FF004D" opacity=".8"/></g>
+          <text x="802" y="60" class="num-s" fill="#FF004D">4&#8211;5 h</text>
+
+          <text x="560" y="100" class="num-s">2000 mAh</text>
+          <rect x="660" y="84" width="400" height="22" fill="#0d0d0d" stroke="#242424" stroke-width="1"/>
+          <g class="grow"><rect x="661" y="85" width="266" height="20" fill="#FFA300" opacity=".85"/></g>
+          <text x="935" y="100" class="num-s" fill="#FFA300">8&#8211;10 h</text>
+
+          <text x="560" y="140" class="num-s">3000 mAh</text>
+          <rect x="660" y="124" width="400" height="22" fill="#0d0d0d" stroke="#242424" stroke-width="1"/>
+          <g class="grow"><rect x="661" y="125" width="398" height="20" fill="#00E436" opacity=".85"/></g>
+          <text x="1052" y="140" class="num-s" fill="#000" text-anchor="end">12&#8211;15 h</text>
+
+          <text x="560" y="176" class="num-s" fill="#5F574F">Assumes ~85% converter efficiency. Menus and idle will beat this; full brightness will not.</text>
+
+          <!-- punchline -->
+          <rect x="0" y="214" width="1060" height="66" fill="#1a1600" stroke="#FFEC27" stroke-width="2"/>
+          <text x="16" y="240" class="lbl" fill="#FFEC27">THE LEVER</text>
+          <text x="16" y="264" class="num-s" fill="#C2C3C7">The backlight, not the CPU, is your battery. A brightness slider will do more for runtime than every clock-gating trick combined.</text>
+        </svg>
+      </div>
+      <p class="fig__note">
+        <b>Audio:</b> the ESP32-S3 has <span class="bad">no internal DAC</span> &#8212; unlike the original ESP32. You need an
+        external I&#178;S part. The <b>MAX98357A</b> is the standard choice: I&#178;S in, DAC and Class-D amp out, three pins,
+        no MCLK, up to 3.2&nbsp;W into 4&nbsp;&#937;. Use a <b>PCM5102A</b> instead if you want a clean headphone line-out.
+        Synthesising PICO-8's four channels is cheap once it is fixed-point &#8212; PicoPico measured ~2&nbsp;ms per SFX.
+      </p>
+    </figure>
+  </section>
+
+  <!-- ===== 06 ARCH ===== -->
+  <section class="sec" id="arch">
+    <div class="sec__head">
+      <span class="sec__num">06</span>
+      <h2 class="sec__title">Two cores, one frame</h2>
+    </div>
+    <p class="sec__standfirst">
+      Core 0 runs the game. Core 1 gets it onto the screen and out of the speaker. The handoff between them is
+      an 8&nbsp;KB indexed buffer and a ring of audio samples &#8212; and nothing else crosses.
+    </p>
+
+    <figure class="fig bleed reveal">
+      <div class="fig__head">
+        <h3 class="fig__title">RUNTIME ARCHITECTURE · FREERTOS TASK SPLIT</h3>
+        <p class="fig__meta">blue = internal SRAM &#183; lavender = PSRAM</p>
+      </div>
+      <div class="fig__body">
+        <svg viewBox="0 0 1080 520" role="img" aria-labelledby="ar">
+          <title id="ar">Architecture diagram: core 0 runs the Lua VM writing to an indexed framebuffer in SRAM; core 1 palette-expands and scales it to the LCD via DMA, and synthesises audio to I2S.</title>
+
+          <!-- ==== CORE 0 ==== -->
+          <rect x="0" y="30" width="330" height="330" fill="#000c1a" stroke="#29ADFF" stroke-width="2"/>
+          <rect x="0" y="30" width="330" height="26" fill="#29ADFF"/>
+          <text x="12" y="48" class="lbl" fill="#000">CORE 0 &#183; PRO &#183; THE GAME</text>
+
+          <rect x="16" y="72" width="298" height="42" fill="#0d0d0d" stroke="#5F574F" stroke-width="1"/>
+          <text x="28" y="90" class="num-s" fill="#FFF1E8">Cart loader</text>
+          <text x="28" y="107" class="num-s" fill="#5F574F">.p8 text &#8594; .p8.png &#8594; PXA decompress</text>
+
+          <rect x="16" y="126" width="298" height="58" fill="#0d0d0d" stroke="#29ADFF" stroke-width="1"/>
+          <text x="28" y="146" class="num-s" fill="#29ADFF">z8lua VM &#183; fix32 16.16</text>
+          <text x="28" y="163" class="num-s" fill="#5F574F">bytecode, precompiled at load</text>
+          <text x="28" y="178" class="num-s" fill="#5F574F">hot state in SRAM &#183; heap in PSRAM</text>
+
+          <rect x="16" y="196" width="142" height="40" fill="#FF77A8"/>
+          <text x="28" y="221" class="num-s" fill="#000">_update()</text>
+          <rect x="172" y="196" width="142" height="40" fill="#FF77A8"/>
+          <text x="184" y="221" class="num-s" fill="#000">_draw()</text>
+
+          <rect x="16" y="248" width="298" height="40" fill="#0d0d0d" stroke="#5F574F" stroke-width="1"/>
+          <text x="28" y="273" class="num-s" fill="#FFF1E8">PICO-8 API &#183; spr map line rectfill pset &#8230;</text>
+
+          <rect x="16" y="300" width="298" height="44" fill="#00E436"/>
+          <text x="28" y="320" class="num-s" fill="#000">128&#215;128 indexed framebuffer</text>
+          <text x="28" y="337" class="num-s" fill="#000" opacity=".6">8 KB &#183; SRAM &#183; the only thing core 0 hands over</text>
+
+          <!-- ==== SHARED ==== -->
+          <rect x="370" y="30" width="200" height="330" fill="#0d0d0d" stroke="#FFEC27" stroke-width="2" stroke-dasharray="6 4"/>
+          <text x="380" y="50" class="lbl" fill="#FFEC27">SHARED &#183; SRAM</text>
+
+          <rect x="386" y="72" width="168" height="70" fill="#00E436" opacity=".25" stroke="#00E436" stroke-width="1"/>
+          <text x="398" y="94" class="num-s" fill="#00E436">Double buffer</text>
+          <text x="398" y="111" class="num-s" fill="#00E436">2 &#215; 8 KB indexed</text>
+          <text x="398" y="130" class="num-s" fill="#5F574F">flip on _draw() end</text>
+
+          <rect x="386" y="158" width="168" height="70" fill="#FFA300" opacity=".25" stroke="#FFA300" stroke-width="1"/>
+          <text x="398" y="180" class="num-s" fill="#FFA300">Audio ring buffer</text>
+          <text x="398" y="197" class="num-s" fill="#FFA300">22 050 Hz</text>
+          <text x="398" y="216" class="num-s" fill="#5F574F">lock-free, single producer</text>
+
+          <rect x="386" y="244" width="168" height="100" fill="#83769C" opacity=".2" stroke="#83769C" stroke-width="1"/>
+          <text x="398" y="266" class="num-s" fill="#83769C">PSRAM</text>
+          <text x="398" y="284" class="num-s" fill="#83769C">Lua heap &#183; 2 MB</text>
+          <text x="398" y="301" class="num-s" fill="#83769C">Cart + bytecode</text>
+          <text x="398" y="318" class="num-s" fill="#83769C">Sprite / map / SFX</text>
+          <text x="398" y="336" class="num-s" fill="#5F574F">slow lane. never per-pixel.</text>
+
+          <!-- arrows -->
+          <path d="M330 322 L384 322 M372 314 L384 322 L372 330" stroke="#00E436" stroke-width="2" fill="none"/>
+          <path d="M570 107 L624 107 M612 99 L624 107 L612 115" stroke="#00E436" stroke-width="2" fill="none"/>
+          <path d="M570 193 L624 193 M612 185 L624 193 L612 201" stroke="#FFA300" stroke-width="2" fill="none"/>
+
+          <!-- ==== CORE 1 ==== -->
+          <rect x="630" y="30" width="330" height="330" fill="#1a0d00" stroke="#FFA300" stroke-width="2"/>
+          <rect x="630" y="30" width="330" height="26" fill="#FFA300"/>
+          <text x="642" y="48" class="lbl" fill="#000">CORE 1 &#183; APP &#183; PIXELS &amp; SOUND</text>
+
+          <rect x="646" y="72" width="298" height="56" fill="#0d0d0d" stroke="#00E436" stroke-width="1"/>
+          <text x="658" y="92" class="num-s" fill="#00E436">Palette expand + integer scale</text>
+          <text x="658" y="109" class="num-s" fill="#5F574F">4bpp index &#8594; RGB565, 2&#215; or 3&#215;, one line at a time</text>
+          <text x="658" y="124" class="num-s" fill="#5F574F">replicate rows for free vertical scale</text>
+
+          <rect x="646" y="140" width="298" height="36" fill="#0d0d0d" stroke="#5F574F" stroke-width="1"/>
+          <text x="658" y="163" class="num-s" fill="#FFF1E8">RGB565 line buffer &#183; ~8 KB &#183; SRAM</text>
+
+          <rect x="646" y="188" width="298" height="36" fill="#29ADFF"/>
+          <text x="658" y="211" class="num-s" fill="#000">esp_lcd i80 / RGB &#183; DMA</text>
+
+          <rect x="646" y="248" width="298" height="52" fill="#0d0d0d" stroke="#FFA300" stroke-width="1"/>
+          <text x="658" y="268" class="num-s" fill="#FFA300">4-channel synth &#183; fix32</text>
+          <text x="658" y="285" class="num-s" fill="#5F574F">zepto8 synth, converted to fixed point &#183; ~2 ms/SFX</text>
+
+          <rect x="646" y="310" width="298" height="34" fill="#FFA300"/>
+          <text x="658" y="332" class="num-s" fill="#000">I2S DMA &#8594; MAX98357A</text>
+
+          <!-- outputs -->
+          <path d="M795 224 L795 244 M787 232 L795 244 L803 232" stroke="#29ADFF" stroke-width="2" fill="none" opacity="0"/>
+          <path d="M960 206 L1010 206 M998 198 L1010 206 L998 214" stroke="#29ADFF" stroke-width="2" fill="none"/>
+          <path d="M960 327 L1010 327 M998 319 L1010 327 L998 335" stroke="#FFA300" stroke-width="2" fill="none"/>
+          <text x="1016" y="203" class="num-s" fill="#29ADFF">LCD</text>
+          <text x="1016" y="219" class="num-s" fill="#5F574F">panel</text>
+          <text x="1016" y="324" class="num-s" fill="#FFA300">SPKR</text>
+
+          <!-- ==== INPUT / STORAGE rail ==== -->
+          <rect x="0" y="392" width="1060" height="100" fill="#0d0d0d" stroke="#5F574F" stroke-width="2"/>
+          <text x="16" y="414" class="lbl" fill="#83769C">HOST LAYER &#183; ESP32Host.cpp &#8212; the only file you actually write</text>
+
+          <rect x="16" y="428" width="200" height="48" fill="#FFCCAA"/>
+          <text x="28" y="448" class="num-s" fill="#000">MCP23017 &#183; I&#178;C</text>
+          <text x="28" y="466" class="num-s" fill="#000">7 buttons &#8594; btn() bitmask</text>
+
+          <rect x="232" y="428" width="200" height="48" fill="#008751"/>
+          <text x="244" y="448" class="num-s" fill="#FFF1E8">microSD &#183; FatFs</text>
+          <text x="244" y="466" class="num-s" fill="#FFF1E8">.p8 / .p8.png carts</text>
+
+          <rect x="448" y="428" width="200" height="48" fill="#5F574F"/>
+          <text x="460" y="448" class="num-s" fill="#FFF1E8">esp_timer</text>
+          <text x="460" y="466" class="num-s" fill="#FFF1E8">frame pacing &#183; 30 or 60 Hz</text>
+
+          <rect x="664" y="428" width="200" height="48" fill="#7E2553"/>
+          <text x="676" y="448" class="num-s" fill="#FFF1E8">Backlight PWM</text>
+          <text x="676" y="466" class="num-s" fill="#FFF1E8">the battery lever</text>
+
+          <rect x="880" y="428" width="164" height="48" fill="#29ADFF" opacity=".3" stroke="#29ADFF" stroke-width="1"/>
+          <text x="892" y="448" class="num-s" fill="#29ADFF">fake-08 core</text>
+          <text x="892" y="466" class="num-s" fill="#29ADFF">unmodified, upstream</text>
+        </svg>
+      </div>
+      <p class="fig__note">
+        <b>The whole port is one file.</b> fake-08's VM, API coverage, cart parsing and decompression stay upstream
+        and unmodified. You implement <code>ESP32Host</code>: flush a framebuffer, fill an audio callback, read a
+        button bitmask, open a file, and tell it what time it is. That is the entire contract &#8212; and it is why
+        porting beats rewriting by an order of magnitude.
+      </p>
+    </figure>
+
+    <h4>TOOLCHAIN</h4>
+    <p>Use <b>ESP-IDF v5.1 or newer</b>, not Arduino-ESP32. You need <code>menuconfig</code> control over PSRAM
+    mode and clock, cache line size, compiler optimisation and FreeRTOS tick rate &#8212; and Arduino hides all of it.
+    The RGB panel &#8220;screen drift&#8221; fix in particular requires IDF &#8805;&nbsp;5.1, which Arduino-ESP32 v2.x cannot give you.
+    PlatformIO with the ESP-IDF framework is fine if you want nicer dependency management; the core is still IDF.</p>
+  </section>
+
+  <!-- ===== 07 PLAN ===== -->
+  <section class="sec" id="plan">
+    <div class="sec__head">
+      <span class="sec__num">07</span>
+      <h2 class="sec__title">The plan, and the gates that stop it</h2>
+    </div>
+    <p class="sec__standfirst">
+      Four phases, four gates. The gates are the point: each one is a measurement that either lets you spend
+      more time or tells you to change the design. Do not skip forward to the PCB.
+    </p>
+
+    <figure class="fig bleed reveal">
+      <div class="fig__head">
+        <h3 class="fig__title">PHASED PLAN · GO / NO-GO GATES</h3>
+        <p class="fig__meta">evenings-and-weekends estimates</p>
+      </div>
+      <div class="fig__body">
+        <svg viewBox="0 0 1080 330" role="img" aria-labelledby="pl">
+          <title id="pl">Four-phase plan: Phase 0 this week with hardware on hand, gated on blit speed and Lua throughput; Phase 1 fake-08 port; Phase 2 the four-inch board; Phase 3 custom PCB.</title>
+
+          <!-- spine -->
+          <line x1="0" y1="150" x2="1060" y2="150" stroke="#5F574F" stroke-width="2"/>
+
+          <!-- PHASE 0 -->
+          <rect x="0" y="60" width="230" height="76" fill="#001a0a" stroke="#00E436" stroke-width="2"/>
+          <text x="14" y="82" class="lbl" fill="#00E436">PHASE 0 &#183; THIS WEEK</text>
+          <text x="14" y="102" class="num-s" fill="#FFF1E8">Hardware you already own</text>
+          <text x="14" y="120" class="num-s" fill="#5F574F">ILI9488 board + ESP-EYE</text>
+          <rect x="0" y="136" width="230" height="4" fill="#00E436"/>
+
+          <!-- GATE 1+2 -->
+          <g>
+            <rect x="248" y="118" width="16" height="64" fill="#FFEC27"/>
+            <rect x="240" y="182" width="220" height="128" fill="#0d0d0d" stroke="#FFEC27" stroke-width="2"/>
+            <text x="252" y="204" class="lbl" fill="#FFEC27">GATE 1 &amp; 2 &#183; THE KILLERS</text>
+            <text x="252" y="226" class="num-s" fill="#00E436">&#9632; Blit 128&#178; scaled &#8805; 30 fps</text>
+            <text x="252" y="244" class="num-s" fill="#00E436">&#9632; z8lua+fix32 within 2&#8211;3&#215;</text>
+            <text x="268" y="261" class="num-s" fill="#5F574F">of 4.2 M inst/sec</text>
+            <text x="252" y="286" class="num-s" fill="#FF004D">Fail either &#8594; redesign,</text>
+            <text x="252" y="302" class="num-s" fill="#FF004D">not push harder.</text>
+          </g>
+
+          <!-- PHASE 1 -->
+          <rect x="290" y="60" width="230" height="76" fill="#000c1a" stroke="#29ADFF" stroke-width="2"/>
+          <text x="304" y="82" class="lbl" fill="#29ADFF">PHASE 1 &#183; 2&#8211;4 WEEKS</text>
+          <text x="304" y="102" class="num-s" fill="#FFF1E8">Port the fake-08 core</text>
+          <text x="304" y="120" class="num-s" fill="#5F574F">ESP32Host + input + audio</text>
+          <rect x="290" y="136" width="230" height="4" fill="#29ADFF"/>
+
+          <!-- GATE 3 -->
+          <g>
+            <rect x="538" y="118" width="16" height="64" fill="#FFEC27"/>
+            <rect x="530" y="182" width="200" height="90" fill="#0d0d0d" stroke="#FFEC27" stroke-width="2"/>
+            <text x="542" y="204" class="lbl" fill="#FFEC27">GATE 3</text>
+            <text x="542" y="226" class="num-s" fill="#C2C3C7">A real cart from SD,</text>
+            <text x="542" y="244" class="num-s" fill="#C2C3C7">&#8805; 30 fps, with sound.</text>
+            <text x="542" y="264" class="num-s" fill="#5F574F">This is the demo that proves it.</text>
+          </g>
+
+          <!-- PHASE 2 -->
+          <rect x="580" y="60" width="230" height="76" fill="#1a0d00" stroke="#FFA300" stroke-width="2"/>
+          <text x="594" y="82" class="lbl" fill="#FFA300">PHASE 2 &#183; 2&#8211;3 WEEKS</text>
+          <text x="594" y="102" class="num-s" fill="#FFF1E8">4-inch board + 8 MB PSRAM</text>
+          <text x="594" y="120" class="num-s" fill="#5F574F">ST7701 RGB &#183; profile the wall</text>
+          <rect x="580" y="136" width="230" height="4" fill="#FFA300"/>
+
+          <!-- GATE 4 -->
+          <g>
+            <rect x="828" y="118" width="16" height="64" fill="#FFEC27"/>
+            <rect x="820" y="182" width="200" height="90" fill="#0d0d0d" stroke="#FFEC27" stroke-width="2"/>
+            <text x="832" y="204" class="lbl" fill="#FFEC27">GATE 4</text>
+            <text x="832" y="226" class="num-s" fill="#C2C3C7">Celeste-class carts stable.</text>
+            <text x="832" y="244" class="num-s" fill="#C2C3C7">Commit: 30 fps or 60?</text>
+            <text x="832" y="264" class="num-s" fill="#5F574F">Panel choice locks here.</text>
+          </g>
+
+          <!-- PHASE 3 -->
+          <rect x="870" y="60" width="190" height="76" fill="#1a0011" stroke="#FF77A8" stroke-width="2"/>
+          <text x="884" y="82" class="lbl" fill="#FF77A8">PHASE 3 &#183; 4&#8211;8 WK</text>
+          <text x="884" y="102" class="num-s" fill="#FFF1E8">Custom PCB + case</text>
+          <text x="884" y="120" class="num-s" fill="#5F574F">only after gates 1&#8211;4 pass</text>
+          <rect x="870" y="136" width="190" height="4" fill="#FF77A8"/>
+
+          <!-- header note -->
+          <text x="0" y="26" class="lbl" fill="#5F574F">SOFTWARE FIRST. THE ENCLOSURE IS THE LAST PROBLEM, NOT THE FIRST.</text>
+        </svg>
+      </div>
+      <p class="fig__note">
+        <b>Gates 1 and 2 are not milestones, they are exit criteria.</b> If Lua comes in more than 3&#8211;4&#215; slower
+        than PICO-8's 4.2&nbsp;M&nbsp;inst/sec target after fix32 and bytecode precompilation, the honest response is to
+        commit to a 30&nbsp;fps-only device or move to the <b>ESP32-P4</b> &#8212; dual RISC-V at 400&nbsp;MHz, 768&nbsp;KB SRAM, a 2D
+        pixel-processing accelerator that can offload the scale/blit entirely. The cost is no built-in WiFi and a
+        younger ecosystem.
+      </p>
+    </figure>
+
+    <figure class="fig bleed reveal">
+      <div class="fig__head">
+        <h3 class="fig__title">DE-RISK ORDER · WHAT IS MOST LIKELY TO KILL THIS</h3>
+        <p class="fig__meta">qualitative &#183; ranked by consequence &#215; uncertainty</p>
+      </div>
+      <div class="fig__body">
+        <svg viewBox="0 0 1080 240" role="img" aria-labelledby="dr">
+          <title id="dr">Ranked project risks: Lua on Xtensa throughput and PSRAM framebuffer bandwidth are highest, followed by the 2MB heap, then audio timing and pin budget.</title>
+
+          <text x="0" y="14" class="lbl" fill="#5F574F">TEST TOP-DOWN. THE FIRST TWO ARE PHASE 0.</text>
+
+          <text x="0" y="46" class="num-s" fill="#FFF1E8">1 &#183; Lua-on-Xtensa throughput</text>
+          <rect x="300" y="30" width="700" height="20" fill="#0d0d0d" stroke="#242424" stroke-width="1"/>
+          <g class="grow"><rect x="301" y="31" width="644" height="18" fill="#FF004D"/></g>
+          <text x="1010" y="46" class="num-s" fill="#FF004D">HIGH</text>
+
+          <text x="0" y="86" class="num-s" fill="#FFF1E8">2 &#183; PSRAM framebuffer bandwidth</text>
+          <rect x="300" y="70" width="700" height="20" fill="#0d0d0d" stroke="#242424" stroke-width="1"/>
+          <g class="grow"><rect x="301" y="71" width="595" height="18" fill="#FF004D"/></g>
+          <text x="1010" y="86" class="num-s" fill="#FF004D">HIGH</text>
+
+          <text x="0" y="126" class="num-s" fill="#FFF1E8">3 &#183; Full 2 MB Lua heap in PSRAM</text>
+          <rect x="300" y="110" width="700" height="20" fill="#0d0d0d" stroke="#242424" stroke-width="1"/>
+          <g class="grow"><rect x="301" y="111" width="385" height="18" fill="#FFA300"/></g>
+          <text x="1010" y="126" class="num-s" fill="#FFA300">MED</text>
+
+          <text x="0" y="166" class="num-s" fill="#C2C3C7">4 &#183; Audio synth timing</text>
+          <rect x="300" y="150" width="700" height="20" fill="#0d0d0d" stroke="#242424" stroke-width="1"/>
+          <g class="grow"><rect x="301" y="151" width="175" height="18" fill="#00E436"/></g>
+          <text x="1010" y="166" class="num-s" fill="#00E436">LOW</text>
+
+          <text x="0" y="206" class="num-s" fill="#C2C3C7">5 &#183; Input pin budget</text>
+          <rect x="300" y="190" width="700" height="20" fill="#0d0d0d" stroke="#242424" stroke-width="1"/>
+          <g class="grow"><rect x="301" y="191" width="105" height="18" fill="#00E436"/></g>
+          <text x="1010" y="206" class="num-s" fill="#00E436">LOW</text>
+        </svg>
+      </div>
+      <p class="fig__note">
+        Risks 4 and 5 are <span class="ok">solved engineering</span> &#8212; fixed-point synth and an I&#178;C expander,
+        both known-good. Risks 1 and 2 are the ones with real uncertainty attached, and they are both testable in
+        an evening on hardware sitting on your desk. That asymmetry is the whole argument for Phase 0.
+      </p>
+    </figure>
+
+    <div class="week reveal">
+      <h3 class="week__head">Start here. Tonight.</h3>
+      <p class="week__sub">No purchases. ILI9488 board + ESP-EYE. Four tasks, ~1&#8211;2 weeks of evenings.</p>
+      <ol>
+        <li><div>
+          <b>Get anything on the screen.</b>
+          Flash an ESP-IDF <code>esp_lcd</code> i80 example and put up colour bars on the ILI9488. The ESP-EYE is your
+          fallback sanity check if the panel stays dark.
+        </div></li>
+        <li><div>
+          <b>Blit a scaled 128&#215;128 frame and time it.</b>
+          Static indexed image &#8594; palette-expand &#8594; 2&#215; integer scale &#8594; line buffer &#8594; DMA. Log the actual frame time.
+          <span class="gate">GATE 1 &#8594; &#8805; 30 fps full-frame, or the display architecture changes.</span>
+        </div></li>
+        <li><div>
+          <b>Cross-compile z8lua with fix32 for Xtensa.</b>
+          Build it as an IDF component. Run a tight fixed-point loop and a <code>sin</code> sweep. Compare against
+          PICO-8's ~4.2&nbsp;M&nbsp;VM&nbsp;inst/sec.
+          <span class="gate">GATE 2 &#8594; within 2&#8211;3&#215; of target, or plan for 30 fps only / ESP32-P4.</span>
+        </div></li>
+        <li><div>
+          <b>Run one trivial cart end to end.</b>
+          A hand-written <code>.p8</code>: a sprite that moves when you press a button. Nothing else. This is the moment
+          the project becomes real.
+        </div></li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- ===== 08 BOM ===== -->
+  <section class="sec" id="bom">
+    <div class="sec__head">
+      <span class="sec__num">08</span>
+      <h2 class="sec__title">Bill of materials</h2>
+    </div>
+    <p class="sec__standfirst">
+      Roughly $45&#8211;70 for a finished unit, depending on whether you keep the 4-inch dev board or lay out your own
+      module. Neither number is the interesting one &#8212; your time is.
+    </p>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr><th>Item</th><th>Part</th><th>Notes</th><th style="text-align:right">Approx.</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="t-name">MCU + display</td><td class="t-mono">Makerfabs ESP32-S3 4&#8243; ST7701</td><td>480&#215;480, N16R8, onboard speaker + LiPo charger + SD. Prototype target.</td><td class="t-num">$45</td></tr>
+          <tr><td class="t-name">MCU (custom)</td><td class="t-mono">ESP32-S3-WROOM-1-N16R8</td><td>16 MB flash / 8 MB Octal PSRAM. The only module spec that matters.</td><td class="t-num">$6</td></tr>
+          <tr><td class="t-name">Display (custom)</td><td class="t-mono">320&#215;320 or 480&#215;480 IPS</td><td>Must divide by 128. Avoid 240&#215;240.</td><td class="t-num">$8&#8211;18</td></tr>
+          <tr><td class="t-name">Audio amp</td><td class="t-mono">MAX98357A</td><td>I&#178;S in, DAC + Class-D out, 3 pins, no MCLK.</td><td class="t-num">$4</td></tr>
+          <tr><td class="t-name">Speaker</td><td class="t-mono">3&#8211;4 &#937;, 1&#8211;4 W</td><td>Already on the 4-inch board.</td><td class="t-num">$2</td></tr>
+          <tr><td class="t-name">Input expander</td><td class="t-mono">MCP23017 / PCF8574</td><td>16 or 8 I/O on I&#178;C. Non-negotiable given the pin budget.</td><td class="t-num">$1.50</td></tr>
+          <tr><td class="t-name">Buttons</td><td class="t-mono">Tactile + NES-style silicone pad</td><td>Design around an off-the-shelf pad; avoid custom moulding.</td><td class="t-num">$3</td></tr>
+          <tr><td class="t-name">Battery</td><td class="t-mono">2000 mAh LiPo</td><td>~8&#8211;10 h. Go 3000 mAh if the case allows.</td><td class="t-num">$8</td></tr>
+          <tr><td class="t-name">Charger</td><td class="t-mono">TP4056 + protection / MCP73831</td><td>Add a MAX17048 fuel gauge for a real battery %.</td><td class="t-num">$1&#8211;3</td></tr>
+          <tr><td class="t-name">Storage</td><td class="t-mono">microSD, 8&#8211;32 GB</td><td>Carts are tiny. Speed is irrelevant &#8212; load the whole cart at launch.</td><td class="t-num">$5</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Enclosure</h3>
+    <p>3D print it. FDM or resin, one-offs and low volume &#8212; CNC only buys you metal, which you do not need.
+    For a 4-inch panel, a <b>landscape PSP-style layout</b> (screen centred, controls flanking) is the ergonomic
+    answer; a Game Boy vertical stack only works below ~3&nbsp;inches. Plenty of Raspberry Pi Zero handheld shells on
+    Printables can be re-scaled rather than drawn from nothing.</p>
+  </section>
+
+  <!-- ===== 09 LEGAL ===== -->
+  <section class="sec" id="legal">
+    <div class="sec__head">
+      <span class="sec__num">09</span>
+      <h2 class="sec__title">Licensing, briefly</h2>
+    </div>
+
+    <p>The runtime is fine. The assets are not. fake-08 and zepto8 are clean-room reimplementations &#8212; fake-08 is
+    MIT-licensed and explicitly unaffiliated with Lexaloffle &#8212; and reimplementing the PICO-8 API is generally
+    accepted. What you must not ship is Lexaloffle's actual binary, its BIOS, or its bundled font data.</p>
+
+    <p>Lexaloffle's posture has been tolerant: Joseph White has not pursued the homebrew emulators, and the
+    community norm &#8212; echoed by fake-08, muOS and ROCKNIX &#8212; is to <b>encourage buying the real PICO-8</b> at $14.99.
+    Anbernic and Miyoo devices already ship with fake-08 preinstalled precisely because it needs no purchased binary.</p>
+
+    <p>The sharper issue is carts, not the runtime. Many BBS carts are unlicensed or CC-BY-NC-SA. <b>Ship the device
+    empty.</b> A personal or open-source build is clearly safe; a commercial one means no Lexaloffle assets, no
+    preloaded carts, and ideally a conversation with Lexaloffle first.</p>
+
+    <div class="call call--stop">
+      <span class="call__tag">NOT LEGAL ADVICE</span>
+      <p>Tolerance is not a licence, and it can be withdrawn &#8212; especially against a product with a price tag.</p>
+    </div>
+  </section>
+
+  <!-- ===== 10 CAVEATS ===== -->
+  <section class="sec" id="caveats">
+    <div class="sec__head">
+      <span class="sec__num">10</span>
+      <h2 class="sec__title">What I am not certain about</h2>
+    </div>
+
+    <ul>
+      <li class="li--warn"><b>The 9 ms figure is from an ESP32 (LX6), not an S3 (LX7).</b> Same clock, and the S3
+      should match or beat it &#8212; but nobody has published the S3 number. Treat it as a strong indicator, not a
+      guarantee. You will be the one who measures it.</li>
+      <li class="li--warn"><b>The ~84 MB/s PSRAM figure is one forum measurement</b> taken while exceeding the cache.
+      With the 120&nbsp;MHz PSRAM option, careful cache-line tuning, and hot data kept in SRAM, your number will differ.
+      Measure it on your board rather than trusting mine.</li>
+      <li class="li--warn"><b>I have not confirmed whether fake-08 statically reserves the full 2 MB heap.</b>
+      The fact it runs on a 4&nbsp;MB-RAM Nintendo DS strongly implies dynamic growth, but verify when you profile.</li>
+      <li class="li--warn"><b>The parallel-TFT pin count is indicative.</b> Exact GPIO consumption depends on the
+      specific board's pinout and whether it exposes RD. The conclusion &#8212; that buttons cannot use direct GPIO &#8212;
+      holds regardless.</li>
+      <li class="li--stop"><b>fake-08's own limitations become yours.</b> Imperfect noise-channel audio, some
+      v0.2.2+ features (custom fonts, fill patterns) unimplemented, and <code>flip()</code>-based tweetcarts can be
+      unstable. Porting inherits the bugs along with the compatibility.</li>
+      <li class="li--stop"><b>Nobody has finished this.</b> PicoPico has partial API coverage and no music. PeX Labs
+      published no framerates. You are doing genuinely novel integration work, and the estimates above are estimates.</li>
+    </ul>
+  </section>
+
+  </main>
+</div>
+</div>
+
+<footer class="foot">
+  <div class="shell">
+    <div class="foot__grid">
+      <div>
+        <h5>RUNTIME</h5>
+        <ul>
+          <li><a href="https://github.com/jtothebell/fake-08">jtothebell/fake-08</a> &#8212; port this</li>
+          <li><a href="https://github.com/DavidVentura/PicoPico">DavidVentura/PicoPico</a> &#8212; the ESP32 proof</li>
+          <li><a href="https://github.com/samhocevar/z8lua">samhocevar/z8lua</a> &#8212; fix32 Lua</li>
+          <li><a href="https://github.com/samhocevar/zepto8">samhocevar/zepto8</a> &#8212; the synth</li>
+        </ul>
+      </div>
+      <div>
+        <h5>REFERENCE</h5>
+        <ul>
+          <li><a href="https://github.com/yocto-8/yocto-8">yocto-8</a> &#8212; why RP2040 fails</li>
+          <li><a href="https://github.com/ducalex/retro-go">ducalex/retro-go</a> &#8212; partial-update technique</li>
+          <li><a href="https://blog.davidv.dev/posts/pico8-console-part-2-performance/">PicoPico performance writeup</a></li>
+          <li><a href="https://www.lexaloffle.com/pico-8.php">PICO-8 &#8212; $14.99. Buy it.</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>HARDWARE</h5>
+        <ul>
+          <li>ESP32-S3-WROOM-1-N16R8 &#8212; 8 MB Octal PSRAM</li>
+          <li>Makerfabs 4&#8243; ST7701 480&#215;480</li>
+          <li>Makerfabs 3.5&#8243; ILI9488 &#8212; bring-up only</li>
+          <li>MAX98357A &#183; MCP23017 &#183; TP4056</li>
+        </ul>
+      </div>
+      <div>
+        <h5>COLOUR KEY</h5>
+        <ul>
+          <li><span style="color:#00E436">&#9632;</span> go &#183; measured-good</li>
+          <li><span style="color:#FFA300">&#9632;</span> caution &#183; verify</li>
+          <li><span style="color:#FF004D">&#9632;</span> hard constraint</li>
+          <li><span style="color:#29ADFF">&#9632;</span> silicon &#183; <span style="color:#FF77A8">&#9632;</span> PICO-8 &#183; <span style="color:#FFEC27">&#9632;</span> time</li>
+        </ul>
+      </div>
+    </div>
+    <p style="margin:0;color:#5F574F">
+      Every colour on this page is one of PICO-8's sixteen. Nothing else was permitted.<br>
+      Figures are drawn to scale where a scale is stated. Estimates are labelled as estimates.
+    </p>
+  </div>
+</footer>
+
+<script>
+(function(){
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // Reveal figures + fill bars on entry
+  var targets = document.querySelectorAll('.reveal');
+  if (reduce || !('IntersectionObserver' in window)) {
+    targets.forEach(function(t){ t.classList.add('in'); });
+  } else {
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+      });
+    }, { rootMargin: '0px 0px -12% 0px', threshold: 0.15 });
+    targets.forEach(function(t){ io.observe(t); });
+  }
+
+  // Boot the hero meter once, on load
+  var meter = document.getElementById('hero-meter');
+  if (meter) {
+    if (reduce) { meter.classList.add('in'); }
+    else { requestAnimationFrame(function(){ setTimeout(function(){ meter.classList.add('in'); }, 220); }); }
+  }
+
+  // Rail: highlight the section you're in
+  var links = Array.prototype.slice.call(document.querySelectorAll('.rail__link'));
+  var secs  = links.map(function(l){ return document.querySelector(l.getAttribute('href')); }).filter(Boolean);
+  if (secs.length && 'IntersectionObserver' in window) {
+    var spy = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if (!e.isIntersecting) return;
+        links.forEach(function(l){ l.classList.remove('is-active'); });
+        var active = links.find(function(l){ return l.getAttribute('href') === '#' + e.target.id; });
+        if (active) active.classList.add('is-active');
+      });
+    }, { rootMargin: '-20% 0px -70% 0px', threshold: 0 });
+    secs.forEach(function(s){ spy.observe(s); });
+  }
+})();
+</script>
+
+</body>
+</html>
