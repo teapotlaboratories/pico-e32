@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phase-0 Gate #3: trivial cart end-to-end — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:860px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)} .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:10px;padding:.8rem 1rem;overflow-x:auto;font-size:.8rem;line-height:1.5;font-family:ui-monospace,monospace}
+  .pill{display:inline-block;font-size:.78rem;font-weight:600;padding:.16em .6em;border-radius:999px;border:1px solid var(--border)}
+  .pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+  .pill.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  .note{color:var(--muted);font-size:.92rem}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .diagram{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.2rem;margin:1.4rem 0;overflow-x:auto}
+  .cap{color:var(--muted);font-size:.85rem;margin:.4rem 0 0;text-align:center}
+  .mono{font-family:ui-monospace,monospace}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <p class="date">2026-07-14</p>
+  <h1>Phase-0 Gate #3: trivial cart end-to-end (minimal ESP32Host)</h1>
+
+  <div class="tldr">
+    <span class="pill ok">✓ groundwork passed</span> <span class="pill warn">⚠ panel image unverified</span><br>
+    A trivial PICO-8 cart runs end-to-end on <strong>z8lua + components/ili9488</strong> at <strong>161.5 fps</strong>
+    (~5.4× the 30 fps gate). Rendering verified <strong>byte-identical host↔device</strong> via a framebuffer
+    checksum — the right pixels reach the framebuffer without needing the camera.
+  </div>
+
+  <h2>The pipeline (firmware/pico-e32-host)</h2>
+  <div class="diagram">
+    <svg viewBox="0 0 820 120" role="img" aria-label="Pipeline: cart Lua -> z8lua -> draw API -> 128x128 framebuffer -> scale -> 256x256 RGB565 -> ILI9488 blit.">
+      <defs><marker id="ar" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--line)"/></marker></defs>
+      <g font-size="11.5" text-anchor="middle">
+        <rect x="10"  y="45" width="120" height="34" rx="7" fill="var(--codebg)" stroke="var(--border)"/><text x="70"  y="66" fill="var(--fg)">cart _update/_draw</text>
+        <rect x="160" y="45" width="90"  height="34" rx="7" fill="var(--codebg)" stroke="var(--accent)"/><text x="205" y="66" fill="var(--fg)">z8lua</text>
+        <rect x="280" y="45" width="110" height="34" rx="7" fill="var(--codebg)" stroke="var(--border)"/><text x="335" y="66" fill="var(--fg)">draw API (C)</text>
+        <rect x="420" y="45" width="120" height="34" rx="7" fill="var(--codebg)" stroke="var(--border)"/><text x="480" y="60" fill="var(--fg)">128×128 fb</text><text x="480" y="74" fill="var(--muted)" font-size="9">(indexed)</text>
+        <rect x="570" y="45" width="110" height="34" rx="7" fill="var(--codebg)" stroke="var(--border)"/><text x="625" y="60" fill="var(--fg)">2× scale</text><text x="625" y="74" fill="var(--muted)" font-size="9">→ RGB565</text>
+        <rect x="710" y="45" width="100" height="34" rx="7" fill="var(--codebg)" stroke="var(--accent)"/><text x="760" y="60" fill="var(--fg)">ili9488</text><text x="760" y="74" fill="var(--muted)" font-size="9">256² blit</text>
+      </g>
+      <g stroke="var(--line)" stroke-width="1.6" marker-end="url(#ar)">
+        <line x1="130" y1="62" x2="158" y2="62"/><line x1="250" y1="62" x2="278" y2="62"/>
+        <line x1="390" y1="62" x2="418" y2="62"/><line x1="540" y1="62" x2="568" y2="62"/><line x1="680" y1="62" x2="708" y2="62"/>
+      </g>
+    </svg>
+    <p class="cap">The minimal ESP32Host: everything from cart Lua to panel pixels, 161.5 fps.</p>
+  </div>
+
+  <h2>Verification: framebuffer checksum (no camera)</h2>
+  <p><code>fb_hash</code> = FNV-1a over the 128×128 framebuffer, per frame. The cart + z8lua fix32 + draw API are
+  deterministic, so host and device must produce the same sequence if the pipeline is correct:</p>
+  <pre>host   0-9: 432b2a8d b99c6cb6 a3304eb4 58e93d00 2d861cfc afd99258 a8a681d0 a5fb37c3 01d10580 2e41c322
+device 0-9: 432b2a8d b99c6cb6 a3304eb4 58e93d00 2d861cfc afd99258 a8a681d0 a5fb37c3 01d10580 2e41c322   ✓ identical</pre>
+  <p>Byte-for-byte match → correct pixels reach the framebuffer on hardware; hashes change each frame → the
+  cart animates. (The host build also caught a Lua-stack bug under ASan before any flash.)</p>
+
+  <h2>Result</h2>
+  <ul>
+    <li><strong>161.5 fps</strong> (`_update`+`_draw`+scale+256² blit) — ~5.4× the 30 fps gate, ~2.7× 60 fps.
+      Raw blit alone was 288 fps (Gate #1); cart draw + scale add ~2.7 ms/frame.</li>
+    <li>App 378 KB, 64% free; frame loop yields on the blit's DMA wait (no WDT issue).</li>
+    <li>⚠ Not verified: the physical panel image (colours/orientation on glass) — same camera blocker as Gate #1.</li>
+  </ul>
+
+  <h2>Next</h2>
+  <ul>
+    <li>Camera → confirm the panel image (closes Gate #1 + this).</li>
+    <li>Phase 1: swap the trivial cart for the fake-08 host + a real cart from SD; add input + I²S audio.</li>
+    <li>Extract the draw API into a reusable <code>components/p8gfx</code> as it grows.</li>
+  </ul>
+</div>
+</body>
+</html>

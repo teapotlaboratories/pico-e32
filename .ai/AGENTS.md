@@ -35,9 +35,10 @@ when the owner explicitly asks for it in that request — a prior commit does no
 authorize the next one. When work is done, summarize what changed and leave it
 staged or unstaged for review rather than committing on your own initiative.
 
-**No commits or pushes during weekday work hours (Mon–Fri, 09:00–16:59 local).**
-Even when the owner asks, hold both `git commit` and `git push` until after 17:00
-(or the weekend) so the history carries no work-hours timestamps. The commit date
+**No commits or pushes during weekday work hours (Mon–Fri, 09:00–16:59 Pacific Time
+— `America/Los_Angeles`, i.e. PST/PDT; the machine clock is UTC, so convert before
+acting).** Even when the owner asks, hold both `git commit` and `git push` until after
+17:00 Pacific (or the weekend) so the history carries no work-hours timestamps. The commit date
 must reflect when the work actually happened — **never back-date, `git commit
 --date=…`, or `--amend` a commit's timestamp** to disguise a work-hours commit as
 off-hours; that falsifies the record. Do the work in the tree, tell the owner the

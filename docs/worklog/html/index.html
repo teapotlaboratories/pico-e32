@@ -31,9 +31,28 @@
     <ul class="entries">
       <li>
         <span class="d">2026-07-14</span>
+        <a class="t" href="2026-07-14-phase0-gate3-host.html">Phase-0 Gate #3: trivial cart end-to-end (minimal ESP32Host)</a>
+        <span class="s">z8lua + ili9488 + a trivial cart in one frame loop: <strong>161.5 fps</strong>. Rendering verified
+          <strong>byte-identical host↔device</strong> via framebuffer checksum (camera-independent).</span>
+      </li>
+      <li>
+        <span class="d">2026-07-14</span>
+        <a class="t" href="2026-07-14-phase0-gate1-display.html">Phase-0 Gate #1: ILI9488 i80 scaled-blit FPS</a>
+        <span class="s">Display-test on hardware: <strong>288 fps @ 256²</strong> (~10× the 30 fps gate, ~94% of the
+          i80 bus). FPS criterion passed — but visual correctness unverified (bench camera unavailable).</span>
+      </li>
+      <li>
+        <span class="d">2026-07-14</span>
+        <a class="t" href="2026-07-14-phase0-gate2-luabench.html">Phase-0 Gate #2: z8lua throughput on real hardware</a>
+        <span class="s">First on-device bring-up. New z8lua integration builds+runs on the ESP32-S3.
+          Throughput was ~5–8× slow — traced to one build flag (<code>-fno-jump-tables</code>); re-enabling
+          <code>-fjump-tables</code> gave ~3× → <strong>Gate #2 passable</strong>. Also: why PicoPico's float switch doesn't help us.</span>
+      </li>
+      <li>
+        <span class="d">2026-07-14</span>
         <a class="t" href="2026-07-14-z8lua-submodule.html">z8lua: vendored copy → git submodule</a>
         <span class="s">Forked z8lua to <code>teapotlaboratories/z8lua</code>, moved the two local
-          patches onto branch <code>pico-e32</code>, and wired it as a submodule. Host build verified.</span>
+          patches onto branch <code>pico-e32</code>, and wired it as a submodule. Compiles <code>.c</code> as C++.</span>
       </li>
     </ul>
     <div class="empty">The first hardware bring-up session (Phase-0 Gate #1 / #2 on real

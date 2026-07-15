@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phase-0 Gate #2: z8lua throughput — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)}
+  .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;
+       font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .pill{display:inline-block;font-size:.78rem;font-weight:600;padding:.16em .6em;border-radius:999px;border:1px solid var(--border)}
+  .pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);
+        border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .6rem;text-align:left}
+  th{background:var(--codebg)} td.n{text-align:right;font-family:ui-monospace,monospace}
+  .yes{color:var(--ok);font-weight:700} .no{color:var(--bad);font-weight:700}
+  .diagram{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.2rem;margin:1.4rem 0;overflow-x:auto}
+  .cap{color:var(--muted);font-size:.85rem;margin:.4rem 0 0;text-align:center}
+  .note{color:var(--muted);font-size:.92rem}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <p class="date">2026-07-14</p>
+  <h1>Phase-0 Gate #2: z8lua throughput on real hardware</h1>
+
+  <div class="tldr">
+    <span class="pill ok">✓ Gate #2 passable</span><br>
+    The new z8lua build (compile <code>.c</code> as C++) runs on the ESP32-S3. First measurement was
+    ~5–8× too slow — but the entire deficit traced to <strong>one ESP-IDF build flag,
+    <code>-fno-jump-tables</code></strong>. Re-enabling <code>-fjump-tables</code> gave <strong>~2.8–3.1×</strong>,
+    landing throughput ~2.5× under the PICO-8 target — inside the go/no-go window. <em>No source edit.</em>
+  </div>
+
+  <h2>Hardware &amp; build</h2>
+  <ul>
+    <li>Board on <code>/dev/ttyUSB0</code>: ESP32-S3 rev1, <strong>2 MB PSRAM, 16 MB flash</strong> — the
+      Makerfabs ILI9488 <strong>N16R2</strong>. Vendored ESP-IDF v5.4.2, xtensa GNU 14.2.0.</li>
+    <li><strong>New z8lua integration validated on target:</strong> the log shows 30 z8lua <code>.c</code>
+      files compiled as <em>CXX</em> objects, 0 errors — <code>set_source_files_properties(… LANGUAGE CXX)</code>
+      works on the real toolchain, no renames.</li>
+    <li>First flash tripped the Task WDT (the timed loop starves IDLE0); disabled it for the benchmark
+      (<code>CONFIG_ESP_TASK_WDT_INIT=n</code>).</li>
+  </ul>
+
+  <h2>The hunt: what actually cost the cycles</h2>
+  <p>Baseline fixed-point was <strong>~420 cycles per VM instruction</strong> (~15× a normal Lua). I chased
+  it lever by lever — most were red herrings:</p>
+  <table>
+    <thead><tr><th>lever tried</th><th>effect</th><th>verdict</th></tr></thead>
+    <tbody>
+      <tr><td>QIO flash + 32 KB I-cache</td><td class="n">0%</td><td class="no">✗ not fetch-bound</td></tr>
+      <tr><td>fix32 divide (isolated w/ no-divide case)</td><td class="n">5%</td><td class="no">✗ not divide</td></tr>
+      <tr><td>assertions</td><td class="n">—</td><td class="no">✗ <code>lua_assert</code> is a no-op</td></tr>
+      <tr><td><code>always_inline</code> the fix32 operators</td><td class="n">1–6%</td><td class="no">✗ inlining wasn't it</td></tr>
+      <tr><td>IRAM placement</td><td class="n">—</td><td class="no">✗ predicted null (not fetch-bound)</td></tr>
+      <tr><td>fix32 <code>double</code>→<code>float</code></td><td class="n">0%</td><td class="no">✗ math is fixed-point</td></tr>
+      <tr><td><strong><code>-fjump-tables</code></strong></td><td class="n"><strong>2.8–3.1×</strong></td><td class="yes">✓ the fix</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Root cause: opcode dispatch was a compare-chain</h2>
+  <p>With operators inlined the empty loop was <em>still</em> ~235 cyc/instruction → the cost was <strong>VM
+  dispatch itself</strong>. ESP-IDF compiles with <code>-fno-jump-tables -fno-tree-switch-conversion</code>,
+  so <code>luaV_execute</code>'s ~40-way opcode <code>switch</code> becomes a linear compare-chain — every
+  bytecode dispatch walks ~20 branches. That's invisible to cache, inlining, and divide, which is exactly
+  why every other lever did nothing.</p>
+  <div class="diagram">
+    <svg viewBox="0 0 800 210" role="img" aria-label="Diagram: -fno-jump-tables makes opcode dispatch a linear compare-chain of ~20 branches; -fjump-tables makes it a single indirect jump through a table.">
+      <text x="20" y="30" fill="var(--bad)" font-size="13" font-weight="700">-fno-jump-tables (default): ~168 branches</text>
+      <g font-size="11" class="mono" fill="var(--muted)">
+        <rect x="20" y="45" width="120" height="26" rx="5" fill="var(--codebg)" stroke="var(--border)"/><text x="30" y="62" fill="var(--fg)">op==0?</text>
+        <line x1="140" y1="58" x2="170" y2="58" stroke="var(--line)" marker-end="url(#a)"/>
+        <rect x="170" y="45" width="120" height="26" rx="5" fill="var(--codebg)" stroke="var(--border)"/><text x="180" y="62" fill="var(--fg)">op==1?</text>
+        <line x1="290" y1="58" x2="320" y2="58" stroke="var(--line)" marker-end="url(#a)"/>
+        <rect x="320" y="45" width="120" height="26" rx="5" fill="var(--codebg)" stroke="var(--border)"/><text x="330" y="62" fill="var(--fg)">op==2?</text>
+        <text x="450" y="62" fill="var(--muted)">… ~20 more …</text>
+        <rect x="600" y="45" width="150" height="26" rx="5" fill="var(--codebg)" stroke="var(--border)"/><text x="610" y="62" fill="var(--fg)">handler</text>
+        <line x1="560" y1="58" x2="600" y2="58" stroke="var(--line)" marker-end="url(#a)"/>
+      </g>
+      <text x="20" y="120" fill="var(--ok)" font-size="13" font-weight="700">-fjump-tables: 64 branches + 1 jx (jump table)</text>
+      <g font-size="11" class="mono">
+        <rect x="20" y="135" width="150" height="26" rx="5" fill="var(--codebg)" stroke="var(--ok)"/><text x="30" y="152" fill="var(--fg)">jx table[op]</text>
+        <line x1="170" y1="148" x2="230" y2="148" stroke="var(--ok)" stroke-width="2" marker-end="url(#a)"/>
+        <rect x="230" y="135" width="150" height="26" rx="5" fill="var(--codebg)" stroke="var(--ok)"/><text x="240" y="152" fill="var(--fg)">handler</text>
+        <text x="400" y="152" fill="var(--muted)">O(1) — one indirect jump</text>
+      </g>
+      <defs><marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--line)"/></marker></defs>
+    </svg>
+    <p class="cap">One build flag turns ~20 compares per bytecode into a single table jump.</p>
+  </div>
+
+  <h2>Result &amp; where it sits</h2>
+  <table>
+    <thead><tr><th>case</th><th>baseline</th><th>+jump-tables</th><th>speedup</th></tr></thead>
+    <tbody>
+      <tr><td>fixed-point arithmetic</td><td class="n">19281 ms</td><td class="n">6922 ms</td><td class="n">2.79×</td></tr>
+      <tr><td>arith, no divide</td><td class="n">18339 ms</td><td class="n">5921 ms</td><td class="n">3.10×</td></tr>
+      <tr><td>pico-8 sin/cos</td><td class="n">3435 ms</td><td class="n">1343 ms</td><td class="n">2.56×</td></tr>
+    </tbody>
+  </table>
+  <p>Fixed-point <strong>0.104 → 0.289 M iter/s ≈ ~1.6 M Lua VM inst/s</strong> vs the ~4 M/s PICO-8 target
+  → <strong>~2.5× off, inside the ~2–3× Gate #2 pass window</strong>. Separately, table-churn OOM'd on
+  internal SRAM (369 KB) → the Lua heap needs PSRAM (reinforces the N16R8 / 8 MB production module).</p>
+
+  <h2>Why PicoPico used <code>float</code> — and why we don't</h2>
+  <p>Asked whether PicoPico's z8lua is a better base. Findings: our base is <strong>jtothebell/z8lua = fake-08's
+  z8lua</strong> (our Phase-1 runtime), and it's <em>more current</em> (2026) than DavidVentura's fork (2023).
+  PicoPico can't be adopted (no license; its ESP port drives ST7789/ILI9340 SPI, not our i80/RGB) — it's a
+  reference, not a base.</p>
+  <p>Its <code>double→float</code> switch (May 2022, commits <code>f907376</code>/<code>8b69c0c</code>) was for
+  the <strong>RP2040 — a chip with no FPU</strong>, where software <code>float</code> beats software
+  <code>double</code>. On the S3, David's own <code>LOG.md</code> concludes the opposite — quoting Espressif,
+  <em>"even though ESP32 has a single-precision FPU, floating point is always slower than integer; use fixed
+  point"</em> — and measured <code>sin</code> <strong>fixed 135 ms vs float 735 ms (~7×)</strong>. z8lua is
+  already fixed-point, so <code>float</code> gave us <strong>0 gain</strong> — reverted. (And PicoPico itself
+  doesn't set <code>-fjump-tables</code> — our ~3× win is unexploited there.)</p>
+
+  <h2>Next</h2>
+  <ul>
+    <li>Commit the Gate #2 work on the current base: the one-line <code>-fjump-tables</code> flag + WDT fix + benchmark cases.</li>
+    <li>Gate #1 (ILI9488 i80 blit ≥ 30 fps @ 256²) — the other Phase-0 project-killer.</li>
+    <li>A full-cart frame-time on the S3 is still unbenchmarked (this measures raw interpreter throughput).</li>
+  </ul>
+</div>
+</body>
+</html>
