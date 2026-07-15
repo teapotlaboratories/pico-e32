@@ -26,14 +26,32 @@ BOARD_DIR := $(CURDIR)/boards/$(BOARD)
 # Board overlay first (owns CONFIG_IDF_TARGET + PSRAM), then the app's own config.
 SDKCONFIG_DEFAULTS := $(BOARD_DIR)/sdkconfig.defaults$(if $(wildcard $(APP_DIR)/sdkconfig.defaults),;$(APP_DIR)/sdkconfig.defaults)
 
+# Optional per-board make settings (e.g. BAUD). Included before the defaults below so a
+# board can pin a value and still be overridden from the command line.
+-include $(BOARD_DIR)/board.mk
+
+# Flash/monitor baud. idf.py defaults to 460800, which some USB-serial bridges cannot
+# sustain — the chip syncs at 115200 and then dies on the baud switch. Boards with a slow
+# bridge pin this in their board.mk.
+BAUD ?= 460800
+
 # Out-of-source build dir, per app+board, so switching boards never reuses a
 # stale sdkconfig.
 BUILD_DIR := $(CURDIR)/build/$(APP)/$(BOARD)
 
+# Secrets are passed on the command line, never stored in the tree. Used by
+# pico-e32-bench-cam (the bench capture camera):
+#   make flash APP=pico-e32-bench-cam BOARD=m5stack-timer-cam PORT=/dev/ttyUSB0 \
+#        WIFI_SSID='my ssid' WIFI_PASS='my pass'
+# Note: -D puts these in the *gitignored* build dir's CMakeCache.txt, so `make fullclean`
+# after flashing if you don't want them lingering on disk.
+WIFI_DEFS := $(if $(WIFI_SSID),-D WIFI_SSID="$(WIFI_SSID)") $(if $(WIFI_PASS),-D WIFI_PASS="$(WIFI_PASS)")
+
 IDF := source "$(IDF_PATH)/export.sh" >/dev/null 2>&1 && cd "$(APP_DIR)" && \
-       idf.py -B "$(BUILD_DIR)" \
+       idf.py -B "$(BUILD_DIR)" -b "$(BAUD)" \
               -D SDKCONFIG="$(BUILD_DIR)/sdkconfig" \
-              -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_DEFAULTS)"
+              -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_DEFAULTS)" \
+              $(WIFI_DEFS)
 
 .PHONY: help install build flash monitor flash-monitor clean fullclean menuconfig size erase
 

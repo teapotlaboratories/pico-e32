@@ -1,0 +1,12 @@
+# Board: M5Stack Timer Camera F (ESP32-D0WDQ6-V3 + OV3660 fisheye, 4 MB flash + 8 MB PSRAM).
+#
+# This is NOT a target board for the handheld — it is the bench capture camera aimed at the
+# panel under test (hardware-in-the-loop verification, see
+# docs/hardware/pico-e32-bench-camera.md). Only pico-e32-bench-cam builds for it.
+CONFIG_IDF_TARGET="esp32"
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# Camera framebuffers need PSRAM.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_USE_MALLOC=y
