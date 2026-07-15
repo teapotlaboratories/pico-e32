@@ -1,0 +1,25 @@
+# ESP-IDF out-of-source build output (Makefile puts it under build/<APP>/<BOARD>/)
+/build/
+
+# ESP-IDF toolchain / Python venv (self-contained SDK tools; IDF_TOOLS_PATH)
+/vendor/.espressif/
+
+# generated sdkconfig — board defaults live in boards/, app defaults in the app dir
+**/sdkconfig
+**/sdkconfig.old
+
+# component manager artifacts
+**/managed_components/
+**/dependencies.lock
+
+# host build artifact
+firmware/pico-e32-luabench/host/bench
+*.o
+
+# third-party benchmark cart (Celeste Classic) — game code, do NOT commit/redistribute.
+# Regenerate locally with assets/gen_celeste_cart.py
+assets/celeste.p8
+assets/celeste_cart.h
+
+# editor / OS cruft
+.DS_Store
