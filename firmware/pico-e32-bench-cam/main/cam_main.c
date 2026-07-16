@@ -1,14 +1,14 @@
-/* pico-e32-bench-cam — the bench capture camera (ESP-EYE).
+/* pico-e32-bench-cam — the bench capture camera (M5Stack Timer Camera F).
  *
- * Hardware-in-the-loop verification: this ESP-EYE is aimed at the panel under test.
- * It joins WiFi and serves a still JPEG at  GET http://<ip>/capture  so the dev box can
- * run a flash -> capture -> inspect loop (tools/capture_frame.sh).
+ * Hardware-in-the-loop verification: the camera is aimed at the panel under test. It joins
+ * WiFi and serves a still JPEG at  GET http://<ip>/capture  so the dev box can run a
+ * flash -> capture -> inspect loop (tools/capture_frame.sh).
  *
  * This is NOT part of the handheld firmware — it is bench equipment.
- * Pin map: espressif/arduino-esp32 CameraWebServer camera_pins.h (CAMERA_MODEL_ESP_EYE).
+ * Pin map: espressif/arduino-esp32 CameraWebServer camera_pins.h.
  *
  * WiFi credentials are NOT stored in the tree — they are passed as build-time macros:
- *   make flash APP=pico-e32-bench-cam BOARD=esp-eye PORT=/dev/ttyUSB1 \
+ *   make flash APP=pico-e32-bench-cam BOARD=m5stack-timer-cam PORT=/dev/ttyUSB0 \
  *        WIFI_SSID='my ssid' WIFI_PASS='my pass'                                    */
 
 #include <string.h>
@@ -27,35 +27,16 @@
 #include "driver/ledc.h"
 
 #if !defined(WIFI_SSID) || !defined(WIFI_PASS)
-#error "WIFI_SSID/WIFI_PASS not defined. Pass them on the build command (they are never stored in the tree): make flash APP=pico-e32-bench-cam BOARD=esp-eye PORT=/dev/ttyUSB1 WIFI_SSID='ssid' WIFI_PASS='pass'"
+#error "WIFI_SSID/WIFI_PASS not defined. Pass them on the build command (they are never stored in the tree): make flash APP=pico-e32-bench-cam BOARD=m5stack-timer-cam PORT=/dev/ttyUSB0 WIFI_SSID='ssid' WIFI_PASS='pass'"
 #endif
 
 static const char *TAG = "bench-cam";
 
-/* ---- Camera pin map ----
- * Default is the M5Stack Timer Camera F (ESP32-D0WDQ6-V3 + OV3660, fisheye), which is the
- * bench camera. Build with -D CAM_BOARD_ESP_EYE for the older ESP-EYE.
- * Maps: espressif/arduino-esp32 camera_pins.h. */
-#if defined(CAM_BOARD_ESP_EYE)
-#define CAM_BOARD_NAME "ESP-EYE"
-#define PIN_PWDN  -1
-#define PIN_RESET -1
-#define PIN_XCLK   4
-#define PIN_SIOD  18
-#define PIN_SIOC  23
-#define PIN_D7    36
-#define PIN_D6    37
-#define PIN_D5    38
-#define PIN_D4    39
-#define PIN_D3    35
-#define PIN_D2    14
-#define PIN_D1    13
-#define PIN_D0    34
-#define PIN_VSYNC  5
-#define PIN_HREF  27
-#define PIN_PCLK  25
-#else   /* M5Stack Timer Camera X / F */
-#define CAM_BOARD_NAME "M5Stack Timer Camera F"
+/* ---- Camera pin map: M5Stack Timer Camera X / F (OV3660) ----
+ * Source: m5stack/TimerCam-arduino, src/utility/Camera_Class.h:6-22 (the vendor's own
+ * library for this board) — all 16 signals verified against it 2026-07-15. If the bench
+ * camera is ever swapped, the failure path below prints which of the known maps the
+ * attached hardware answers to. */
 #define PIN_PWDN  -1
 #define PIN_RESET 15
 #define PIN_XCLK  27
@@ -72,7 +53,13 @@ static const char *TAG = "bench-cam";
 #define PIN_VSYNC 22
 #define PIN_HREF  26
 #define PIN_PCLK  21
-#endif
+
+/* The Timer Camera latches its own power rail: the board only stays up while GPIO 33 is
+ * driven high. USB masks this — the rail is held anyway — but on battery the board powers
+ * itself off, which is exactly how the vendor implements powerOff() (drive the same pin
+ * low). Source: m5stack/TimerCam-arduino, src/utility/Power_Class.h:13 (POWER_HOLD_PIN 33)
+ * and Power_Class.cpp:7-8 (pinMode OUTPUT + digitalWrite HIGH in begin()). */
+#define PIN_POWER_HOLD 33
 
 static EventGroupHandle_t s_wifi_events;
 #define WIFI_CONNECTED_BIT BIT0
@@ -108,23 +95,23 @@ static void wifi_start(void)
     ESP_ERROR_CHECK(esp_wifi_start());
 }
 
-static esp_err_t camera_start(void)
+/* Latch the power rail on. Must run before anything else that matters, and before any
+ * long-running work, so an unplugged board does not drop out mid-capture. */
+static void power_hold(void)
 {
-#if defined(CAM_BOARD_ESP_EYE)
-    /* ESP-EYE quirk: GPIO 13/14 must be input-pullup BEFORE esp_camera_init(), or the
-     * SCCB sensor probe fails with "Detected camera not supported" (0x106). Mirrors
-     * arduino-esp32's CameraWebServer.ino (CAMERA_MODEL_ESP_EYE), which does
-     * pinMode(13/14, INPUT_PULLUP) right before camera init. Not a Timer Camera pin. */
-    gpio_config_t pu = {
-        .pin_bit_mask = (1ULL << 13) | (1ULL << 14),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
+    gpio_config_t h = {
+        .pin_bit_mask = 1ULL << PIN_POWER_HOLD,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
-    gpio_config(&pu);
-#endif
+    gpio_config(&h);
+    gpio_set_level(PIN_POWER_HOLD, 1);
+}
 
+static esp_err_t camera_start(void)
+{
     camera_config_t c = {
         .pin_pwdn = PIN_PWDN, .pin_reset = PIN_RESET, .pin_xclk = PIN_XCLK,
         .pin_sccb_sda = PIN_SIOD, .pin_sccb_scl = PIN_SIOC,
@@ -134,8 +121,8 @@ static esp_err_t camera_start(void)
         .xclk_freq_hz = 20000000,
         .ledc_timer = LEDC_TIMER_0, .ledc_channel = LEDC_CHANNEL_0,
         .pixel_format = PIXFORMAT_JPEG,
-        .frame_size   = FRAMESIZE_SVGA,   /* 800x600 — plenty to read a 320x480 panel */
-        .jpeg_quality = 10,               /* lower = better quality */
+        .frame_size   = FRAMESIZE_UXGA,   /* 1600x1200 — the panel is a small part of frame */
+        .jpeg_quality = 8,                /* lower = better quality */
         .fb_count     = 2,
         .fb_location  = CAMERA_FB_IN_PSRAM,
         .grab_mode    = CAMERA_GRAB_LATEST,
@@ -280,13 +267,15 @@ static void sccb_sweep(void)
                   "not a pin-map error.", hits);
 }
 
-/* Last unknown: this board may gate the sensor with a power-down/reset line that the
- * documented ESP-EYE map says does not exist (PWDN -1, RESET -1). A sensor held in
- * power-down answers on no pin, so the bus sweep above cannot see past that. Rather than
- * hand-roll the power sequencing, hand each known ESP32 camera board's pin map to the
- * vendor driver and let it do the PWDN/RESET dance. A success identifies the board; all
+/* Last unknown: the attached camera may gate its sensor with a power-down/reset line that
+ * the configured pin map gets wrong. A sensor held in power-down answers on no pin, so the
+ * bus sweep above cannot see past that. Rather than hand-roll the power sequencing, hand
+ * each known ESP32 camera board's pin map to the vendor driver and let it do the
+ * PWDN/RESET dance. A success identifies which board is actually attached; all of them
  * failing is strong evidence the fault is in the hardware, not the configuration.
- * Maps from espressif/arduino-esp32 camera_pins.h. */
+ * Maps from espressif/arduino-esp32,
+ * libraries/ESP32/examples/Camera/CameraWebServer/camera_pins.h — each verified against it
+ * 2026-07-15. */
 typedef struct { const char *name; camera_config_t cfg; } board_map_t;
 
 #define MAP(nm, pwdn, rst, xclk, sd, sc, d7, d6, d5, d4, d3, d2, d1, d0, vs, hr, pc) \
@@ -339,6 +328,53 @@ static int query_int(const char *q, const char *key, int dflt)
     return (end == buf) ? dflt : (int)v;
 }
 
+
+/* GET /stream -> MJPEG (multipart/x-mixed-replace). Open it in a browser to aim the rig
+ * live instead of capturing one frame at a time. Honours whatever exposure/AWB the last
+ * /capture set, so what you see is what a capture will grab.
+ * Tip: aiming is easier at a smaller frame size -- /stream?size=svga is much smoother than
+ * UXGA, and resolution does not matter for pointing the camera. */
+#define PART_BOUNDARY "pico-e32-bench-cam-frame"
+static const char *STREAM_TYPE     = "multipart/x-mixed-replace;boundary=" PART_BOUNDARY;
+static const char *STREAM_BOUNDARY = "\r\n--" PART_BOUNDARY "\r\n";
+static const char *STREAM_PART     = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
+
+static esp_err_t stream_get(httpd_req_t *req)
+{
+    char q[64] = { 0 };
+    sensor_t *s = esp_camera_sensor_get();
+    if (httpd_req_get_url_query_str(req, q, sizeof q) == ESP_OK && s) {
+        char v[16];
+        if (httpd_query_key_value(q, "size", v, sizeof v) == ESP_OK) {
+            if      (!strcmp(v, "svga")) s->set_framesize(s, FRAMESIZE_SVGA);
+            else if (!strcmp(v, "xga"))  s->set_framesize(s, FRAMESIZE_XGA);
+            else if (!strcmp(v, "uxga")) s->set_framesize(s, FRAMESIZE_UXGA);
+            else if (!strcmp(v, "vga"))  s->set_framesize(s, FRAMESIZE_VGA);
+            vTaskDelay(pdMS_TO_TICKS(300));   /* let the sensor settle after a size change */
+        }
+    }
+    esp_err_t res = httpd_resp_set_type(req, STREAM_TYPE);
+    if (res != ESP_OK) return res;
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    ESP_LOGI(TAG, "stream: client connected");
+
+    char part[80];
+    while (1) {
+        camera_fb_t *fb = esp_camera_fb_get();
+        if (!fb) { res = ESP_FAIL; break; }
+        int hlen = snprintf(part, sizeof part, STREAM_PART, (unsigned)fb->len);
+        if ((res = httpd_resp_send_chunk(req, STREAM_BOUNDARY, strlen(STREAM_BOUNDARY))) != ESP_OK ||
+            (res = httpd_resp_send_chunk(req, part, hlen)) != ESP_OK ||
+            (res = httpd_resp_send_chunk(req, (const char *)fb->buf, fb->len)) != ESP_OK) {
+            esp_camera_fb_return(fb);
+            break;                                  /* client closed the tab */
+        }
+        esp_camera_fb_return(fb);
+    }
+    ESP_LOGI(TAG, "stream: client gone");
+    return res;
+}
+
 /* GET /capture -> a fresh still JPEG
  *
  * Optional query params tune the sensor for the subject we actually shoot: a bright,
@@ -347,6 +383,8 @@ static int query_int(const char *q, const char *key, int dflt)
  *   ?exp=<0-1200>  manual exposure; lower = darker      (default: auto)
  *   ?gain=<0-30>   manual gain; lower = less noise/bloom (default: auto)
  *   ?auto=1        force auto exposure/gain back on
+ *   ?awb=0|1       auto white balance off/on -- OFF to judge real colour on a panel
+ *   ?sat=-2..2     saturation   ?con=-2..2  contrast   ?sharp=-2..2  sharpness
  * Values persist in the sensor until changed, so a bare /capture reuses the last setting. */
 static esp_err_t capture_get(httpd_req_t *req)
 {
@@ -370,7 +408,18 @@ static esp_err_t capture_get(httpd_req_t *req)
             s->set_gain_ctrl(s, 0);          /* manual */
             s->set_agc_gain(s, gain);
         }
-        if (exp >= 0 || gain >= 0) ESP_LOGI(TAG, "capture: exp=%d gain=%d", exp, gain);
+        /* Auto white balance *lies about colour*: it renormalises a red screen toward grey,
+         * which is exactly the judgement we use the rig for (is that red or cyan?). Turn it
+         * off to read the panel's real hue. ?awb=1 restores it. */
+        int awb = query_int(q, "awb", -1);
+        if (awb >= 0) {
+            s->set_whitebal(s, awb);
+            s->set_awb_gain(s, awb);
+        }
+        int sat = query_int(q, "sat", -99);  if (sat != -99) s->set_saturation(s, sat);  /* -2..2 */
+        int con = query_int(q, "con", -99);  if (con != -99) s->set_contrast(s, con);    /* -2..2 */
+        int sharp = query_int(q, "sharp", -99); if (sharp != -99) s->set_sharpness(s, sharp);
+        if (exp >= 0 || gain >= 0) ESP_LOGI(TAG, "capture: exp=%d gain=%d awb=%d", exp, gain, awb);
     }
 
     /* Drop frames so we return a *current* image: one to clear the buffered frame, plus
@@ -393,15 +442,21 @@ static void http_start(void)
 {
     httpd_handle_t s = NULL;
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
+    cfg.max_open_sockets = 4;      /* /stream holds one open indefinitely */
+    cfg.stack_size = 8192;
     if (httpd_start(&s, &cfg) == ESP_OK) {
         httpd_uri_t u = { .uri = "/capture", .method = HTTP_GET, .handler = capture_get };
         httpd_register_uri_handler(s, &u);
-        ESP_LOGI(TAG, "http server up (GET /capture)");
+        httpd_uri_t st = { .uri = "/stream", .method = HTTP_GET, .handler = stream_get };
+        httpd_register_uri_handler(s, &st);
+        ESP_LOGI(TAG, "http server up (GET /capture, GET /stream)");
     } else ESP_LOGE(TAG, "httpd_start failed");
 }
 
 void app_main(void)
 {
+    power_hold();   /* first: keep the board alive if it is ever run off USB power */
+
     esp_err_t nv = nvs_flash_init();
     if (nv == ESP_ERR_NVS_NO_FREE_PAGES || nv == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase()); ESP_ERROR_CHECK(nvs_flash_init());
