@@ -1,9 +1,12 @@
-# App config for the bench camera. Target/PSRAM come from boards/esp-eye/.
+# App config for the bench camera. Target/PSRAM come from boards/m5stack-timer-cam/.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 
-# esp32-camera 2.0.0 defaults SCCB to the new I2C master driver; the sensor probe does
-# not ACK on this ESP32/OV2640 through that path. The legacy driver is the well-worn one
-# on the classic ESP32.
+# Pin SCCB to the legacy I2C driver to match cam_main.c's probe diagnostics, which use the
+# legacy driver/i2c.h API. ESP-IDF refuses to run both I2C drivers in one app: leaving this
+# at the component default (..._NEW) aborts at boot with
+#   "CONFLICT! driver_ng is not allowed to be used with this old driver"
+# and boot-loops. Drop this line only together with porting those diagnostics to
+# driver/i2c_master.h.
 CONFIG_SCCB_HARDWARE_I2C_DRIVER_LEGACY=y
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 # JPEG frames can exceed the default 4 KB HTTP send; keep the server roomy.

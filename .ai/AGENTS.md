@@ -309,6 +309,12 @@ sources** so the claim can be checked — don't report a bare conclusion.
   each other.
 - **Capture the flash/monitor command you actually ran** as evidence in the worklog (the
   build target, the port, the flags), so a result can be reproduced.
+- **Captured frames go under `/tmp`, never in the repo** — unless the owner explicitly asks for
+  one to be kept. Camera captures are throwaway diagnostics produced by the dozen: they are
+  binaries, they churn, and they are worthless a day later. `tools/capture_frame.sh` writes to
+  `/tmp` by default; do not "helpfully" point it back at the working tree. The rare frame that is
+  genuine *evidence* for a worklog is the exception, and it gets copied in deliberately, by hand,
+  with the owner's say-so.
 - **A camera is aimed at the device for hardware-in-the-loop testing** — it is the
   primary way to confirm what the display actually shows (see
   [Verifying changes](#verifying-changes)). Document how to grab a frame (the capture
