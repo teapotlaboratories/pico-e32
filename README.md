@@ -27,7 +27,7 @@ The plan of record is [`docs/pico-e32-development-plan.md`](docs/pico-e32-develo
 ```
 .ai/                    # guidance for AI coding agents working in this repo
 boards/                 # per-board sdkconfig.defaults (owns target + PSRAM)
-  makerfabs-ili9488/     #   3.5" ILI9488, N16R2 (2 MB) — the first device
+  makerfabs-ili9488-r1/     #   3.5" ILI9488, N16R2 (2 MB) — the first device
   makerfabs-st7701-4in/  #   4.0" ST7701, N16R8 (8 MB) — later target
 components/             # shared components
   z8lua/                 #   vendored PICO-8 fixed-point Lua
@@ -48,7 +48,7 @@ Makefile                # make build APP=<app> BOARD=<board>
 ESP-IDF v5.1+ (export `IDF_PATH`). From the repo root:
 
 ```sh
-make build flash monitor APP=pico-e32-luabench BOARD=makerfabs-ili9488
+make build flash monitor APP=pico-e32-luabench BOARD=makerfabs-ili9488-r1
 make help    # list apps + boards
 ```
 

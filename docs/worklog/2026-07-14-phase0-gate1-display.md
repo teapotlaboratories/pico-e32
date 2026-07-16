@@ -3,7 +3,16 @@
 **Goal:** bring up the display-test on real hardware and measure the 256×256 scaled-blit
 frame rate. **Gate #1: ≥ 30 fps @ 256²** on the Makerfabs ILI9488 (16-bit i80 parallel).
 
-**Status:** ⚠️ **FPS criterion PASSED (288 fps); visual correctness UNVERIFIED (no camera).**
+**Status:** ❌ **VOID — see [2026-07-16](2026-07-16-panel-rev1-pinmap.md).**
+
+> **The 288 fps below is not a display measurement.** The pin map used here (WR=18, DC=17, CS=46) is
+> for Makerfabs' *newer* board; this unit is **rev 1**, whose LCD is on **WR=35, DC=36, CS=37**. The
+> i80 bus was clocking into pins that are not wired to the panel — the panel showed **nothing** for the
+> entire time this "pass" stood. The bus-utilisation arithmetic here is still sound; it just measures
+> DMA into unconnected pins.
+>
+> This log's own warning turned out to be exactly right — *"a broken panel init could still clock DMA at
+> 288 fps into a blank screen"* — and it was written off as a hypothetical.
 
 ---
 

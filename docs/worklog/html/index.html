@@ -30,6 +30,30 @@
       linked from this index (see <a href="../../../.ai/AGENTS.md">.ai/AGENTS.md</a> → Worklogs).</p>
     <ul class="entries">
       <li>
+        <span class="d">2026-07-16</span>
+        <a class="t" href="2026-07-16-panel-rev1-pinmap.html">The panel was never broken: this board is rev 1, and its LCD is on different pins</a>
+        <span class="s">Two days of “the panel is dead” resolved: this unit is Makerfabs' <strong>first revision</strong>,
+          LCD on <strong>WR=35/DC=36/CS=37</strong> — their newer N16R8 board moved it to 18/17/46 because octal PSRAM
+          eats those pins. 288 fps, matching checksums and a clean init were all <em>true and meaningless</em>: the bus
+          clocked into unconnected pins. Driver now LovyanGFX; Gate #1's fps is void.</span>
+      </li>
+      <li>
+        <span class="d">2026-07-15</span>
+        <a class="t" href="2026-07-15-host-graphics.html">ESP32Host graphics: cart assets, the harness, and the font question</a>
+        <span class="s">Started the PICO-8 graphics surface. Sprite sheet <strong>extracted and verified by eye</strong>;
+          the font is <strong>CC-0 straight from Lexaloffle</strong>, so no emulator's copy needed. Two findings:
+          half of Celeste's map hides in memory <strong>shared with the sprite sheet</strong>, and Gate #2's
+          15.8 ms/frame is honest but <strong>scoped to half the game</strong>.</span>
+      </li>
+      <li>
+        <span class="d">2026-07-15</span>
+        <a class="t" href="2026-07-15-bench-camera.html">Bench camera: the hardware-in-the-loop capture rig</a>
+        <span class="s">The rig Gate #1/#3 were blocked on is up (<strong>M5Stack Timer Camera F</strong>, OV3660).
+          Getting there meant proving the ESP-EYE's OV2640 <strong>dead</strong> — no answer on any of 306 pin
+          pairs, any address, either I2C driver — plus two traps: idf.py's <strong>460800 baud</strong> vs the
+          FTDI bridge, and an I2C driver conflict that boot-loops the board. Its conclusions were <strong>wrong</strong> (dead panel / bad focus) — see the 2026-07-16 entry.</span>
+      </li>
+      <li>
         <span class="d">2026-07-14</span>
         <a class="t" href="2026-07-14-phase0-gate3-host.html">Phase-0 Gate #3: trivial cart end-to-end (minimal ESP32Host)</a>
         <span class="s">z8lua + ili9488 + a trivial cart in one frame loop: <strong>161.5 fps</strong>. Rendering verified
@@ -39,7 +63,7 @@
         <span class="d">2026-07-14</span>
         <a class="t" href="2026-07-14-phase0-gate1-display.html">Phase-0 Gate #1: ILI9488 i80 scaled-blit FPS</a>
         <span class="s">Display-test on hardware: <strong>288 fps @ 256²</strong> (~10× the 30 fps gate, ~94% of the
-          i80 bus). FPS criterion passed — but visual correctness unverified (bench camera unavailable).</span>
+          i80 bus). <strong>VOID</strong> — that 288 fps was DMA into unconnected pins (wrong board revision's pin map); the panel showed nothing.</span>
       </li>
       <li>
         <span class="d">2026-07-14</span>
@@ -55,8 +79,6 @@
           patches onto branch <code>pico-e32</code>, and wired it as a submodule. Compiles <code>.c</code> as C++.</span>
       </li>
     </ul>
-    <div class="empty">The first hardware bring-up session (Phase-0 Gate #1 / #2 on real
-      hardware) will land here next.</div>
   </div>
 </body>
 </html>

@@ -10,7 +10,7 @@ bring-up log in [`../docs/worklog/`](../docs/worklog/).
 Makefile                 # (repo root) idf.py wrapper: make build APP=<app> BOARD=<board>
 build/<APP>/<BOARD>/      # (repo root) out-of-source build output (gitignored)
 boards/
-  makerfabs-ili9488/     # 3.5" ILI9488, N16R2 (2 MB quad) — the first device
+  makerfabs-ili9488-r1/     # 3.5" ILI9488, N16R2 (2 MB quad) — the first device
   makerfabs-st7701-4in/  # 4.0" ST7701, N16R8 (8 MB octal) — later target (Gate #5)
 components/              # shared components (root, like rimba's components/)
   z8lua/                 #   PICO-8's fixed-point Lua 5.2 dialect (vendored)
@@ -38,8 +38,8 @@ Then from the repo root, `make` sources the vendored IDF and layers the board's 
 under the app's (override `IDF_PATH` to use a different install):
 
 ```sh
-make build         APP=pico-e32-luabench      BOARD=makerfabs-ili9488
-make flash-monitor APP=pico-e32-display-test  BOARD=makerfabs-ili9488  PORT=/dev/ttyACM0
+make build         APP=pico-e32-luabench      BOARD=makerfabs-ili9488-r1
+make flash-monitor APP=pico-e32-display-test  BOARD=makerfabs-ili9488-r1  PORT=/dev/ttyACM0
 make help          # list apps + boards
 ```
 
@@ -53,7 +53,7 @@ make help          # list apps + boards
 1. **pico-e32-luabench first** (the project-killer): `cd pico-e32-luabench/host && make run` for
    the host sanity check, then `make build APP=pico-e32-luabench` for the real Gate #2 numbers.
 2. **pico-e32-display-test**: `make build APP=pico-e32-display-test`, read the FPS, confirm the
-   image on the ESP-EYE.
+   image on the bench camera (see `docs/hardware/pico-e32-bench-camera.md`).
 
 ## Verification status
 

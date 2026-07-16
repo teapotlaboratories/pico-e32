@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bench camera: the hardware-in-the-loop capture rig — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)}
+  .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;
+       font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:10px;padding:.8rem 1rem;overflow-x:auto;font-size:.82rem;line-height:1.5}
+  .pill{display:inline-block;font-size:.78rem;font-weight:600;padding:.16em .6em;border-radius:999px;border:1px solid var(--border)}
+  .pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+  .pill.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);
+        border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  .tldr.warn{border-left-color:var(--warn)}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .6rem;text-align:left}
+  th{background:var(--codebg)} td.n{text-align:right;font-family:ui-monospace,monospace}
+  .yes{color:var(--ok);font-weight:700} .no{color:var(--bad);font-weight:700}
+  .diagram{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.2rem;margin:1.4rem 0;overflow-x:auto}
+  .cap{color:var(--muted);font-size:.85rem;margin:.4rem 0 0;text-align:center}
+  .note{color:var(--muted);font-size:.92rem}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <p class="date">2026-07-15</p>
+  <h1>Bench camera: the hardware-in-the-loop capture rig</h1>
+
+  <div class="tldr">
+    <span class="pill ok">✓ rig works</span> <span class="pill warn">⚠ Gate #1/#3 visual still open</span><br>
+    The rig Gate #1 and Gate #3 have been blocked on is up: <strong>M5Stack Timer Camera F</strong>
+    (OV3660 detected, 800×600 JPEG over HTTP, <code>capture_frame.sh</code> end-to-end). Getting there
+    meant proving the original <strong>ESP-EYE's OV2640 is dead</strong>, and falling into two traps that
+    looked nothing like their causes. The visual confirms remain open: the camera sits
+    <strong>too close to focus</strong> — a bench fix, not a code fix.
+  </div>
+
+  <div class="tldr warn">
+    <strong>Process note.</strong> This worklog was written at the <em>end</em> of the session rather than
+    updated as the work happened — exactly what the worklog rule says not to do. Every number below is
+    re-read from the logs of the runs that produced it, but that reconstruction is lossy, which is why the
+    rule exists. Recorded rather than quietly backfilled as a tidy narrative.
+  </div>
+
+  <h2>The rig</h2>
+  <div class="diagram">
+    <svg viewBox="0 0 720 250" role="img" aria-label="Dev box flashes the ESP32-S3 panel over USB and pulls JPEG frames from the Timer Camera over WiFi; the camera is aimed at the panel.">
+      <defs>
+        <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--line)"/>
+        </marker>
+      </defs>
+      <rect x="14" y="96" width="148" height="62" rx="9" fill="var(--codebg)" stroke="var(--line)"/>
+      <text x="88" y="122" text-anchor="middle" fill="var(--fg)" font-size="13" font-weight="700">dev box</text>
+      <text x="88" y="140" text-anchor="middle" fill="var(--muted)" font-size="11">make flash / curl</text>
+
+      <rect x="540" y="18" width="166" height="74" rx="9" fill="var(--codebg)" stroke="var(--line)"/>
+      <text x="623" y="42" text-anchor="middle" fill="var(--fg)" font-size="13" font-weight="700">ESP32-S3 + ILI9488</text>
+      <text x="623" y="60" text-anchor="middle" fill="var(--muted)" font-size="11">device under test</text>
+      <text x="623" y="78" text-anchor="middle" fill="var(--ok)" font-size="11" font-weight="700">288 fps, bars drawn</text>
+
+      <rect x="540" y="162" width="166" height="74" rx="9" fill="var(--codebg)" stroke="var(--line)"/>
+      <text x="623" y="186" text-anchor="middle" fill="var(--fg)" font-size="13" font-weight="700">Timer Camera F</text>
+      <text x="623" y="204" text-anchor="middle" fill="var(--muted)" font-size="11">OV3660 @ 0x3c</text>
+      <text x="623" y="222" text-anchor="middle" fill="var(--muted)" font-size="11">192.168.7.135/capture</text>
+
+      <line x1="164" y1="116" x2="534" y2="60" stroke="var(--line)" stroke-width="1.6" marker-end="url(#a)"/>
+      <text x="350" y="76" text-anchor="middle" fill="var(--muted)" font-size="11">USB · make flash · 460800 default</text>
+
+      <line x1="164" y1="140" x2="534" y2="196" stroke="var(--line)" stroke-width="1.6" marker-end="url(#a)"/>
+      <text x="344" y="186" text-anchor="middle" fill="var(--muted)" font-size="11">USB · pinned 115200 · + WiFi GET /capture</text>
+
+      <line x1="623" y1="158" x2="623" y2="98" stroke="var(--warn)" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#a)"/>
+      <text x="636" y="132" fill="var(--warn)" font-size="11">aimed at panel —</text>
+      <text x="636" y="146" fill="var(--warn)" font-size="11">too close to focus</text>
+    </svg>
+    <p class="cap">The loop: flash the panel over USB, pull a frame over WiFi, look at it. The dashed link is the one still broken.</p>
+  </div>
+
+  <table>
+    <tr><th>role</th><th>board</th><th>chip</th><th>notes</th></tr>
+    <tr><td>device under test</td><td>Makerfabs ILI9488</td><td class="mono">ESP32-S3 N16R2</td><td>the panel</td></tr>
+    <tr><td>bench camera <span class="no">(dead)</span></td><td>Espressif ESP-EYE v2.1</td><td class="mono">ESP32-D0WD + OV2640</td><td>sensor never answered</td></tr>
+    <tr><td>bench camera <span class="yes">(works)</span></td><td>M5Stack Timer Camera F</td><td class="mono">ESP32-D0WDQ6-V3 + OV3660</td><td>fisheye, 8 MB PSRAM</td></tr>
+  </table>
+
+  <p><strong>Ports are not stable</strong> across replugs — over this session the S3 was on <code>ttyUSB0</code>,
+  then the camera took <code>ttyUSB0</code> and the S3 moved to <code>ttyUSB1</code>. Identify by chip:</p>
+  <pre>esptool.py -p /dev/ttyUSB0 flash_id | grep 'Chip is'
+# ESP32-D0WDQ6-V3 -> bench camera      ESP32-S3 -> board under test</pre>
+
+  <h2>Attempt 1 — the ESP-EYE, and how it turned out to be dead</h2>
+  <pre>E (1474) camera: Detected camera not supported.
+E (1474) camera: Camera probe failed with error 0x106(ESP_ERR_NOT_SUPPORTED)</pre>
+
+  <p><code>0x106</code> is ambiguous, which cost time: <code>esp_camera.c</code>'s <code>camera_probe()</code>
+  returns it for <strong>both</strong> “nothing ACKed on the bus” <em>and</em> “something ACKed but its PID is
+  unknown” — the probe loop swallows per-address failures
+  (<code>if (ESP_OK != SCCB_Probe(addr)) continue;</code>). The distinguishing line
+  (<code>Camera PID=0x..</code>) never printed, so the error alone could not separate the two.</p>
+
+  <table>
+    <tr><th>#</th><th>Hypothesis</th><th>Test</th><th>Outcome</th></tr>
+    <tr><td class="n">1</td><td>GPIO 13/14 need a pull-up before init (a real documented ESP-EYE quirk)</td><td>mirrored arduino-esp32's <code>CameraWebServer.ino</code></td><td class="no">no change</td></tr>
+    <tr><td class="n">2</td><td>Wrong pin map</td><td>vs arduino-esp32 <code>camera_pins.h</code> <em>and</em> esp-who <code>Camera_connections.md</code></td><td class="no">16/16 match — not it</td></tr>
+    <tr><td class="n">3</td><td><code>sccb-ng</code> (new I2C driver) unexercised on classic ESP32</td><td>forced <code>..._DRIVER_LEGACY</code></td><td class="no">identical failure</td></tr>
+    <tr><td class="n">4</td><td>Won't answer at 20 MHz XCLK</td><td>full 0x03–0x77 scan at 20 <em>and</em> 10 MHz</td><td class="no">0 devices either way</td></tr>
+    <tr><td class="n">5</td><td>Bus dead / unpowered on the ESP32 side</td><td>internal pull-<em>down</em> on SDA+SCL, read back</td><td class="yes">both HIGH → pull-ups present, bus alive</td></tr>
+    <tr><td class="n">6</td><td>Some other pin pair is the real SCCB bus</td><td>swept <strong>all 306</strong> output-capable pairs × {0x30, 0x3C}, XCLK running</td><td class="no">0 hits</td></tr>
+    <tr><td class="n">7</td><td>A PWDN/RESET line the map calls <code>-1</code> holds it off</td><td>5 known board maps via the vendor driver (it does the sequencing)</td><td class="no">all <code>0x106</code></td></tr>
+  </table>
+
+  <div class="diagram">
+    <svg viewBox="0 0 720 130" role="img" aria-label="Seven hypotheses tested, zero survived, leaving dead hardware as the conclusion.">
+      <text x="10" y="22" fill="var(--fg)" font-size="13">Sensor answers on… <tspan class="mono" font-size="12">306 pin pairs × 2 addresses × 2 XCLK freqs × 2 I2C drivers</tspan></text>
+      <rect x="10" y="34" width="700" height="26" rx="5" fill="none" stroke="var(--line)"/>
+      <rect x="10" y="34" width="2" height="26" rx="1" fill="var(--bad)"/>
+      <text x="24" y="52" fill="var(--bad)" font-size="12" font-weight="700">0 responses — nothing, anywhere</text>
+      <text x="10" y="86" fill="var(--muted)" font-size="12">ESP32 side provably healthy: bus pull-ups present, XCLK configured ESP_OK.</text>
+      <text x="10" y="104" fill="var(--muted)" font-size="12">Same firmware brought the Timer Camera up first try → the OV2640 is dead.</text>
+    </svg>
+    <p class="cap">Seven hypotheses, none survived. The conclusion was reached by elimination, then confirmed by the swap.</p>
+  </div>
+
+  <p><strong>A bug I introduced while diagnosing:</strong> the TTGO T-Journal map probes <strong>GPIO 17, a
+  PSRAM pin on WROVER modules</strong> — including the ESP-EYE's. Probing it took PSRAM out and panicked the
+  board into a boot loop (why early logs repeat). That map is deliberately omitted now, with the reason
+  recorded in <code>cam_main.c</code>.</p>
+
+  <p class="note"><strong>Caveat on my own evidence:</strong> the pull-ups in test 5 are almost certainly on
+  the ESP-EYE mainboard, not the camera module — so that test proves the <em>ESP32 side</em> is fine, not that
+  the module was powered. Weaker evidence than it first looks.</p>
+
+  <h2>Attempt 2 — Timer Camera F: worked, after two traps</h2>
+  <pre>I (1460) sccb: pin_sda 25 pin_scl 23
+I (1510) camera: Camera PID=0x3660 VER=0x00 MIDL=0x00 MIDH=0x00
+I (1510) camera: Detected OV3660 camera
+I (1510) camera: Detected camera at address=0x3c
+I (1870) bench-cam: camera up (SVGA JPEG)
+I (3320) bench-cam: ==== bench-cam ready:  http://192.168.7.135/capture  ====</pre>
+
+  <h2>Trap 1 — the flash baud (cost the most time)</h2>
+  <p><code>esptool.py flash_id</code> connected every time; <code>make flash</code> <strong>never</strong> did.</p>
+  <div class="diagram">
+    <svg viewBox="0 0 720 170" role="img" aria-label="The chip syncs at 115200, then dies when esptool switches to 460800; pinning 115200 in board.mk fixes it.">
+      <defs>
+        <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--line)"/>
+        </marker>
+      </defs>
+      <text x="10" y="18" fill="var(--muted)" font-size="12" font-weight="700">idf.py default</text>
+      <rect x="10" y="28" width="180" height="40" rx="7" fill="var(--codebg)" stroke="var(--line)"/>
+      <text x="100" y="46" text-anchor="middle" fill="var(--fg)" font-size="12">sync @ 115200</text>
+      <text x="100" y="61" text-anchor="middle" fill="var(--ok)" font-size="11" font-weight="700">Chip is ESP32-D0WDQ6-V3 ✓</text>
+      <line x1="192" y1="48" x2="252" y2="48" stroke="var(--line)" stroke-width="1.6" marker-end="url(#b)"/>
+      <rect x="254" y="28" width="180" height="40" rx="7" fill="var(--codebg)" stroke="var(--line)"/>
+      <text x="344" y="52" text-anchor="middle" fill="var(--fg)" font-size="12">switch to 460800</text>
+      <line x1="436" y1="48" x2="496" y2="48" stroke="var(--bad)" stroke-width="1.6" marker-end="url(#b)"/>
+      <rect x="498" y="28" width="212" height="40" rx="7" fill="none" stroke="var(--bad)"/>
+      <text x="604" y="52" text-anchor="middle" fill="var(--bad)" font-size="11" font-weight="700">No serial data received</text>
+
+      <text x="10" y="106" fill="var(--muted)" font-size="12" font-weight="700">boards/m5stack-timer-cam/board.mk</text>
+      <rect x="10" y="116" width="180" height="40" rx="7" fill="var(--codebg)" stroke="var(--line)"/>
+      <text x="100" y="140" text-anchor="middle" fill="var(--fg)" font-size="12">BAUD := 115200</text>
+      <line x1="192" y1="136" x2="496" y2="136" stroke="var(--ok)" stroke-width="1.6" marker-end="url(#b)"/>
+      <rect x="498" y="116" width="212" height="40" rx="7" fill="none" stroke="var(--ok)"/>
+      <text x="604" y="140" text-anchor="middle" fill="var(--ok)" font-size="11" font-weight="700">Hash of data verified ✓</text>
+    </svg>
+    <p class="cap">The initial sync <em>succeeds</em>, which is what makes this read as a dead board rather than a baud problem.</p>
+  </div>
+
+  <p>This board's FTDI bridge (<code class="mono">0403:6001</code>) cannot sustain the switch. Fixed with a
+  per-board <code>boards/&lt;BOARD&gt;/board.mk</code> hook, <code>BAUD ?= 460800</code> in the Makefile, and
+  <code>BAUD := 115200</code> pinned for this board. All three paths verified:</p>
+  <table>
+    <tr><th>BOARD</th><th>BAUD</th><th></th></tr>
+    <tr><td class="mono">makerfabs-ili9488</td><td class="n">460800</td><td>default</td></tr>
+    <tr><td class="mono">m5stack-timer-cam</td><td class="n">115200</td><td>pinned by <code>board.mk</code></td></tr>
+    <tr><td class="mono">m5stack-timer-cam BAUD=921600</td><td class="n">921600</td><td>command line still overrides</td></tr>
+  </table>
+
+  <h2>Trap 2 — port permissions</h2>
+  <p>The serial node is <code>root:dialout</code> and is <strong>re-created on every board reset</strong>, so a
+  one-off <code>chmod</code> evaporates. A udev rule was tried first and worked, but was ruled out; the
+  mechanism is now plain group membership (<code>usermod -aG dialout</code>), which persists and needs no
+  system-wide rule. <code>sg dialout -c '...'</code> covers a shell that predates the change. No udev anywhere.</p>
+
+  <h2>The SCCB override: right setting, wrong reason</h2>
+  <p>During cleanup I removed <code>CONFIG_SCCB_HARDWARE_I2C_DRIVER_LEGACY</code>, since I had added it on a
+  theory that was <strong>wrong</strong> (I'd written that the new driver “does not ACK”; in fact both drivers
+  failed, because the hardware was dead). Removing it <strong>boot-loops the working camera 16 times in
+  22 s</strong>:</p>
+  <pre>E (1408) i2c: CONFLICT! driver_ng is not allowed to be used with this old driver
+abort() was called at PC 0x400f1640</pre>
+  <p><strong>The real reason:</strong> <code>cam_main.c</code>'s probe diagnostics use the legacy
+  <code>driver/i2c.h</code> API, and ESP-IDF refuses to run both I2C drivers in one app — so SCCB must be
+  pinned to <em>match</em> the diagnostics. Restored, with the true constraint and the condition for removing
+  it (port the diagnostics to <code>driver/i2c_master.h</code>) recorded in the app's
+  <code>sdkconfig.defaults</code>.</p>
+  <p class="note"><strong>Lesson:</strong> a config comment stating the wrong reason is worse than no comment.
+  It survives exactly long enough to make the next person delete the line.</p>
+
+  <h2>Verified against the vendor's own library</h2>
+  <p>The pin map was originally written <strong>from memory</strong> and cited to
+  <code>arduino-esp32/camera_pins.h</code> — a file I had not opened, violating <em>Research &amp; citations</em>
+  (“verify every cited <code>file:line</code> — do NOT cite from memory”). Checked against the source of
+  record, <a href="https://github.com/m5stack/TimerCam-arduino">m5stack/TimerCam-arduino</a>:</p>
+  <ul>
+    <li><code>src/utility/Camera_Class.h:6-22</code> — all <strong>16 signals match</strong> (PWDN −1,
+      RESET 15, XCLK 27, SIOD 25, SIOC 23, D7–D0 = 19/36/18/39/5/34/35/32, VSYNC 22, HREF 26, PCLK 21), as do
+      <code>xclk_freq_hz</code>, LEDC timer/channel, JPEG, <code>fb_count=2</code>, PSRAM, <code>GRAB_LATEST</code>.</li>
+    <li><strong>Deliberate divergence:</strong> SVGA/quality 10 rather than the vendor's UXGA/quality 16 —
+      800×600 is ample to read a 320×480 panel and keeps frames small over HTTP.</li>
+    <li>The 5 diagnostic maps in <code>identify_board()</code> were also from memory; each re-verified
+      <strong>16/16</strong> against the real <code>camera_pins.h</code>.</li>
+  </ul>
+  <p>Memory turned out accurate in all six cases — which is luck, not method, and would not survive the next board.</p>
+
+  <p><strong>The gap this found — the power-hold:</strong></p>
+  <pre>// Power_Class.h:13
+#define POWER_HOLD_PIN 33
+// Power_Class.cpp:7-8
+pinMode(POWER_HOLD_PIN, OUTPUT);
+digitalWrite(POWER_HOLD_PIN, HIGH);</pre>
+  <p>The Timer Camera <strong>latches its own power rail</strong> — it stays up only while GPIO 33 is driven
+  high. The code (inherited from the ESP-EYE version, which has no such pin) never did this. USB masks it
+  completely, which is why the rig worked; on battery the board would switch itself off, since driving that
+  same pin <em>low</em> is precisely how the vendor implements <code>powerOff()</code>. Now asserted first
+  thing in <code>app_main()</code>; GPIO 33 collides with no camera signal (D0 = 32, D2 = 34).</p>
+
+  <h2>Screen capture: the panel is right, the camera can't see it</h2>
+  <p>The S3 is drawing correctly — confirmed over UART, camera-independently:</p>
+  <pre>I (837)  trackA: palette bars drawn at (32,112) 256x256
+I (5847) trackA: ==== Gate #1: 1441 frames in 5.00s = 288.0 fps (256x256 blit) ====</pre>
+  <p><strong>Refuted hypothesis:</strong> overexposure — auto-exposure metering the dark box and clipping the
+  emissive panel to white. Manual exposure/gain was added (<code>/capture?exp=&amp;gain=</code>) and swept:</p>
+  <table>
+    <tr><th>exp (gain 0)</th><td class="n">4</td><td class="n">12</td><td class="n">30</td><td class="n">60</td><td class="n">120</td><td class="n">300</td></tr>
+    <tr><th>bytes</th><td class="n">11054</td><td class="n">11515</td><td class="n">12109</td><td class="n">11878</td><td class="n">11885</td><td class="n">12619</td></tr>
+  </table>
+  <p><code>exp=4</code> is evenly black, <code>exp=300</code> an even white glow. <strong>Clipping would reveal
+  structure as you darken it; only brightness changed</strong> — so the lens is resolving nothing. The camera is
+  too close to focus, averaging the whole screen into one patch (the faint cyan cast is plausibly the mean of
+  the palette bars). No exposure value fixes distance. The control is kept: a lit panel in a dark box does
+  genuinely defeat auto-exposure, so it will be needed once focused.</p>
+
+  <h2>What's verified / what isn't</h2>
+  <ul>
+    <li><strong>Verified:</strong> camera detected (<code>PID=0x3660</code>) and up; WiFi + <code>GET /capture</code>
+      serving real 800×600 JPEGs; <code>capture_frame.sh</code> end-to-end (~14 KB frames); single clean boot,
+      no loop; per-board BAUD resolution (all 3 cases); pin map 16/16 vs vendor source; power-hold asserted
+      with no pin conflict.</li>
+    <li><strong>Not verified:</strong> <strong>Gate #1</strong> (palette bars) and <strong>Gate #3</strong>
+      (cart image) remain visually unconfirmed — the rig cannot focus at its current distance. Also
+      <strong>battery operation</strong>: the power-hold fix is correct against the vendor source and harmless
+      on USB, but nothing here has been run off USB power to prove it.</li>
+  </ul>
+
+  <h2>Commands actually run</h2>
+  <pre>make flash APP=pico-e32-bench-cam BOARD=m5stack-timer-cam PORT=/dev/ttyUSB0 \
+     WIFI_SSID='…' WIFI_PASS='…'          # creds are build-time macros, never in the tree
+make flash APP=pico-e32-display-test BOARD=makerfabs-ili9488 PORT=/dev/ttyUSB1
+tools/capture_frame.sh gate1-bars          # -> captures/&lt;ts&gt;-gate1-bars.jpg</pre>
+  <p class="note">Monitoring used a raw pyserial reader rather than <code>make monitor</code>:
+  <code>idf.py monitor</code> requires a TTY and exits 1 non-interactively in this environment. Noted as a real
+  deviation from the documented flow.</p>
+
+  <h2>Currently flashed</h2>
+  <ul>
+    <li><strong>S3</strong> (<code>ttyUSB1</code>): <code>pico-e32-display-test</code> — Gate #1 palette bars, 288 fps.</li>
+    <li><strong>Camera</strong> (<code>ttyUSB0</code>): <code>pico-e32-bench-cam</code> — serving <code>http://192.168.7.135/capture</code>.</li>
+  </ul>
+
+  <h2>Next</h2>
+  <ul>
+    <li><strong>Bench fix:</strong> back the camera off to ~10–15 cm, aim at the panel face, adjust the lens;
+      then close the Gate #1 and Gate #3 visual confirms, and tape the framing down so captures stay comparable.</li>
+    <li><strong>Camera-independent alternative:</strong> the host build (<code>-DHOST_MAIN</code>) can render to
+      PNG, verifying rendering <em>logic</em> without the rig — it would not cover the panel's
+      byte-order/MADCTL, which only a capture can.</li>
+    <li>Port the probe diagnostics to <code>driver/i2c_master.h</code> so the SCCB override can go.</li>
+  </ul>
+</div>
+</body>
+</html>
