@@ -71,21 +71,25 @@ static void reg(lua_State *L,const char*n,lua_CFunction f){ lua_pushcfunction(L,
 
 /* Trivial cart: animated shapes (uses only cls/rectfill/circfill/pset + z8lua sin/cos). */
 static const char *CART = R"lua(
-t=0
-function _update() t=t+1 end
+-- Orientation + colour test. The L-shape fixes which way is up and whether the panel is
+-- mirrored, using SHAPE only (colour-independent). The corner squares then name the colours.
 function _draw()
- cls(12)
- rectfill(0,0,127,10,1)
- for i=0,11 do
-  local a=t*0.02+i/12
-  local x=64+sin(a)*(30+i)
-  local y=60+cos(a*1.3)*(28+i%18)
-  circfill(x,y,2+i%4,8+i%8)
- end
- rectfill(0,118,127,127,3)
- pset(t%128,64,7)
- line(0,64,127,64,5)
+ cls(0)
+ -- thick bar along the TOP edge, full width
+ rectfill(0,0,127,7,7)
+ -- shorter bar down the LEFT edge -> "L" is asymmetric under rotation AND mirroring
+ rectfill(0,0,7,63,7)
+ -- one notch at top-left so we can tell top from bottom even if the L is ambiguous
+ rectfill(0,0,15,15,7)
+ -- corner markers: red=TL  green=TR  blue=BL  yellow=BR
+ rectfill(20,20,35,35,8)
+ rectfill(92,20,107,35,11)
+ rectfill(20,92,35,107,12)
+ rectfill(92,92,107,107,10)
+ -- a single white pixel run pointing right along the middle: disambiguates left/right
+ rectfill(64,62,120,65,7)
 end
+function _update() end
 )lua";
 
 /* FNV-1a over the framebuffer — a per-frame content fingerprint for host/device compare. */
@@ -114,13 +118,35 @@ static void call_opt(lua_State *L, const char *fn){
 static void host_frame(lua_State *L){ call_opt(L,"_update"); call_opt(L,"_draw"); }
 
 #ifdef HOST_MAIN   /* host: run frames, print framebuffer checksums (no display) */
+#include <stdlib.h>
+/* Dump the raw indexed framebuffer so a frame can be *looked at*, not just hashed:
+ *   P8_DUMP=dir ./bench            -> dir/frame_000.raw ... (128*128 bytes, 1 index/px)
+ *   tools/p8_png.py dir/frame_000.raw out.png
+ * The hash proves host and device agree; the image proves either is actually *right* —
+ * a matching pair of wrong framebuffers hashes just fine. Camera-independent, so it works
+ * while the bench rig is down (docs/runtime/pico-e32-host-graphics.md, HG-2). */
+static void dump_frame(const char *dir, int f){
+    char path[512];
+    snprintf(path, sizeof path, "%s/frame_%03d.raw", dir, f);
+    FILE *fp = fopen(path, "wb");
+    if(!fp){ printf("dump: cannot write %s\n", path); return; }
+    fwrite(fb, 1, sizeof fb, fp);
+    fclose(fp);
+}
 int main(void){
     lua_State *L=host_open();
-    for(int f=0; f<10; f++){ host_frame(L); printf("frame %d fb_hash=%08x\n", f, fb_hash()); }
+    const char *dump = getenv("P8_DUMP");
+    for(int f=0; f<10; f++){
+        host_frame(L);
+        printf("frame %d fb_hash=%08x\n", f, fb_hash());
+        if(dump) dump_frame(dump, f);
+    }
+    if(dump) printf("dumped 10 frames to %s/ (render: tools/p8_png.py %s/frame_009.raw out.png)\n", dump, dump);
     lua_close(L); return 0;
 }
 #else              /* device: full pipeline — draw -> scale -> blit, measure FPS */
 #include "ili9488.h"
+#include "board_pins.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -131,13 +157,12 @@ int main(void){
 #define OY  ((480-OUT)/2)
 extern "C" void app_main(void){
     ili9488_config_t cfg = {
-        .pin_wr=18,.pin_dc=17,.pin_cs=46,.pin_bl=45,
-        .data_pins={47,21,14,13,12,11,10,9, 3,8,16,15,7,6,5,4},
-        .pclk_hz=20*1000*1000,.h_res=320,.v_res=480,.madctl=0x48,.swap_color_bytes=true,
-        .max_transfer_bytes=OUT*OUT*2+16,
+        ILI9488_PINS,                           /* boards/<BOARD>/board_pins.h — set by BOARD, not by us */
+        .max_transfer_bytes = OUT*OUT*2+16,
     };
     ESP_ERROR_CHECK(ili9488_init(&cfg));
     ili9488_fill(0);
+    /* selftest removed: the cart itself is now the test pattern */
     lua_State *L=host_open();
     static uint16_t *scaled;
     scaled=(uint16_t*)heap_caps_malloc(OUT*OUT*2, MALLOC_CAP_DMA);

@@ -1,12 +1,14 @@
-/* Minimal ILI9488 driver over the ESP32-S3 esp_lcd i80 (16-bit Intel-8080) bus.
+/* ILI9488 driver over the ESP32-S3 esp_lcd i80 (16-bit Intel-8080) bus.
  *
- * Reusable display component: bus + panel-IO bring-up, the ILI9488 init sequence,
- * and a DMA blit that blocks on completion. Board-specific pins/orientation come in
- * via ili9488_config_t, so the same driver serves any 16-bit-parallel ILI9488 board.
+ * Reusable display component: bus + panel-IO bring-up and a DMA blit that blocks on
+ * completion. The panel bring-up itself is delegated to the proven
+ * `atanisoft/esp_lcd_ili9488` component; board-specific pins come in via
+ * ili9488_config_t.
  *
- * Verified at the bus level on the Makerfabs ILI9488 (Gate #1: 288 fps @ 256x256,
- * ~94% of the 20 MHz x 16-bit bus). Panel colour/orientation correctness is a
- * separate visual check (needs the bench camera). */
+ * A previous hand-rolled init sequence passed every non-visual check -- 288 fps, DMA
+ * completing, framebuffer checksums byte-identical to the host build -- while putting
+ * NOTHING on the glass. Only a camera pointed at the panel caught it. Hence the
+ * component: see docs/worklog/2026-07-15-bench-camera.md. */
 #pragma once
 
 #include <stdint.h>
@@ -19,16 +21,20 @@ extern "C" {
 #endif
 
 typedef struct {
-    int      pin_wr;              /* WR strobe */
+    int      pin_wr;             /* WR strobe */
     int      pin_dc;             /* data/command (RS) */
     int      pin_cs;             /* chip select (-1 if the board ties it low) */
     int      pin_bl;             /* backlight (PWM via LEDC); -1 to skip */
+    int      pin_rd;             /* RD strobe -- MUST be driven high on an 8080 bus;
+                                  * esp_lcd never touches it. -1 if the board ties it high. */
     int      data_pins[16];      /* 16-bit parallel data bus */
-    int      pclk_hz;            /* pixel clock (ILI9488 tolerates up to ~20 MHz) */
-    int      h_res;              /* panel width  (native, pre-rotation of MADCTL) */
+    int      pclk_hz;            /* pixel clock (Makerfabs' own example uses 10 MHz) */
+    int      h_res;              /* panel width */
     int      v_res;              /* panel height */
-    uint8_t  madctl;             /* 0x36 value: orientation + RGB/BGR order */
-    bool     swap_color_bytes;   /* swap the two RGB565 bytes on the 16-bit bus */
+    uint8_t  madctl;             /* UNUSED: the panel component owns MADCTL (it sets BGR +
+                                  * orientation). Kept so board configs still compile; use
+                                  * esp_lcd_panel_mirror/swap_xy if orientation needs work. */
+    bool     swap_color_bytes;   /* swap the two RGB565 bytes (applied in ili9488_rgb565) */
     size_t   max_transfer_bytes; /* largest single blit, sizes the i80 DMA path */
 } ili9488_config_t;
 
@@ -42,6 +48,10 @@ void ili9488_blit(int x, int y, int w, int h, const uint16_t *src);
 
 /* Fill the whole panel with one RGB565 colour (e.g. ili9488_rgb565(0,0,0)). */
 void ili9488_fill(uint16_t color);
+
+/* Self-test: cycle the panel red/green/blue using LovyanGFX's own API, bypassing this
+ * project's framebuffer/palette/blit path entirely. Blocks ~9s. Diagnostic only. */
+void ili9488_selftest(void);
 
 /* RGB888 -> RGB565, honouring the configured swap_color_bytes. */
 uint16_t ili9488_rgb565(uint8_t r, uint8_t g, uint8_t b);

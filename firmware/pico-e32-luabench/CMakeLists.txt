@@ -1,5 +1,5 @@
 # pico-e32-luabench — Phase-0 Gate #2: z8lua interpreter throughput.
-# Build from the repo root:  make build APP=pico-e32-luabench BOARD=makerfabs-ili9488
+# Build from the repo root:  make build APP=pico-e32-luabench BOARD=makerfabs-ili9488-r1
 cmake_minimum_required(VERSION 3.16)
 
 # Shared components (z8lua) live at the repo root, like rimba's components/.
