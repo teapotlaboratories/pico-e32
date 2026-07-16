@@ -6,7 +6,8 @@ docs (per [`.ai/AGENTS.md`](../.ai/AGENTS.md) → *Plan first*).
 - **Plan of record:** [`pico-e32-development-plan.md`](pico-e32-development-plan.md)
 - **Evidence base:** [`design-specification/`](design-specification/) (runtime feasibility, silicon decision)
 - **Hardware reference:** [`reference/pico-e32-makerfabs-boards.md`](reference/pico-e32-makerfabs-boards.md)
-- **Bench camera (HIL verification):** [`hardware/pico-e32-bench-camera.md`](hardware/pico-e32-bench-camera.md) — rig setup + its backlog (`BC-1`…`BC-6`); **`BC-1` (framing/focus) blocks both visual gates**
+- **Display path (ILI9488 + driver):** [`hardware/pico-e32-display.md`](hardware/pico-e32-display.md) — pin map/bus/orientation status + its backlog (`DP-1`…`DP-7`); **`DP-1` — the repo contradicts itself about whether `esp_lcd` was retried**
+- **Bench camera (HIL verification):** [`hardware/pico-e32-bench-camera.md`](hardware/pico-e32-bench-camera.md) — rig setup + its backlog (`BC-1`…`BC-6`); **`BC-1` done — the rig works and caught the Y-flip**
 - **z8lua speedup research:** [`reference/z8lua-speedup-research.md`](reference/z8lua-speedup-research.md) — lever ranking; **profile before optimizing**
 - **Bring-up log:** [`worklog/`](worklog/)
 - **Firmware:** [`../firmware/`](../firmware/)
@@ -16,8 +17,8 @@ docs (per [`.ai/AGENTS.md`](../.ai/AGENTS.md) → *Plan first*).
 | # | Item | Gate | Where | Status |
 |---|------|------|-------|--------|
 | B | z8lua interpreter throughput on the LX7 | **#2** ≤ 33 ms/frame of work (30 fps) | [`firmware/pico-e32-luabench`](../firmware/pico-e32-luabench) | ✅ **measured on hardware — passable** (~1.6 M VM inst/s, ~2.5× under target, in the pass window). **Needs `-fjump-tables`** (~3×). See [worklog](worklog/2026-07-14-phase0-gate2-luabench.md) |
-| A | ILI9488 scaled blit + FPS | **#1** ≥ 30 fps @ 256² | [`firmware/pico-e32-display-test`](../firmware/pico-e32-display-test) | 🔨 **panel RENDERS at last** — the blocker was the **pin map**: this is Makerfabs' **rev 1**, LCD on **WR=35/DC=36/CS=37** (N16R2 quad PSRAM frees them; their newer N16R8 board moved the LCD to 18/17/46). Driver now **LovyanGFX** (plan §A1's other branch). 16 vertical bars confirmed by camera at 57 px/bar. ⚠️ **Y-flipped** (shape-verified) — open. ❌ **fps UNKNOWN** — the old *288 fps* was DMA into unconnected pins; needs an honest re-measure. See [worklog](worklog/2026-07-16-panel-rev1-pinmap.md) |
-| C | Trivial cart end-to-end (minimal `ESP32Host`) | **#3** cart ≥ 30 fps on panel | [`firmware/pico-e32-host`](../firmware/pico-e32-host) | ⚠️ **groundwork done — 161.5 fps** (z8lua + ili9488 + trivial cart). Rendering verified **byte-identical host↔device** (framebuffer checksum). **Panel image still unverified** — bench camera works; blocked on [`BC-1`](hardware/pico-e32-bench-camera.md#open-items) (framing/focus). See [worklog](worklog/2026-07-14-phase0-gate3-host.md), [rig](worklog/2026-07-15-bench-camera.md) |
+| A | ILI9488 scaled blit + FPS | **#1** ≥ 30 fps @ 256² | [`firmware/pico-e32-display-test`](../firmware/pico-e32-display-test) | ✅ **GATE #1 PASSES — measured honestly, and the image is correct.** **blit-only 393.0 fps**, **end-to-end 210.6 fps** (expand+scale+blit every frame) vs a **610.4 fps** bus ceiling — 7–13× the gate, frame time 2.54/4.75 ms with ~zero spread. ✅ **Y-flip FIXED** — the glass is mounted mirrored; `.mirror_y = true` → `offset_rotation = 4`; L-pattern verified **upright** by camera. Panel confirmed **live during the timed window** (tearing visible while the palette animates), so this is not another 288. Driver **LovyanGFX** on rev-1 pins (WR=35/DC=36/CS=37). See [worklog](worklog/2026-07-16-yflip-and-gate1-fps.md), [display doc](hardware/pico-e32-display.md) |
+| C | Trivial cart end-to-end (minimal `ESP32Host`) | **#3** cart ≥ 30 fps on panel | [`firmware/pico-e32-host`](../firmware/pico-e32-host) | ⚠️ **groundwork done — 161.5 fps** (z8lua + ili9488 + trivial cart). **Panel image now VERIFIED** — the L-pattern cart renders **upright and correct** on the glass (2026-07-16), which was the last thing blocking this; `BC-1`/`BC-3` are done. Two caveats before calling the gate: the 161.5 fps predates the Y-flip fix **and** carries a task-watchdog backtrace inside its 1-second reporting windows (the loop never yields — same bug fixed in Track A), so **re-measure it**. And the framebuffer checksum covers less than it claims — see [`DP-4`](hardware/pico-e32-display.md#open-items). See [worklog](worklog/2026-07-14-phase0-gate3-host.md), [rig](worklog/2026-07-15-bench-camera.md) |
 | B+ | **Gate #2 real-cart confirmation** — Celeste on the S3 | (confirmation + optimization scoping) | [`firmware/pico-e32-luabench`](../firmware/pico-e32-luabench) | ✅ **real Celeste = ~15.8 ms/frame avg** (input-insensitive; per-room 5–40 ms, object-count-driven) → **solid 30 fps** (dense rooms near budget), 60 fps room-dependent; drawing runs on core 1. ⚠️ **Scoped to levels 3–15** — levels 16–30 live in the map's shared-memory region, which wasn't extracted, so *half the game is unbenchmarked*; now unblocked by [`HG-1`](runtime/pico-e32-host-graphics.md). Not a bug (the bench says so), but the average may move. Optimization levers now **deferred** (only needed for 60 fps / heavy carts): globals→locals measured only ~14% on Xtensa; see [research](reference/z8lua-speedup-research.md) + [worklog](worklog/2026-07-14-phase0-gate2-luabench.md) |
 
 ## Next — Phase 1 (playable, on the ILI9488)
@@ -33,6 +34,9 @@ docs (per [`.ai/AGENTS.md`](../.ai/AGENTS.md) → *Plan first*).
 ## Later — Phase 2+ (the 4.0" ST7701 board)
 
 - Port the host to the ST7701 **RGB** path; run **Gate #5** (RGB drift soak test) before trusting it.
+  **Driver already in hand:** LovyanGFX (already vendored) ships `Bus_RGB` + `Panel_ST7701` and a
+  ready-made config for this exact Makerfabs 4" board — same library as the 3.5" i80 driver. Detail +
+  the Gate-5 caveat (it's a PSRAM-framebuffer panel by design) in [plan §2b](pico-e32-development-plan.md#2b-verified-hardware--makerfabs-40-st7701-480480-ordered).
 - Enclosure + (only if custom) a PCB with the display that survives Gate #5.
 
 ## Open decisions

@@ -1,0 +1,42 @@
+# Display path (ILI9488, 16-bit parallel) — status + backlog
+
+The 3.5" ILI9488 panel and the driver that feeds it: `components/ili9488` (LovyanGFX
+`Bus_Parallel16` + `Panel_ILI9488`), the board pin map in
+[`boards/makerfabs-ili9488-r1/board_pins.h`](../../boards/makerfabs-ili9488-r1/board_pins.h), and the
+Gate #1 harness [`firmware/pico-e32-display-test`](../../firmware/pico-e32-display-test).
+
+The backlog for this area (per [`.ai/AGENTS.md`](../../.ai/AGENTS.md) → *Plan first*); reachable from the
+master index [`docs/pico-e32-todo.md`](../pico-e32-todo.md). The rig that verifies all of it is the
+[bench camera](pico-e32-bench-camera.md).
+
+## Status
+
+| | |
+|---|---|
+| **Pin map** | rev 1: WR=35 DC=36 CS=37 BL=45 RD=48, D0–D15 = 47,21,14,13,12,11,10,9,3,8,16,15,7,6,5,4 |
+| **Bus** | LovyanGFX `Bus_Parallel16`, **40.000 MHz** (240 MHz ÷ 2 ÷ 3, exact), `dlen_16bit` |
+| **Pixel format** | COLMOD `0x55` — RGB565, **1 bus cycle/px** (the ILI9488's RGB666 penalty is SPI-only) |
+| **Orientation** | glass mounted Y-mirrored → `.mirror_y = true` → `offset_rotation = 4` → MADCTL `0x98`. ✅ verified upright |
+| **Gate #1** | ✅ **PASS** — blit-only **393.0 fps**, end-to-end **210.6 fps**, ceiling 610.4 fps |
+
+Detail + evidence: [worklog 2026-07-16 — Y-flip and Gate #1 fps](../worklog/2026-07-16-yflip-and-gate1-fps.md),
+[worklog 2026-07-16 — the rev-1 pin map](../worklog/2026-07-16-panel-rev1-pinmap.md).
+
+## Open items
+
+| # | Item | Why | Verified by | Status |
+|---|------|-----|-------------|--------|
+| **DP-1** | ~~**Resolve the `esp_lcd` contradiction**~~ **RESOLVED** | The worklog side was right: esp_lcd was **never tested on the correct pins** before 2026-07-16; the code comments claiming "retried … gets colour wrong: red/yellow → blue/green" as a *measured* result were overclaims inherited from wrong-pin runs. Now bench-tested (`components/ili9488_esp_lcd.c`): colour **is** broken, but **not** the way claimed — see DP-2. The false comments in `ili9488.cpp` and `CMakeLists.txt` are corrected. | Bench test + comment fix done | ✅ **done** — [worklog](../worklog/2026-07-16-esp-lcd-vs-lovyangfx.md) |
+| **DP-2** | **esp_lcd i80 colour is broken on this board — root-cause it** | An esp_lcd i80 backend now exists (`components/ili9488/ili9488_esp_lcd.c`; build `ILI9488_BACKEND=esp_lcd`). It is **1.5× faster** (590 vs 393 fps, **true zero-copy DMA** — the `DP-3` win, realised). BUT colour is wrong: **every bright fill (R/G/B alike) renders the same teal, and toggling the byte pre-swap changes nothing** — so it is *not* a byte-order bug (a swap would change the hue). Brightness/structure survive; black stays black. Two hardware swap routes fail: `flags.swap_color_bytes` shreds the 16-bit frame; crossing `data_gpio_nums` (to mimic LovyanGFX's `Bus_Parallel16.cpp:160-166` crossover) scrambles the shared 8-bit init commands so the panel won't configure. **Working theory:** this board's data-bus wiring needs LovyanGFX's exact crossover, entangled with esp_lcd's command path. **Decision: stay on LovyanGFX** (Gate #1 passes 13× over — no pressure — and this is a real unsolved blocker). Keep the esp_lcd backend in-tree for a future logic-analyzer session. | Logic analyzer on D0-D15/WR/DC, or owner board-wiring insight; then a correct-colour capture | 📋 **open — needs a logic analyzer or owner insight; NOT blocking** |
+| **DP-3** | **`ili9488_blit` never uses DMA** — switch to `pushImageDMA` | `pushImage`'s `use_dma` parameter **defaults to `false`** (`LGFXBase.hpp:449`), so every blit `memcpy`s through a **256-byte** double buffer (`Bus_Parallel16.hpp:117`, `CACHE_SIZE = 256`) and spin-waits on the previous chunk before each copy (`Bus_Parallel16.cpp:415`) — the CPU copy never overlaps the transfer. A 131,072-byte frame becomes **512 serialised round-trips + 128 KB of memcpy**, versus one descriptor chain and one `LCD_CAM_LCD_START`. This is most of the gap between the measured 393 fps and the 610.4 fps ceiling: overhead is 1.06 ms/frame ÷ 512 chunks ≈ **2.07 µs/chunk (~498 CPU cycles)**, and the arithmetic closes to the measurement exactly. `pushImageDMA` (`LGFXBase.hpp:436-439`) takes the zero-copy path; both harness buffers are already `MALLOC_CAP_DMA`. ⚠️ **Not free:** DMA reads the caller's buffer directly, so the harness's rebuild-in-place (`main.c`) becomes a genuine **tearing race** unless the per-blit drain is kept. The two changes are individually safe and jointly unsafe. | fps before/after, plus a capture showing no tearing/corruption | 📋 open — **optimisation, NOT needed for Gate #1** (which passes 13× over) |
+| **DP-4** | **The framebuffer checksum's coverage is oversold** | `host_main.cpp:8-11` calls `fb_hash()` "the camera-independent correctness check". It hashes the **indexed** `fb[128*128]` only — **everything from palette expansion to the wire is outside its coverage**, which is exactly the stretch the two-day pin-map bug lived in. Worse, `host_open` hardcodes the RGB565 byte swap unconditionally while `ili9488_blit` branches on `.swap_color_bytes`; they agree only because the board says `true`. Set it `false` and the panel gets double-swapped colours **while the checksum stays identical**. Fix: have `host_open` call `ili9488_rgb565()` so there is one definition of the swap policy — which also kills the third copy of `PAL888` (`host_main.cpp:25`, `main.c:45`, `tools/p8_png.py:19`, the last already carrying a "must stay identical" comment). | Set `.swap_color_bytes = false`, confirm the checksum *changes* or the colours don't | 📋 open |
+| **DP-5** | **Negative control: prove the fps counter is blind to a missing panel** | Gate #1's own worklog predicted the 288 fps failure **in writing** ("a broken panel init could still clock DMA at 288 fps into a blank screen") and it was written off as hypothetical — then cost two days. Run it as an experiment: flash the identical binary with WR or CS deliberately misconfigured, confirm the **fps is unchanged** while the camera goes **blank**. That converts the void-mode from a warning into a documented, reproducible fact. | fps identical ±1%, capture blank | 📋 open — cheap, high value |
+| **DP-6** | **`ili9488_fill()` — slow, redundant, one latent OOB** | 480 separate `pushImage` calls, each a full transaction (~1,440 chunk round-trips) for one clear. `s_lcd->fillScreen()` is one `setWindow` + one repeat-write. It is also **redundant**: LovyanGFX's `init_impl(use_reset, use_clear)` already clears (`LGFXBase.cpp:3636-3639`) before both apps clear again. Latent bug: the guard at `ili9488.cpp` clamps the **fill** to `line[480]` but still blits `w` entries — any board with `h_res > 480` reads past the buffer. That is the "guard that produces wrong output instead of failing" pattern. Only called once at boot, so **zero fps impact**. | Unit-testable; or capture a clear | 🟡 low priority |
+| **DP-7** | **`bus_shared = true` is inert, wrongly justified, and diverges from the source of record** | `ili9488.cpp` says `/* the microSD shares this bus */`. **It doesn't** — microSD is CS=1/MOSI=2/MISO=41/CLK=42 (`docs/reference/pico-e32-makerfabs-boards.md:29`), disjoint from the LCD's pins. The flag costs **nothing** per transaction (its only real consumer is `prepareTmpTransaction`, called solely from `drawBmp`/`drawJpg`/`drawPng`/font-from-file paths), so it is **not** distorting any fps number. But the rev-1 source of record sets `bus_shared = false`, and `ili9488.cpp` claims its config "comes from the REV-1 source of record" — so this is an undocumented deviation of exactly the kind that file's own banner warns about. Also fix `docs/reference/pico-e32-makerfabs-boards.md:16`'s "(bus shared with the LCD)" for the 3.5" board, which looks carried over from the 4" RGB board's entry at `:92` where it is genuinely true. | Code reading; no hardware needed | 🟡 low priority |
+
+> **The trap this area keeps setting.** Three separate knobs *look* like the orientation/colour controls
+> and are not: `.madctl` (now removed — it was never read by any driver, and named `MX|BGR` while `0x08`
+> was actually being sent), `.swap_color_bytes` (decides **which side** does the byte swap, not whether
+> colours are right — flipping it to chase a colour bug changes nothing visible and quietly costs fps),
+> and `max_transfer_bytes` (advisory only; LovyanGFX manages its own DMA descriptors). The live knobs are
+> `.mirror_y` for orientation and `p.invert` / `p.rgb_order` for colour.

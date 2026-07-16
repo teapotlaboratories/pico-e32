@@ -50,6 +50,15 @@
  * RD (48) must be driven HIGH on this 8080 bus — the driver does that; it is a pin, not a
  * strobe we generate. CS is a real GPIO on rev 1 (37); it is NOT tied low, despite what the
  * newer board's vendor config implies.
+ *
+ * .mirror_y — THE GLASS IS MOUNTED UPSIDE-DOWN on this board: at the controller's native scan
+ * direction GRAM row 0 lands at the BOTTOM, so everything renders vertically mirrored. A board
+ * fact, not an ILI9488 or driver fact, so it lives here and the driver only applies it.
+ * Measured via the L-pattern, not assumed: docs/worklog/2026-07-16-yflip-and-gate1-fps.md.
+ *
+ * Note the vendor's own rev-1 config does NOT set this — because their demo only ever ran
+ * setRotation(1) (landscape). Rotation 0 is untested upstream, so "matches the vendor" was
+ * never evidence it renders upright. Same trap as the pin map above, one layer in.
  */
 #define ILI9488_PINS                                        \
     .pin_wr = 35, .pin_dc = 36, .pin_cs = 37, .pin_bl = 45,           \
@@ -59,5 +68,5 @@
     .pclk_hz = 40 * 1000 * 1000,                                      \
     .h_res = ILI9488_H_RES,                                 \
     .v_res = ILI9488_V_RES,                                 \
-    .madctl = 0x48,                                                   \
+    .mirror_y = true,                                                 \
     .swap_color_bytes = true

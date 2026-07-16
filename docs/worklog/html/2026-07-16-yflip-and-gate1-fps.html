@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fixing the Y-flip, and measuring Gate #1 honestly — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)}
+  .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;
+       font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:10px;padding:.8rem 1rem;overflow-x:auto;font-size:.82rem;line-height:1.5}
+  .pill{display:inline-block;font-size:.78rem;font-weight:600;padding:.16em .6em;border-radius:999px;border:1px solid var(--border)}
+  .pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+  .pill.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);
+        border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  .tldr.warn{border-left-color:var(--warn)}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .6rem;text-align:left}
+  th{background:var(--codebg)} td.n{text-align:right;font-family:ui-monospace,monospace}
+  .yes{color:var(--ok);font-weight:700} .no{color:var(--bad);font-weight:700}
+  .diagram{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.2rem;margin:1.4rem 0;overflow-x:auto}
+  .cap{color:var(--muted);font-size:.85rem;margin:.4rem 0 0;text-align:center}
+  .note{color:var(--muted);font-size:.92rem}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .toc{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.8rem 1.1rem;margin:1.4rem 0;font-size:.93rem}
+  .toc ul{margin:.4rem 0 0;columns:2;column-gap:2rem}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.7rem;margin:1.2rem 0}
+  .stat{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.7rem .9rem}
+  .stat .v{font-size:1.5rem;font-weight:700;letter-spacing:-.02em;font-family:ui-monospace,monospace}
+  .stat .k{color:var(--muted);font-size:.78rem;margin-top:.1rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <p class="date">2026-07-16</p>
+  <h1>Fixing the Y-flip, and measuring Gate #1 for the first time honestly</h1>
+
+  <div class="tldr">
+    <span class="pill ok">✓ Y-FLIP FIXED</span> <span class="pill ok">✓ GATE #1 PASSES</span><br>
+    Picks up from <a href="2026-07-16-panel-rev1-pinmap.html">the pin-map worklog</a>, which left exactly
+    two things open. The glass on this board is <strong>mounted upside-down</strong> — a board fact, now
+    recorded as <code>.mirror_y = true</code> and verified upright by camera on the first try. And the
+    display path runs at <strong>393.0 fps</strong> blit-only / <strong>210.6 fps</strong> end-to-end
+    against a <strong>610.4 fps</strong> bus ceiling — 7–13× the gate.
+  </div>
+
+  <div class="tldr warn">
+    <strong>The number was already there, unread.</strong> The board had been printing an fps line since the
+    pin fix; nobody had opened the UART. It said <strong>370.3 fps</strong> — next to a <em>stale</em>
+    ceiling of “~305 fps @16-bit/20MHz” from the esp_lcd era, which made a perfectly physical number look
+    like it had beaten the bus by 21%. It had not. The bus is 40 MHz now, and its ceiling is 610.4.
+  </div>
+
+  <div class="toc">
+    <strong>On this page</strong>
+    <ul>
+      <li><a href="#bench">Bench state</a></li>
+      <li><a href="#wdt">The watchdog in the window</a></li>
+      <li><a href="#yflip">The Y-flip, measured</a></li>
+      <li><a href="#fix">The fix, and where it lives</a></li>
+      <li><a href="#gate1">Gate #1, honestly</a></li>
+      <li><a href="#evidence">Why this isn't another 288</a></li>
+      <li><a href="#filed">Found on the way</a></li>
+    </ul>
+  </div>
+
+  <h2 id="bench">Bench state</h2>
+  <table>
+    <tr><th>board under test</th><td><code>/dev/ttyUSB1</code> — ESP32-S3 (QFN56) rev v0.1, <strong>Embedded PSRAM 2MB</strong> → confirms N16R2 / rev 1</td></tr>
+    <tr><th>bench camera</th><td><code>/dev/ttyUSB0</code> — ESP32-D0WDQ6-V3, serving <code>http://192.168.7.135</code></td></tr>
+    <tr><th>tree</th><td>clean at <code>5e2dae7</code></td></tr>
+  </table>
+
+  <div class="tldr warn">
+    <strong>A rig gotcha this session found:</strong> <code>esptool.py flash_id</code> — the very command the
+    bench doc tells you to run to tell the two boards apart — <strong>power-cycles the target</strong>. The
+    camera's tuned <code>awb=0&amp;exp=600&amp;gain=0&amp;sat=2</code> lives in the <em>sensor's registers,
+    not flash</em>, so identifying the camera silently reverts it to auto-exposure and auto-white-balance.
+    A bare <code>/capture</code> afterwards then quietly measures with exactly the AWB the rig exists to
+    avoid. Now documented in the bench doc.
+  </div>
+
+  <h2 id="wdt">The watchdog was firing inside the measurement window</h2>
+  <p>Not previously recorded. The Gate #1 loop never yielded, so <code>IDLE0</code> starved for the whole
+    5 s run:</p>
+  <pre>E (5782) task_wdt: Task watchdog got triggered. The following tasks/users did not reset the watchdog in time:
+E (5782) task_wdt:  - IDLE0 (CPU 0)</pre>
+  <p>It fires at t≈5.78 s — <strong>inside</strong> the 5.01 s window (which starts after init at t≈0.8 s).
+    Printing a backtrace over a 115200 UART is not free and it lands in the timed region, so it could only
+    have <strong>depressed</strong> 370.3 fps. Prediction: the true rate is that or higher.
+    <strong>It was.</strong> With the yield added: <strong>393.0 fps</strong>, +6.1%.</p>
+
+  <h2 id="yflip">The Y-flip, measured — not eyeballed</h2>
+  <p>Flashed the L-pattern cart and captured. Rather than judge by eye — the failure mode this rig has
+    already caused twice — the capture was <strong>blob-detected and mapped back into cart coordinates</strong>.
+    The full-width L bar spans 128 cart px across 928 capture px → <strong>7.25 capture px per cart px</strong>,
+    which anchors everything.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 720 260" role="img" aria-label="Before: L bar at bottom, corners blue/yellow/red/green. After: L bar at top, corners red/green/blue/yellow — upright.">
+      <!-- BEFORE -->
+      <text x="105" y="18" text-anchor="middle" fill="var(--bad)" font-size="13" font-weight="700">BEFORE — Y-flipped</text>
+      <rect x="25" y="30" width="160" height="160" fill="none" stroke="var(--line)"/>
+      <!-- flipped: bar at bottom, left arm bottom half, notch bottom-left -->
+      <rect x="25" y="180" width="160" height="10" fill="#9fb8b0"/>
+      <rect x="25" y="110" width="10" height="80" fill="#9fb8b0"/>
+      <rect x="25" y="170" width="20" height="20" fill="#9fb8b0"/>
+      <rect x="50" y="145" width="20" height="20" fill="#1f6fd0"/><text x="60" y="140" text-anchor="middle" fill="var(--muted)" font-size="8">blue</text>
+      <rect x="140" y="145" width="20" height="20" fill="#cfc41f"/><text x="150" y="140" text-anchor="middle" fill="var(--muted)" font-size="8">yellow</text>
+      <rect x="50" y="55" width="20" height="20" fill="#c0392b"/><text x="60" y="88" text-anchor="middle" fill="var(--muted)" font-size="8">red</text>
+      <rect x="140" y="55" width="20" height="20" fill="#2aa84a"/><text x="150" y="88" text-anchor="middle" fill="var(--muted)" font-size="8">green</text>
+      <rect x="105" y="105" width="60" height="6" fill="#9fb8b0"/>
+      <text x="105" y="212" text-anchor="middle" fill="var(--muted)" font-size="10">L arm widths: 56 px top / <tspan font-weight="700">611 px bottom</tspan></text>
+      <text x="105" y="228" text-anchor="middle" fill="var(--bad)" font-size="11" font-weight="700">every top↔bottom pair swapped</text>
+      <text x="105" y="244" text-anchor="middle" fill="var(--muted)" font-size="10">no left↔right pair did</text>
+
+      <!-- arrow -->
+      <line x1="215" y1="110" x2="290" y2="110" stroke="var(--accent)" stroke-width="2"/>
+      <polygon points="290,110 282,105 282,115" fill="var(--accent)"/>
+      <text x="252" y="100" text-anchor="middle" fill="var(--accent)" font-size="11" font-weight="700">mirror_y</text>
+      <text x="252" y="126" text-anchor="middle" fill="var(--muted)" font-size="10">MADCTL</text>
+      <text x="252" y="139" text-anchor="middle" fill="var(--muted)" font-size="10">0x08 → 0x98</text>
+
+      <!-- AFTER -->
+      <text x="420" y="18" text-anchor="middle" fill="var(--ok)" font-size="13" font-weight="700">AFTER — upright ✓</text>
+      <rect x="340" y="30" width="160" height="160" fill="none" stroke="var(--line)"/>
+      <rect x="340" y="30" width="160" height="10" fill="#9fb8b0"/>
+      <rect x="340" y="30" width="10" height="80" fill="#9fb8b0"/>
+      <rect x="340" y="30" width="20" height="20" fill="#9fb8b0"/>
+      <rect x="365" y="55" width="20" height="20" fill="#c0392b"/><text x="375" y="88" text-anchor="middle" fill="var(--muted)" font-size="8">red</text>
+      <rect x="455" y="55" width="20" height="20" fill="#2aa84a"/><text x="465" y="88" text-anchor="middle" fill="var(--muted)" font-size="8">green</text>
+      <rect x="365" y="145" width="20" height="20" fill="#1f6fd0"/><text x="375" y="140" text-anchor="middle" fill="var(--muted)" font-size="8">blue</text>
+      <rect x="455" y="145" width="20" height="20" fill="#cfc41f"/><text x="465" y="140" text-anchor="middle" fill="var(--muted)" font-size="8">yellow</text>
+      <rect x="420" y="105" width="60" height="6" fill="#9fb8b0"/>
+      <text x="420" y="212" text-anchor="middle" fill="var(--muted)" font-size="10">L arm widths: <tspan font-weight="700">890 px top</tspan> / 55 px bottom</text>
+      <text x="420" y="228" text-anchor="middle" fill="var(--ok)" font-size="11" font-weight="700">all four markers land as drawn</text>
+      <text x="420" y="244" text-anchor="middle" fill="var(--muted)" font-size="10">first try</text>
+
+      <!-- legend -->
+      <text x="560" y="45" fill="var(--muted)" font-size="10">the stub (→) is the X control:</text>
+      <text x="560" y="60" fill="var(--muted)" font-size="10">it stays RIGHT in both, so X is</text>
+      <text x="560" y="75" fill="var(--muted)" font-size="10">not mirrored — which rules out</text>
+      <text x="560" y="90" fill="var(--muted)" font-size="10">a 180° rotation.</text>
+      <text x="560" y="115" fill="var(--muted)" font-size="10">It says nothing about Y: at</text>
+      <text x="560" y="130" fill="var(--muted)" font-size="10">cart y 62–65 it is symmetric</text>
+      <text x="560" y="145" fill="var(--muted)" font-size="10">about the 128-px centre, so it</text>
+      <text x="560" y="160" fill="var(--muted)" font-size="10">maps onto itself under a flip.</text>
+    </svg>
+    <p class="cap">The L-pattern before and after, drawn from the measured blob positions. Every top↔bottom feature pair swaps; no left↔right pair does — a pure vertical mirror.</p>
+  </div>
+
+  <table>
+    <tr><th>feature</th><th>drawn at (cart)</th><th>observed at (cart)</th><th>mean RGB</th><th>reads as</th></tr>
+    <tr><td>red <code>8</code> marker</td><td>TL (20,20)</td><td><strong>BL</strong> (17.7–33.5, 84.7–102)</td><td class="mono">(85,42,37)</td><td>dark red</td></tr>
+    <tr><td>green <code>11</code> marker</td><td>TR (92,20)</td><td><strong>BR</strong> (92–110.5, 89.5–107)</td><td class="mono">(31,145,26)</td><td>green (red=31)</td></tr>
+    <tr><td>blue <code>12</code> marker</td><td>BL (20,92)</td><td><strong>TL</strong> (21–38, 11–28)</td><td class="mono">(8,84,157)</td><td>blue</td></tr>
+    <tr><td>yellow <code>10</code> marker</td><td>BR (92,92)</td><td><strong>TR</strong> (95.7–113, 12–30)</td><td class="mono">(82,126,22)</td><td>yellow-green (red=82)</td></tr>
+    <tr><td>L bar, full width</td><td><strong>top</strong> y=0–7</td><td><strong>bottom</strong></td><td class="mono">(63,131,110)</td><td>white <code>7</code> + cast</td></tr>
+    <tr><td>stub</td><td><strong>right</strong>, x=64–120</td><td><strong>right</strong>, x=64–126</td><td class="mono">(64,153,141)</td><td>white <code>7</code> + cast</td></tr>
+  </table>
+
+  <p>The two greens are separated by their <strong>red channel</strong> (31 vs 82), not by absolute hue — per
+    the bench doc's rule, relative colour only. The yellower one sits where <code>green</code> was drawn and
+    vice versa: the Y-flip again, independently of the L-shape.</p>
+
+  <div class="tldr warn">
+    <strong>The one assumption this rested on, stated honestly.</strong> All of it is conditional on the bench
+    doc's claim that the camera is mounted <strong>90° CW</strong> (LEFT of frame = TOP of panel). If that
+    note were wrong by 180°, the identical capture would instead mean an <strong>X-flip</strong>. Nothing in
+    the frame settles it — the rig cannot see its own mounting, and the 256×256 blit is centred, so even the
+    panel borders offer no anchor. It didn't need settling analytically: <strong>the fix loop settles it.</strong>
+    Apply a Y-flip → upright means the diagnosis was right; 180° means it was an X-flip. It came up
+    <strong>upright</strong>, so the mount note is confirmed as a side effect.
+  </div>
+
+  <h2 id="fix">The fix — <code>offset_rotation = 4</code>, and why it is the only candidate</h2>
+  <p>LovyanGFX owns orientation, and its rotation arithmetic is <strong>not</strong> the obvious
+    <code>(r + offset) &amp; 7</code>. From <code>Panel_LCD.cpp:130</code>:</p>
+  <pre>_internal_rotation = ((r + _cfg.offset_rotation) &amp; 3) | ((r &amp; 4) ^ (_cfg.offset_rotation &amp; 4));</pre>
+  <p>Bit 2 is a <strong>mirror flag XORed in</strong> — it can never carry into the rotation bits. With the
+    app's rotation at 0, <code>offset_rotation = 4</code> → <code>_internal_rotation = 4</code>. The MADCTL
+    table lives at <code>Panel_LCD.hpp:85-99</code>; <code>Panel_ILI9488</code> does <em>not</em> override
+    <code>getMadCtl</code> — the override at <code>Panel_ILI948x.hpp:87</code> belongs to the <em>sibling</em>
+    <code>Panel_ILI9481</code>, which is easy to misread.</p>
+
+  <table>
+    <tr><th><code>_internal_rotation</code></th><th>MADCTL (+BGR)</th><th>MV (axis swap)</th><th>MX</th><th>MY</th><th></th></tr>
+    <tr><td class="n">0</td><td class="n">0x08</td><td class="n">0</td><td class="n">0</td><td class="n">0</td><td>← was</td></tr>
+    <tr><td class="n">2</td><td class="n">0xDC</td><td class="n">0</td><td class="n"><span class="no">1</span></td><td class="n">1</td><td>flips X too</td></tr>
+    <tr><td class="n"><strong>4</strong></td><td class="n"><strong>0x98</strong></td><td class="n">0</td><td class="n">0</td><td class="n"><span class="yes">1</span></td><td>← <strong>now</strong></td></tr>
+    <tr><td class="n">6</td><td class="n">0x4C</td><td class="n">0</td><td class="n"><span class="no">1</span></td><td class="n">0</td><td>X only</td></tr>
+    <tr><td class="n">1, 3, 5, 7</td><td class="n">—</td><td class="n"><span class="no">1</span></td><td class="n">—</td><td class="n">—</td><td>all swap to 480×320</td></tr>
+  </table>
+
+  <p>The bit semantics are documented in-tree, not folklore —
+    <code>vendor/esp-idf/components/esp_lcd/include/esp_lcd_panel_commands.h:51-56</code>:
+    <code>MY (1&lt;&lt;7)</code> “Row address order, 0: top to bottom, <strong>1: bottom to top</strong>” — the
+    mirror; <code>ML (1&lt;&lt;4)</code> “Line address order … refresh top to bottom / bottom to top”. So
+    rotation 4's <code>MY|ML</code> is a vertical mirror with the panel's <em>refresh</em> direction brought
+    along to match, which is why LovyanGFX pairs them in every entry: scanout travels the same way as
+    addressing, avoiding a tear. <span class="note">(That header carries its own caveat at <code>:48-50</code>
+    — these positions are conventional, not standardised. It corroborates LovyanGFX's table; the hardware
+    result is what settles it.)</span></p>
+
+  <p><strong>4 is the only value in 0–7 that inverts Y while leaving MX and MV clear.</strong> Geometry is
+    provably untouched: <code>4 &amp; 1 == 0</code> so no dimension swap (<code>Panel_LCD.cpp:138</code>);
+    <code>4 &amp; 2 == 0</code> so <code>_colstart = 0</code> (<code>:146</code>); and
+    <code>_rowstart = mh - (ph + oy) = 480 - 480 = 0</code> (<code>:149</code>) — which lands on zero
+    <strong>only because</strong> <code>memory_height == panel_height</code> and <code>offset_y == 0</code>,
+    both true here. Cost: one MADCTL byte at init, <strong>zero per frame</strong>.</p>
+
+  <h3>Where it lives matters more than the value</h3>
+  <p>In <code>boards/makerfabs-ili9488-r1/board_pins.h</code>, as <code>.mirror_y = true</code>, replacing the
+    dead <code>.madctl = 0x48</code> — <em>not</em> in the driver. The glass on this board is mounted
+    upside-down relative to the controller's native scan direction: a fact about <strong>this board</strong>,
+    not about the ILI9488 and not about LovyanGFX. It belongs in the file that calls itself “THE ONE
+    DEFINITION” for board facts. The driver just asks <code>c-&gt;mirror_y ? 4 : 0</code>, so
+    <code>ili9488_config_t</code> stays free of LovyanGFX's rotation encoding — which matters, because
+    retrying esp_lcd is still an open option and <code>mirror_y</code> survives that swap where an
+    <code>offset_rotation</code> byte would not.</p>
+
+  <div class="tldr warn">
+    <strong>The vendor never ran rotation 0.</strong> The rev-1 source of record
+    (<code>LGFX_MakerFabs_Parallel_S3.hpp:106</code>) also sets <code>offset_rotation = 0</code> — our config
+    was byte-identical to the vendor's. But their demo calls <code>lcd.setRotation(1)</code>
+    (<code>main.cpp:134</code>, landscape 480×320). <code>_internal_rotation = 0</code> on this board was
+    untested territory upstream, so the reference matching us was never evidence that rotation 0 renders
+    correctly. <strong>It is the pin-map trap one layer in:</strong> a vendor's file is only authoritative for
+    <em>the configuration the vendor actually ran</em>.
+  </div>
+
+  <p class="note">The dead <code>.madctl = 0x48</code> named <code>MX|BGR</code>; the fix needs
+    <code>MY</code>. It disagreed — and carries no weight. It was never applied by any driver (<code>0x08</code>
+    was what actually went to the panel), and it was set during the era when the bus clocked into unconnected
+    pins, so it was never validated against a lit panel either. Not a second opinion; noise that looked like
+    config.</p>
+
+  <h2 id="gate1">Gate #1, honestly</h2>
+
+  <div class="stats">
+    <div class="stat"><div class="v" style="color:var(--ok)">393.0</div><div class="k">fps — blit-only (2.54 ms)</div></div>
+    <div class="stat"><div class="v" style="color:var(--ok)">210.6</div><div class="k">fps — end-to-end (4.75 ms)</div></div>
+    <div class="stat"><div class="v">610.4</div><div class="k">fps — bus ceiling</div></div>
+    <div class="stat"><div class="v" style="color:var(--muted)">30</div><div class="k">fps — the gate</div></div>
+  </div>
+
+  <div class="diagram">
+    <svg viewBox="0 0 700 250" role="img" aria-label="Bar chart to scale: gate 30 fps, end-to-end 210.6, pre-fix 370.3, blit-only 393.0, ceiling 610.4.">
+      <!-- scale: 560 px == 610.4 fps -->
+      <text x="10" y="16" fill="var(--muted)" font-size="11">bar widths to scale — 560 px = the 610.4 fps ceiling</text>
+
+      <text x="10" y="46" fill="var(--fg)" font-size="12">gate</text>
+      <rect x="120" y="34" width="27.5" height="18" fill="var(--muted)" opacity=".5"/>
+      <text x="156" y="47" fill="var(--muted)" font-size="11">30 fps — the bar to clear</text>
+
+      <text x="10" y="80" fill="var(--fg)" font-size="12">end-to-end</text>
+      <rect x="120" y="68" width="193.2" height="18" fill="var(--ok)" opacity=".75"/>
+      <text x="322" y="81" fill="var(--fg)" font-size="11"><tspan font-weight="700">210.6</tspan> fps — expand+scale+blit every frame · 7.0× gate · 34.5%</text>
+
+      <text x="10" y="114" fill="var(--muted)" font-size="12">pre-fix</text>
+      <rect x="120" y="102" width="339.7" height="18" fill="var(--warn)" opacity=".45"/>
+      <text x="468" y="115" fill="var(--muted)" font-size="11">370.3 fps — depressed by the WDT backtrace</text>
+
+      <text x="10" y="148" fill="var(--fg)" font-size="12">blit-only</text>
+      <rect x="120" y="136" width="360.5" height="18" fill="var(--ok)"/>
+      <text x="489" y="149" fill="var(--fg)" font-size="11"><tspan font-weight="700">393.0</tspan> fps · 13.1× gate · 64.4%</text>
+
+      <text x="10" y="182" fill="var(--fg)" font-size="12">ceiling</text>
+      <rect x="120" y="170" width="560" height="18" fill="none" stroke="var(--accent)" stroke-dasharray="4 3"/>
+      <text x="126" y="183" fill="var(--accent)" font-size="11"><tspan font-weight="700">610.4</tspan> fps — 65,536 px ÷ 40 MHz = 1.6384 ms, 1 cycle/px</text>
+
+      <line x1="480.5" y1="130" x2="480.5" y2="196" stroke="var(--ok)" stroke-width="1" stroke-dasharray="3 3"/>
+      <text x="120" y="216" fill="var(--muted)" font-size="10">The 393→610 gap is not mysterious: blits never use DMA (DP-3). Each frame is 512 serialised 256-byte</text>
+      <text x="120" y="230" fill="var(--muted)" font-size="10">chunks + 128 KB of memcpy. Overhead 1.06 ms ÷ 512 ≈ 2.07 µs/chunk (~498 CPU cycles) — closes exactly.</text>
+      <text x="120" y="244" fill="var(--muted)" font-size="10">An optimisation, not a Gate #1 requirement.</text>
+    </svg>
+    <p class="cap">Both reported numbers clear the gate by 7–13×. The display path is not the bottleneck — as the plan predicted.</p>
+  </div>
+
+  <pre>I (802)  trackA: bus ceiling 610.4 fps  (16-bit @ 40.0 MHz, 256x256 RGB565, 1 cycle/px)
+I (2422) trackA: blit-only   600 frames in 1526.638 ms -&gt;  393.0 fps  (frame 2.54 ms mean, 2.54 min, 2.55 max)  64.4% of ceiling
+I (4002) trackA: end-to-end  300 frames in 1424.641 ms -&gt;  210.6 fps  (frame 4.75 ms mean, 4.75 min, 4.75 max)  34.5% of ceiling</pre>
+
+  <p>Spread is essentially zero — 2.54 min / 2.55 max over 600 frames — and eight consecutive passes reproduce
+    to 0.1 fps. A genuinely <em>sustained</em> rate, not an average hiding stalls. The expand+scale costs
+    <code>4.75 − 2.54 = 2.21 ms/frame</code>: the CPU-side palette work is comparable to the entire bus transfer.</p>
+
+  <h3>The ceiling, re-derived — and the old one was never wrong</h3>
+  <p>The ILI9488's notorious RGB666/18-bit coercion (2 writes/pixel) is <strong>SPI-only</strong>: LovyanGFX
+    applies it only when <code>busType() == bus_spi</code> (<code>Panel_ILI948x.hpp:169-179</code>). On
+    <code>Bus_Parallel16</code> the panel gets <code>COLMOD 0x55</code> = RGB565, and <code>dlen_16bit</code>
+    puts 16 bits on the wire per WR strobe → <strong>one bus cycle per pixel</strong>. 40 MHz is exact, not
+    nominal: 240 MHz ÷ 2 ÷ 3, no fractional divider.</p>
+
+  <div class="tldr warn">
+    <strong>A correction to the record, in the project's favour.</strong> The Gate #1 worklog declared the
+    plan's <code>≈130 fps theoretical @16-bit/20MHz</code> “wrong” and replaced it with <code>~305</code>.
+    <strong>The 130 was right.</strong> It is a full-panel 320×480 figure: 153,600 ÷ 20e6 = 130.2 ✓, and its
+    companion “≈32 fps at 8-bit/10 MHz” checks out too (307,200 ÷ 10e6 = 32.6 ✓). The worklog compared a
+    <strong>320×480 ceiling</strong> against a <strong>256×256 measurement</strong>, called the ceiling wrong,
+    and overwrote it — which is how the harness came to print a stale, mismatched “~305 fps @16-bit/20MHz”.
+    <em>A correct number was destroyed by comparing it against a different quantity.</em> The harness now
+    <strong>derives</strong> the ceiling from <code>cfg.pclk_hz</code> and logs an error if a measurement ever
+    exceeds it.
+  </div>
+
+  <h2 id="evidence">Why this isn't another 288</h2>
+  <p>393 fps proves the ESP32's LCD_CAM finished strobing WR. It proves <em>nothing</em> about the panel —
+    bus timing is identical whether the pins reach an ILI9488 or nothing at all. That gap is unclosable by
+    timing, and it is exactly the gap the 288 fps fell through. Only the camera closes it.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 700 172" role="img" aria-label="Chain: ili9488_blit calls pushImage; writeBytes is pipelined and returns with DMA in flight; the drain happens at the unnested endWrite.">
+      <rect x="8" y="30" width="120" height="44" rx="6" fill="var(--codebg)" stroke="var(--border)"/>
+      <text x="68" y="50" text-anchor="middle" fill="var(--fg)" font-size="11" font-weight="700">ili9488_blit</text>
+      <text x="68" y="65" text-anchor="middle" fill="var(--muted)" font-size="9">no outer startWrite</text>
+
+      <line x1="128" y1="52" x2="168" y2="52" stroke="var(--line)" stroke-width="1.5"/><polygon points="168,52 161,48 161,56" fill="var(--line)"/>
+
+      <rect x="170" y="30" width="132" height="44" rx="6" fill="var(--codebg)" stroke="var(--border)"/>
+      <text x="236" y="50" text-anchor="middle" fill="var(--fg)" font-size="11" font-weight="700">writeBytes</text>
+      <text x="236" y="65" text-anchor="middle" fill="var(--bad)" font-size="9">pipelined — RETURNS</text>
+
+      <line x1="302" y1="52" x2="342" y2="52" stroke="var(--line)" stroke-width="1.5"/><polygon points="342,52 335,48 335,56" fill="var(--line)"/>
+
+      <rect x="344" y="30" width="132" height="44" rx="6" fill="var(--codebg)" stroke="var(--border)"/>
+      <text x="410" y="50" text-anchor="middle" fill="var(--fg)" font-size="11" font-weight="700">endWrite</text>
+      <text x="410" y="65" text-anchor="middle" fill="var(--muted)" font-size="9">refcount 1→0</text>
+
+      <line x1="476" y1="52" x2="516" y2="52" stroke="var(--ok)" stroke-width="1.5"/><polygon points="516,52 509,48 509,56" fill="var(--ok)"/>
+
+      <rect x="518" y="30" width="170" height="44" rx="6" fill="var(--codebg)" stroke="var(--ok)"/>
+      <text x="603" y="50" text-anchor="middle" fill="var(--ok)" font-size="11" font-weight="700">_bus-&gt;wait()</text>
+      <text x="603" y="65" text-anchor="middle" fill="var(--ok)" font-size="9">spins to full drain ✓</text>
+
+      <text x="8" y="104" fill="var(--fg)" font-size="11" font-weight="700">The drain is real — but not where you'd look for it.</text>
+      <text x="8" y="120" fill="var(--muted)" font-size="10.5">writeBytes spins on the PREVIOUS transfer, sets LCD_CAM_LCD_START and returns with DMA in flight.</text>
+      <text x="8" y="135" fill="var(--muted)" font-size="10.5">It blocks only because each blit is its OWN transaction, so the unnested endWrite drains it.</text>
+      <text x="8" y="156" fill="var(--warn)" font-size="10.5" font-weight="700">⚠ Wrap blits in an outer startWrite/endWrite — the standard LovyanGFX idiom — and the drain migrates</text>
+      <text x="8" y="169" fill="var(--warn)" font-size="10.5" font-weight="700">outward, silently turning any fps loop into a measurement of the queueing rate. Now documented at the API.</text>
+    </svg>
+    <p class="cap">Verified in source: <code>Panel_LCD.cpp:87</code> → <code>Bus_Parallel16.cpp:211-216</code>. The loop measures completed transfers.</p>
+  </div>
+
+  <h3>The camera evidence: the panel is live <em>during</em> the timed window</h3>
+  <p>Four captures, 1 s apart, while the measurement loop ran:</p>
+  <ul>
+    <li><strong>Content changes between every pair.</strong> Mean |difference| across the full frame:
+      <strong>12.1 – 24.3</strong> levels. The panel region's mean RGB swings R 31.6→45.5, G 56.9→91.1.
+      Far above sensor noise.</li>
+    <li><strong>The two phases are visually distinguishable, and they alternate.</strong> <code>live-1</code>
+      and <code>live-3</code> show 16 clean stripes — captured during <strong>blit-only</strong>, where the
+      content is static. <code>live-2</code> and <code>live-4</code> show a torn patchwork — captured during
+      <strong>end-to-end</strong>, where the palette advances every frame. The tear bands run along
+      <strong>panel rows</strong> (the 90° mount maps panel-y to frame-x): GRAM is rewritten at 210 fps while
+      the panel scans its glass at ~60 Hz (<code>Panel_ILI948x.hpp:209</code>: <code>FRMCTR1 = 0xA0</code>), so
+      different rows hold different palette generations at the instant of exposure. 2 clean / 2 torn,
+      alternating, matches the 1.53 s / 1.42 s phase split.</li>
+  </ul>
+
+  <div class="tldr warn">
+    <strong>Honesty note — a measurement I attempted and threw away.</strong> I tried to <em>count</em> tear
+    bands programmatically to quantify the write rate. The detector is unreliable and its numbers are
+    <strong>not reported</strong>: at this focus the <strong>LCD pixel grid is resolvable</strong> (the rig
+    working as designed), and that high-frequency pattern registers as “steps” along the same axis as a tear.
+    Smoothing above the grid pitch then picked up the panel edge instead, and it flagged <code>live-3</code> —
+    plainly clean to the eye — as torn. The tearing is real and visible; my count of it was not trustworthy,
+    so it stays <strong>qualitative</strong>. An invented band-count would have been this session's
+    “double byte-swap”.
+  </div>
+
+  <p><strong>What is still NOT proven, and cannot be by anything above:</strong> that every pixel latches
+    <em>cleanly</em>. The panel is clocked at <strong>40 MHz (25 ns WR cycle) against a datasheet 8080-II
+    minimum of 50 ns (20 MHz)</strong> — 2× its rating. That value comes from the vendor's own rev-1 config
+    (<code>LGFX_MakerFabs_Parallel_S3.hpp:76</code>) and it renders, which is the only evidence behind it;
+    there is no timing-margin analysis. Marginal latching would show as sparkle or dropped pixels,
+    <strong>not</strong> as a wrong fps. Judge from the frame, never the counter.</p>
+
+  <div class="tldr warn">
+    <strong>One thing the number must never be read as.</strong> 393 fps is a <strong>GRAM-write rate, not
+    photons per second</strong>. The panel scans its own glass at ~60 Hz, so nothing above ~60 is ever visible
+    — to the eye or the camera. The tearing above <em>is</em> that fact made visible. This doesn't weaken
+    Gate #1, which asks whether the blit path can sustain 30 fps of work (it can, 13× over), but “the screen
+    updates 393 times a second” would be false.
+  </div>
+
+  <h2 id="filed">Found on the way — filed, not fixed</h2>
+  <p>All in <a href="../../hardware/pico-e32-display.md">the new display area doc</a> as <code>DP-1</code>…<code>DP-7</code>.
+    Deliberately not bundled in: Gate #1 passes 13× over without any of them, and the Y-flip fix should be
+    reviewable on its own.</p>
+  <ul>
+    <li><strong>DP-1 — the repo contradicts itself about <code>esp_lcd</code>, in <code>main</code>, right now.</strong>
+      <code>ili9488.cpp:5-9</code> says esp_lcd i80 <em>was</em> retried on the correct rev-1 pins and “gets
+      COLOUR wrong: red and yellow come out blue/green, only two distinguishable hues instead of four”. The
+      pin-map worklog says it <em>was never tried</em> (<code>:86</code>) and lists “consider retrying” as a
+      next step (<code>:115</code>). Committed <strong>36 seconds apart</strong> (<code>66b3958</code>,
+      <code>080d68f</code>). One is false and nothing marks which. Given this rig's record, the <em>colour</em>
+      claim is the one to doubt first — but it was never written up, so it is flagged, not overruled.</li>
+    <li><strong>DP-3 — blits never use DMA.</strong> <code>use_dma</code> defaults to <strong>false</strong>.
+      Explains most of the 393→610 gap. Has a real trap: DMA reads the caller's buffer, so it and the
+      harness's rebuild-in-place are individually safe and <strong>jointly a tearing race</strong>.</li>
+    <li><strong>DP-4 — the checksum's coverage is oversold.</strong> It hashes the <em>indexed</em>
+      framebuffer only; everything from palette expansion to the wire — exactly where the two-day bug lived —
+      is outside it. Setting <code>.swap_color_bytes = false</code> would double-swap the panel's colours
+      <em>while the hash stays identical</em>.</li>
+    <li><strong>DP-5 — the negative control.</strong> Misconfigure WR/CS, confirm fps is unchanged while the
+      camera goes blank. Gate #1's own worklog <em>predicted the 288 fps failure in writing</em> and it was
+      written off as hypothetical. Running it once makes it a fact.</li>
+    <li><strong>DP-6</strong> <code>ili9488_fill</code> is slow, redundant and has a latent OOB.
+      <strong>DP-7</strong> <code>bus_shared = true</code> is inert but its comment is false.</li>
+  </ul>
+
+  <h2>Board left as</h2>
+  <p><code>pico-e32-display-test</code> @ <code>makerfabs-ili9488-r1</code> on <code>/dev/ttyUSB1</code> — the
+    Gate #1 harness, looping blit-only/end-to-end forever and printing both. Panel upright, animating, no
+    watchdog.</p>
+  <pre>make build APP=pico-e32-display-test BOARD=makerfabs-ili9488-r1
+make flash APP=pico-e32-display-test BOARD=makerfabs-ili9488-r1 PORT=/dev/ttyUSB1
+curl -o /tmp/f.jpg 'http://192.168.7.135/capture?awb=0&amp;exp=600&amp;gain=0&amp;sat=2'   # then rotate 90 CW</pre>
+
+  <h2>Next</h2>
+  <ul>
+    <li><strong>Re-measure Gate #3.</strong> Its 161.5 fps predates the Y-flip fix and has the same
+      never-yielding loop, so a TWDT backtrace lands inside its 1-second reporting windows (~1 in 5 reports
+      depressed).</li>
+    <li><code>DP-1</code> first — cheap, and it is a live contradiction in the record.</li>
+    <li>Extend the Gate #2 bench to levels 16–30 (<a href="2026-07-15-host-graphics.html">host-graphics worklog</a>).</li>
+  </ul>
+</div>
+</body>
+</html>

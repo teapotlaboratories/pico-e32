@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>esp_lcd i80 vs LovyanGFX — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)}
+  .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;
+       font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:10px;padding:.8rem 1rem;overflow-x:auto;font-size:.82rem;line-height:1.5}
+  .pill{display:inline-block;font-size:.78rem;font-weight:600;padding:.16em .6em;border-radius:999px;border:1px solid var(--border)}
+  .pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+  .pill.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+  .pill.bad{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,transparent)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);
+        border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  .tldr.warn{border-left-color:var(--warn)}
+  .tldr.bad{border-left-color:var(--bad)}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .6rem;text-align:left}
+  th{background:var(--codebg)} td.n{text-align:right;font-family:ui-monospace,monospace}
+  .yes{color:var(--ok);font-weight:700} .no{color:var(--bad);font-weight:700}
+  .diagram{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.2rem;margin:1.4rem 0;overflow-x:auto}
+  .cap{color:var(--muted);font-size:.85rem;margin:.4rem 0 0;text-align:center}
+  .note{color:var(--muted);font-size:.92rem}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .toc{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.8rem 1.1rem;margin:1.4rem 0;font-size:.93rem}
+  .toc ul{margin:.4rem 0 0;columns:2;column-gap:2rem}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.7rem;margin:1.2rem 0}
+  .stat{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.7rem .9rem}
+  .stat .v{font-size:1.5rem;font-weight:700;letter-spacing:-.02em;font-family:ui-monospace,monospace}
+  .stat .k{color:var(--muted);font-size:.78rem;margin-top:.1rem}
+  .swatch{display:inline-block;width:.85em;height:.85em;border-radius:3px;vertical-align:baseline;border:1px solid var(--line)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <p class="date">2026-07-16</p>
+  <h1>Trying esp_lcd i80 instead of LovyanGFX: why colour “broke”, and a real comparison</h1>
+
+  <div class="tldr warn">
+    <span class="pill warn">⏸ CONCLUDED — esp_lcd parked, LovyanGFX stays</span><br>
+    esp_lcd i80 is <strong>1.5× faster</strong> (590 vs 393 fps, real zero-copy DMA) but its <strong>colour is
+    broken on this board in a way byte-swapping does NOT fix</strong> — every bright fill renders the same
+    teal, swap-invariant. Root-causing it needs a logic analyzer or owner board-wiring insight
+    (<code>DP-2</code>). <code>DP-1</code> resolved: the “colour wrong” code comments were overclaims —
+    esp_lcd had never actually been tested on the correct pins before now.
+  </div>
+
+  <div class="tldr">
+    <strong>Read this as a story with a twist.</strong> The middle builds a clean source-derived theory —
+    “it's just a byte swap” — and then the <strong>hardware refutes it</strong>. The refuted theory is kept,
+    not deleted: the reasoning was sound and the refutation is the finding.
+  </div>
+
+  <div class="toc">
+    <strong>On this page</strong>
+    <ul>
+      <li><a href="#contradiction">The contradiction, ×3</a></li>
+      <li><a href="#theory">The byte-swap theory (from source)</a></li>
+      <li><a href="#speed">Result 1 — speed: esp_lcd wins</a></li>
+      <li><a href="#colour">Result 2 — colour: the twist</a></li>
+      <li><a href="#theory2">Working theory + DP-1</a></li>
+      <li><a href="#decision">DP-2 decision</a></li>
+    </ul>
+  </div>
+
+  <h2 id="contradiction">The contradiction — in three places at once</h2>
+  <p>The claim that esp_lcd “gets colour wrong” was asserted in the code <strong>three times</strong> and
+    denied by the worklog once — all in <code>main</code>:</p>
+  <table>
+    <tr><th>where</th><th>says</th></tr>
+    <tr><td class="mono">ili9488.cpp:5-9</td><td>esp_lcd <strong>was</strong> retried on rev-1 pins, “gets COLOUR wrong: red/yellow → blue/green, two hues not four”</td></tr>
+    <tr><td class="mono">CMakeLists.txt:3-5</td><td>same — “gets colour wrong … so it is rejected”</td></tr>
+    <tr><td class="mono">panel-rev1-pinmap.md:86</td><td>“<strong>esp_lcd i80 is untested on the correct pins</strong>”</td></tr>
+    <tr><td class="mono">…pinmap.md:115</td><td>lists “Consider retrying esp_lcd” as a <em>next step</em></td></tr>
+  </table>
+  <p>Either it was retried and failed, or it was never retried. One is wrong. This session settled it on the bench.</p>
+
+  <h2 id="theory">The byte-swap theory — sound, and wrong <span class="pill bad">REFUTED below</span></h2>
+  <p>Formed from reading source <em>before</em> flashing. <strong>LovyanGFX byte-swaps every pixel in
+    hardware via the GPIO matrix; esp_lcd does not.</strong> <code>Bus_Parallel16.cpp:160-166</code> crosses
+    the two bytes:</p>
+  <pre>for (size_t i = 0; i &lt; 8; ++i) {
+    LGFX_GPIO_MATRIX_OUT(pins[i]  , idx_base + i+8);   // D0..D7  -&gt; LCD_DATA_OUT8..15  (HIGH byte)
+    LGFX_GPIO_MATRIX_OUT(pins[i+8], idx_base + i  );   // D8..D15 -&gt; LCD_DATA_OUT0..7   (LOW byte)
+}</pre>
+  <p><code>esp_lcd_new_i80_bus</code> maps <code>data_gpio_nums[i] → LCD_DATA_OUT&lt;i&gt;</code> straight.
+    So identical pixel bytes reach the panel byte-swapped between the two drivers — which <em>would</em>
+    turn the PICO-8 warm palette (red/orange/yellow all share the high-byte red bits) toward blue, exactly
+    the reported symptom. Three independent fixes exist (esp_lcd's <code>flags.swap_color_bytes</code>,
+    reordering <code>data_gpio_nums</code>, or the software swap in <code>ili9488_rgb565</code>), and the
+    rule seemed to be “exactly one net swap.” <strong>Clean theory. The hardware disagreed.</strong></p>
+
+  <h2 id="speed">Result 1 — speed: esp_lcd wins by ~1.5× <span class="pill ok">measured</span></h2>
+  <div class="stats">
+    <div class="stat"><div class="v" style="color:var(--ok)">590.2</div><div class="k">esp_lcd blit-only fps (1.69 ms)</div></div>
+    <div class="stat"><div class="v">393.0</div><div class="k">LovyanGFX blit-only fps (2.54 ms)</div></div>
+    <div class="stat"><div class="v" style="color:var(--ok)">96.7%</div><div class="k">esp_lcd, of 610.4 ceiling</div></div>
+    <div class="stat"><div class="v">64.4%</div><div class="k">LovyanGFX, of ceiling</div></div>
+  </div>
+  <div class="diagram">
+    <svg viewBox="0 0 700 190" role="img" aria-label="Bar chart: LovyanGFX 393 fps at 64% of ceiling, esp_lcd 590 fps at 97%, ceiling 610.4.">
+      <text x="10" y="16" fill="var(--muted)" font-size="11">bar widths to scale — 560 px = the 610.4 fps bus ceiling (both drivers share it)</text>
+      <text x="10" y="52" fill="var(--fg)" font-size="12">LovyanGFX</text>
+      <rect x="130" y="38" width="360.5" height="22" fill="var(--warn)" opacity=".55"/>
+      <text x="498" y="54" fill="var(--fg)" font-size="12"><tspan font-weight="700">393</tspan> fps · 64% · non-DMA (512 memcpy chunks/frame)</text>
+      <text x="10" y="92" fill="var(--fg)" font-size="12">esp_lcd i80</text>
+      <rect x="130" y="78" width="541.3" height="22" fill="var(--ok)"/>
+      <text x="176" y="94" fill="#fff" font-size="12" font-weight="700">590 fps · 97% · one zero-copy DMA</text>
+      <text x="10" y="132" fill="var(--fg)" font-size="12">ceiling</text>
+      <rect x="130" y="118" width="560" height="22" fill="none" stroke="var(--accent)" stroke-dasharray="4 3"/>
+      <text x="136" y="134" fill="var(--accent)" font-size="12"><tspan font-weight="700">610.4</tspan> fps — 65,536 px ÷ 40 MHz, 1 cycle/px</text>
+      <text x="130" y="166" fill="var(--muted)" font-size="10.5">esp_lcd mounts the app buffer straight onto the GDMA link; the CPU sleeps through the transfer. The blit still</text>
+      <text x="130" y="180" fill="var(--muted)" font-size="10.5">blocks honestly (semaphore on the real transaction-done IRQ), so the fps is a true back-to-back-transfer rate.</text>
+    </svg>
+    <p class="cap">This is the <code>DP-3</code> finding made real: LovyanGFX's <code>pushImage</code> is the non-DMA path; esp_lcd is genuine zero-copy DMA. Clock is a wash — esp_lcd also lands 40.000 MHz exactly (160 ÷ 2 ÷ 2).</p>
+  </div>
+  <p>End-to-end (palette-expand + scale + blit): esp_lcd <strong>256.5</strong> fps vs LovyanGFX
+    <strong>210.6</strong>. On speed, esp_lcd is the better path — though Gate #1 already passes 13× over on
+    LovyanGFX, so throughput isn't actually needed.</p>
+
+  <h2 id="colour">Result 2 — colour: the twist <span class="pill bad">theory refuted</span></h2>
+  <p>Every configuration renders colour wrong. Judged on the static L-pattern and solid R/G/B fills:</p>
+  <table>
+    <tr><th>config</th><th>result on the glass</th></tr>
+    <tr><td>straight pins, app pre-swap, <code>flags.swap_color_bytes=1</code></td><td>shredded, all-teal</td></tr>
+    <tr><td>straight pins, <code>flags.swap_color_bytes=1</code>, MADCTL 0x98</td><td>shredded shapes, teal</td></tr>
+    <tr><td><strong>data-pin crossover</strong> (mimic LovyanGFX), app pre-swap</td><td class="no">worse — uniform teal, no shapes: crossing the pins scrambles the 8-bit init COMMANDS that share the bus</td></tr>
+    <tr><td>straight pins, <strong>native</strong> RGB565 (no swap)</td><td>recognisable shapes, teal; solid R=G=B fill → same teal</td></tr>
+    <tr><td>straight pins, <strong>app pre-swap</strong> (swapped)</td><td><strong>identical to native</strong> — solid R=G=B → same teal</td></tr>
+  </table>
+
+  <div class="diagram">
+    <svg viewBox="0 0 700 210" role="img" aria-label="LovyanGFX renders red, green, blue as distinct colours; esp_lcd renders all three as the same teal, regardless of byte-swap toggle.">
+      <text x="10" y="18" fill="var(--fg)" font-size="12" font-weight="700">Solid R / G / B fills, same harness, camera-judged</text>
+
+      <text x="10" y="52" fill="var(--fg)" font-size="12">LovyanGFX</text>
+      <rect x="150" y="36" width="70" height="34" fill="#c0392b"/><text x="185" y="86" text-anchor="middle" fill="var(--muted)" font-size="10">red</text>
+      <rect x="240" y="36" width="70" height="34" fill="#2aa84a"/><text x="275" y="86" text-anchor="middle" fill="var(--muted)" font-size="10">green</text>
+      <rect x="330" y="36" width="70" height="34" fill="#2f6fd0"/><text x="365" y="86" text-anchor="middle" fill="var(--muted)" font-size="10">blue</text>
+      <text x="430" y="58" fill="var(--ok)" font-size="12" font-weight="700">✓ distinct hues</text>
+
+      <text x="10" y="130" fill="var(--fg)" font-size="12">esp_lcd i80</text>
+      <rect x="150" y="114" width="70" height="34" fill="#2b8f8a"/><text x="185" y="164" text-anchor="middle" fill="var(--muted)" font-size="10">“red”</text>
+      <rect x="240" y="114" width="70" height="34" fill="#2b8f8a"/><text x="275" y="164" text-anchor="middle" fill="var(--muted)" font-size="10">“green”</text>
+      <rect x="330" y="114" width="70" height="34" fill="#2b8f8a"/><text x="365" y="164" text-anchor="middle" fill="var(--muted)" font-size="10">“blue”</text>
+      <text x="430" y="136" fill="var(--bad)" font-size="12" font-weight="700">✗ all the same teal</text>
+      <text x="150" y="192" fill="var(--muted)" font-size="10.5">Measured panel mean RGB ≈ (26, 80, 82) for all three — and toggling the byte pre-swap (native ↔ swapped)</text>
+      <text x="150" y="205" fill="var(--muted)" font-size="10.5">changed NOTHING. Brightness/structure survive (white-on-black L is legible; black stays black).</text>
+    </svg>
+    <p class="cap">A byte-order bug cannot be swap-<em>invariant</em>: swapping the two bytes of <code>0xF800</code> vs <code>0x00F8</code> must change the hue if the panel decodes the bytes at all. It doesn't. So the clean source theory is wrong.</p>
+  </div>
+
+  <p>So the old “red/yellow → blue/green” is <em>directionally</em> right (colour <strong>is</strong> wrong
+    on esp_lcd) but the mechanism is deeper than the byte-order story. The bit-level prediction was sound as
+    a prediction; the hardware is swap-<em>invariant</em>, which no byte-swapping fixes.</p>
+
+  <h2 id="theory2">Working theory, and the record corrected</h2>
+  <div class="tldr warn">
+    <strong>Working theory (needs a logic analyzer).</strong> LovyanGFX drives this panel via a GPIO-matrix
+    data-pin crossover it applies to <em>data</em> while still getting <em>commands</em> out — it packs
+    commands with the crossover in mind. esp_lcd shares one fixed pin map between data and commands: cross
+    the pins and the init commands scramble; leave them straight and the colour bits don't land. The board's
+    actual DB-pin wiring isn't on the silkscreen, so every theory here is a guess about a bus I can't see.
+    <strong>Resolving it needs a logic analyzer on D0-D15 + WR + DC</strong>, or the owner's knowledge of the
+    rev-1 data-bus wiring — the same class of board fact that cracked the pin map.
+  </div>
+  <p><strong>DP-1 resolved, honestly.</strong> The worklog side was right: esp_lcd was never actually tested
+    on the correct pins before this session. The code comments stating “retried … gets colour wrong” as a
+    <em>measured</em> result were overclaiming — the failure is real, but it was inherited from wrong-pin
+    runs and a source prediction until now. This session both confirms colour is broken <em>and</em> shows
+    the stated reason (a byte swap) is wrong. Comments in <code>ili9488.cpp</code> and
+    <code>CMakeLists.txt</code> corrected.</p>
+
+  <h2 id="decision">DP-2 decision: stay on LovyanGFX</h2>
+  <p>esp_lcd's 1.5× speed and cleaner DMA are appealing, but it does not render correct colour on this
+    board, the cause is not a config toggle, and Gate #1 already passes 13× over on LovyanGFX — so there is
+    <strong>no pressure</strong> to switch and a <strong>real, unsolved blocker</strong> against it. Keep
+    LovyanGFX as the default; keep the esp_lcd backend in-tree (<code>ILI9488_BACKEND=esp_lcd</code>, neither
+    file deleted) as the substrate for a logic-analyzer session. Revisit if a future heavy cart needs the
+    throughput, or the owner has board-wiring insight.</p>
+  <p class="note">Roadmap note: LovyanGFX also covers the Phase-2 4" ST7701 <strong>RGB</strong> board
+    (<code>Bus_RGB</code> + <code>Panel_ST7701</code>, with a bundled Makerfabs 4" config) and SPI panels —
+    one library across the whole roadmap, which reinforces keeping it despite the 132 MB submodule.</p>
+
+  <h2>Board left as</h2>
+  <p>Restored to the known-good <strong>LovyanGFX</strong> <code>display-test</code> build on
+    <code>/dev/ttyUSB1</code> — palette bars, distinct colours, upright. The esp_lcd backend is in the tree
+    but not the default.</p>
+</div>
+</body>
+</html>

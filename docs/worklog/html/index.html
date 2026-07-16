@@ -31,6 +31,25 @@
     <ul class="entries">
       <li>
         <span class="d">2026-07-16</span>
+        <a class="t" href="2026-07-16-esp-lcd-vs-lovyangfx.html">Trying esp_lcd i80 instead of LovyanGFX: why colour “broke”, and a real comparison</a>
+        <span class="s">Built an esp_lcd i80 backend to settle whether it really renders “colour wrong” on the rev-1 pins.
+          It's <strong>1.5× faster</strong> (590 vs 393 fps, real zero-copy DMA) — but its <strong>colour is broken in a way
+          byte-swapping doesn't fix</strong>: every bright fill renders the <em>same teal</em>, swap-invariant. A clean
+          source theory (“just a byte swap”) that the hardware <strong>refuted</strong>. The old “colour wrong” comments were
+          overclaims — esp_lcd had never been tested on the correct pins. <strong>Decision: stay on LovyanGFX.</strong></span>
+      </li>
+      <li>
+        <span class="d">2026-07-16</span>
+        <a class="t" href="2026-07-16-yflip-and-gate1-fps.html">Fixing the Y-flip, and measuring Gate #1 for the first time honestly</a>
+        <span class="s">Both of the pin-map worklog's open items closed. The glass is <strong>mounted upside-down</strong> —
+          a board fact, now <code>.mirror_y = true</code>, verified <strong>upright</strong> by camera on the first try.
+          <strong>Gate #1 PASSES</strong>: <strong>393.0 fps</strong> blit-only / <strong>210.6 fps</strong> end-to-end
+          against a <strong>610.4 fps</strong> ceiling. The fps line had been printing unread all along, next to a
+          <em>stale 20 MHz ceiling</em> that made it look impossible. The watchdog was firing inside the measurement
+          window; the plan's “wrong” 130 fps was <strong>right</strong> all along.</span>
+      </li>
+      <li>
+        <span class="d">2026-07-16</span>
         <a class="t" href="2026-07-16-panel-rev1-pinmap.html">The panel was never broken: this board is rev 1, and its LCD is on different pins</a>
         <span class="s">Two days of “the panel is dead” resolved: this unit is Makerfabs' <strong>first revision</strong>,
           LCD on <strong>WR=35/DC=36/CS=37</strong> — their newer N16R8 board moved it to 18/17/46 because octal PSRAM

@@ -49,11 +49,17 @@ BUILD_DIR := $(CURDIR)/build/$(APP)/$(BOARD)
 # after flashing if you don't want them lingering on disk.
 WIFI_DEFS := $(if $(WIFI_SSID),-D WIFI_SSID="$(WIFI_SSID)") $(if $(WIFI_PASS),-D WIFI_PASS="$(WIFI_PASS)")
 
+# Optional: pick the ILI9488 driver backend (components/ili9488 has two, one public API).
+#   ILI9488_BACKEND=esp_lcd    -> ESP-IDF-native esp_lcd i80 (no LovyanGFX submodule)
+#   ILI9488_BACKEND=lovyangfx  -> LovyanGFX (the default; leave unset for it)
+ILI9488_DEFS := $(if $(ILI9488_BACKEND),-D ILI9488_BACKEND=$(ILI9488_BACKEND))
+
 IDF := source "$(IDF_PATH)/export.sh" >/dev/null 2>&1 && cd "$(APP_DIR)" && \
        idf.py -B "$(BUILD_DIR)" -b "$(BAUD)" \
               -D SDKCONFIG="$(BUILD_DIR)/sdkconfig" \
               -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_DEFAULTS)" \
               -D BOARD_DIR="$(BOARD_DIR)" \
+              $(ILI9488_DEFS) \
               $(WIFI_DEFS)
 
 .PHONY: help install build flash monitor flash-monitor clean fullclean menuconfig size erase
