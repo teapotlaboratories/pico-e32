@@ -40,7 +40,7 @@ table churn (alloc+read)         ~78           ~1.3
 ### 2. ESP32-S3 (the real Gate #2)
 ```sh
 # from the repo root (ESP-IDF v5.1+):
-make build flash monitor APP=pico-e32-luabench BOARD=makerfabs-ili9488
+make build flash monitor APP=pico-e32-luabench BOARD=makerfabs-ili9488-r1
 ```
 Reads the two-column SRAM-vs-PSRAM result over UART.
 
