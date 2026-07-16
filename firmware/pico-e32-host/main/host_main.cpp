@@ -2,7 +2,7 @@
  *
  * z8lua runs the cart's _update/_draw; a minimal PICO-8 draw API writes into a
  * 128x128 indexed framebuffer; the frame is palette-expanded + 2x scaled to
- * 256x256 RGB565 and blitted to the ILI9488 (components/ili9488). Prints FPS and a
+ * 256x256 RGB565 and blitted via the board display (boards/<BOARD>/board.cpp). Prints FPS and a
  * per-frame framebuffer checksum over UART.
  *
  * The checksum is the camera-independent correctness check: the SAME cart + draw API
@@ -97,7 +97,7 @@ static uint32_t fb_hash(void){ uint32_t h=2166136261u; for(size_t i=0;i<sizeof f
 
 static lua_State *host_open(void){
     for(int i=0;i<16;i++) pal565[i]=((PAL888[i][0]&0xF8)<<8)|((PAL888[i][1]&0xFC)<<3)|(PAL888[i][2]>>3);
-    /* swap bytes for the 16-bit i80 bus (matches ili9488 swap_color_bytes) */
+    /* swap bytes for the 16-bit i80 bus (matches the board driver's SWAP_COLOR_BYTES) */
     for(int i=0;i<16;i++) pal565[i]=(uint16_t)((pal565[i]>>8)|(pal565[i]<<8));
     lua_State *L=luaL_newstate(); luaL_openlibs(L);
     reg(L,"cls",l_cls); reg(L,"color",l_color); reg(L,"pset",l_pset);
@@ -145,23 +145,18 @@ int main(void){
     lua_close(L); return 0;
 }
 #else              /* device: full pipeline — draw -> scale -> blit, measure FPS */
-#include "ili9488.h"
-#include "board_pins.h"
+#include "board.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #define OUT 256
-#define OX  ((320-OUT)/2)
-#define OY  ((480-OUT)/2)
+#define OX  ((BOARD_LCD_H_RES-OUT)/2)
+#define OY  ((BOARD_LCD_V_RES-OUT)/2)
 extern "C" void app_main(void){
-    ili9488_config_t cfg = {
-        ILI9488_PINS,                           /* boards/<BOARD>/board_pins.h — set by BOARD, not by us */
-        .max_transfer_bytes = OUT*OUT*2+16,
-    };
-    ESP_ERROR_CHECK(ili9488_init(&cfg));
-    ili9488_fill(0);
+    ESP_ERROR_CHECK(board_lcd_init());
+    board_lcd_fill(0);
     /* selftest removed: the cart itself is now the test pattern */
     lua_State *L=host_open();
     static uint16_t *scaled;
@@ -171,7 +166,7 @@ extern "C" void app_main(void){
     auto present=[&](void){
         for(int y=0;y<OUT;y++){ const uint8_t*s=&fb[(y>>1)*128]; uint16_t*d=&scaled[y*OUT];
             for(int x=0;x<OUT;x++) d[x]=pal565[s[x>>1]&15]; }
-        ili9488_blit(OX,OY,OUT,OUT,scaled);
+        board_lcd_blit(OX,OY,OUT,OUT,scaled);
     };
 
     printf("\n=== pico-e32 Gate #3 — trivial cart end-to-end ===\n");

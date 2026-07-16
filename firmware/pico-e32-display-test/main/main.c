@@ -1,10 +1,9 @@
-/* Phase-0 Track A — ILI9488 scaled PICO-8 blit + FPS (Gate #1).
+/* Phase-0 Track A — scaled PICO-8 blit + FPS (Gate #1).
  *
- * Board-agnostic: the panel wiring comes from boards/<BOARD>/board_pins.h (ILI9488_PINS),
- * selected by BOARD at build time. Target board today: an ILI9488 320x480 parallel panel,
- * 16-bit Intel-8080 parallel. The display driver now lives in the reusable
- * components/ili9488 module; this file is just the Gate #1 test harness (board
- * pin map + PICO-8 palette test image + 2x scale + FPS loop).
+ * Board-agnostic: the display comes from boards/<BOARD>/board.{h,cpp} (board_lcd_*), selected by
+ * BOARD at build time. Target board today: a 320x480 16-bit Intel-8080 parallel panel. This file is
+ * just the Gate #1 test harness (PICO-8 palette test image + 2x scale + FPS loop); the pins,
+ * orientation and byte order all live in the board driver.
  *
  *   A1: show 16 PICO-8 palette bars (a 128x128 indexed test image) -> proves
  *       the bus, pins, orientation and colour order.
@@ -13,12 +12,9 @@
  *
  * GATE #1: >= 30 fps sustained for the 256x256 scaled full-refresh.
  *
- * Orientation and colour are NOT adjusted here. Orientation is a board fact
- * (ILI9488_PINS -> .mirror_y in boards/<BOARD>/board_pins.h); .swap_color_bytes decides
- * only WHICH SIDE swaps the RGB565 bytes, not whether the colours come out right, so
- * flipping it to chase a colour problem just costs fps. The 2026-07-14 "288 fps" that used
- * to be quoted here was void -- it clocked DMA into unconnected pins on the wrong pin map.
- * See docs/worklog/2026-07-16-yflip-and-gate1-fps.md. */
+ * Orientation and colour are NOT adjusted here — both are board facts owned by the board driver.
+ * The 2026-07-14 "288 fps" that used to be quoted here was void: it clocked DMA into unconnected
+ * pins on the wrong pin map. See docs/worklog/2026-07-16-yflip-and-gate1-fps.md. */
 
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -26,20 +22,16 @@
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "ili9488.h"
-#include "board_pins.h"
+#include "board.h"
 
 static const char *TAG = "trackA";
 
-#define LCD_H_RES 320
-#define LCD_V_RES 480
-
-/* PICO-8 native + 2x integer scale */
+/* PICO-8 native + 2x integer scale, centred on the panel */
 #define P8    128
 #define SCALE 2
-#define OUT   (P8 * SCALE)                 /* 256 */
-#define OX    ((LCD_H_RES - OUT) / 2)      /* 32  */
-#define OY    ((LCD_V_RES - OUT) / 2)      /* 112 */
+#define OUT   (P8 * SCALE)                       /* 256 */
+#define OX    ((BOARD_LCD_H_RES - OUT) / 2)      /* 32  */
+#define OY    ((BOARD_LCD_V_RES - OUT) / 2)      /* 112 */
 
 /* PICO-8 16-colour palette as RGB888 */
 static const uint8_t PAL888[16][3] = {
@@ -49,15 +41,11 @@ static const uint8_t PAL888[16][3] = {
 static uint16_t pal565[16];
 
 void app_main(void) {
-    ili9488_config_t cfg = {
-        ILI9488_PINS,                           /* boards/<BOARD>/board_pins.h — set by BOARD, not by us */
-        .max_transfer_bytes = OUT * OUT * 2 + 16,
-    };
-    ESP_ERROR_CHECK(ili9488_init(&cfg));
+    ESP_ERROR_CHECK(board_lcd_init());
 
-    for (int i = 0; i < 16; i++) pal565[i] = ili9488_rgb565(PAL888[i][0], PAL888[i][1], PAL888[i][2]);
+    for (int i = 0; i < 16; i++) pal565[i] = board_lcd_rgb565(PAL888[i][0], PAL888[i][1], PAL888[i][2]);
 
-    ili9488_fill(ili9488_rgb565(0, 0, 0));   /* clear to black */
+    board_lcd_fill(board_lcd_rgb565(0, 0, 0));   /* clear to black */
 
     /* build a 128x128 indexed test image: 16 vertical PICO-8 palette bars */
     static uint8_t idx[P8 * P8];
@@ -74,7 +62,7 @@ void app_main(void) {
         for (int x = 0; x < OUT; x++) dst[x] = pal565[src[x / SCALE]];
     }
 
-    ili9488_blit(OX, OY, OUT, OUT, out);
+    board_lcd_blit(OX, OY, OUT, OUT, out);
     ESP_LOGI(TAG, "palette bars drawn at (%d,%d) %dx%d", OX, OY, OUT, OUT);
 
     /* The bus ceiling, derived from the pclk we ACTUALLY configured rather than pasted in as a
@@ -86,10 +74,10 @@ void app_main(void) {
      * A hard-coded ceiling is what made the old log line incoherent: it kept saying
      * "~305 fps @16-bit/20MHz" long after the bus moved to 40 MHz, so a perfectly physical
      * 370 fps read as 21% past the theoretical maximum. Derive it, don't quote it. */
-    const double ceiling_fps = (double)cfg.pclk_hz / (double)(OUT * OUT);
+    const double ceiling_fps = (double)BOARD_LCD_PCLK_HZ / (double)(OUT * OUT);
 
     ESP_LOGI(TAG, "bus ceiling %.1f fps  (%d-bit @ %.1f MHz, %dx%d RGB565, 1 cycle/px)",
-             ceiling_fps, 16, cfg.pclk_hz / 1e6, OUT, OUT);
+             ceiling_fps, 16, BOARD_LCD_PCLK_HZ / 1e6, OUT, OUT);
 
     /* Time N frames of `body`, reporting mean/min/max frame time and utilisation.
      * A fixed FRAME COUNT, not a fixed wall-clock window: it makes the sample auditable and
@@ -134,7 +122,7 @@ void app_main(void) {
     ESP_LOGI(TAG, "==== Gate #1 — PASS if >= 30 fps ====");
 
     while (1) {
-        MEASURE("blit-only", 600, ili9488_blit(OX, OY, OUT, OUT, out));
+        MEASURE("blit-only", 600, board_lcd_blit(OX, OY, OUT, OUT, out));
 
         /* Yield between phases so IDLE0 can feed the task watchdog. The old loop never yielded,
          * so the TWDT fired at t~5.78s -- INSIDE the 5s measurement window -- and its backtrace
@@ -156,7 +144,7 @@ void app_main(void) {
                 uint16_t *dst = &out[y * OUT];
                 for (int x = 0; x < OUT; x++) dst[x] = pal565[src[x / SCALE]];
             }
-            ili9488_blit(OX, OY, OUT, OUT, out);
+            board_lcd_blit(OX, OY, OUT, OUT, out);
         }));
 
         vTaskDelay(1);

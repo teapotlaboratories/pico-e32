@@ -31,7 +31,7 @@ sources. Full context and the design rationale are in
 Board config: [`boards/makerfabs-ili9488-r1/`](../../boards/makerfabs-ili9488-r1/) — the **`-r1`
 suffix is deliberate**: the revision is part of the board's identity here, because rev 1 and the
 current rev need *different LCD pins*. A future N16R8 unit would be a separate `-r2` board dir with
-its own `board_pins.h`, not an edit to this one.
+its own `board.{h,cpp}`, not an edit to this one.
 
 > ## ⚠️ THIS BOARD HAS TWO PIN MAPS. The LCD pins depend on the PSRAM part.
 >
@@ -71,11 +71,11 @@ its own `board_pins.h`, not an edit to this one.
 > **Other facts, verified on hardware 2026-07-16:**
 >
 > - **RD (GPIO 48) must be driven HIGH** — `esp_lcd`'s i80 driver never touches it; the vendor's
->   examples set it explicitly. `components/ili9488` does this via `pin_rd`.
+>   examples set it explicitly. The board driver (boards/<board>/board.cpp) does this via PIN_RD.
 > - **RST is `NC`** — tied to the board reset; there is no panel reset line to drive.
 > - **pclk 40 MHz** works (the rev-1 reference's value). The data bus D0–D15 is **identical across
 >   both revisions** — only WR/DC/CS moved.
-> - **The driver is LovyanGFX**, not `esp_lcd` — see [`components/ili9488`](../../components/ili9488).
+> - **The driver is LovyanGFX**, not `esp_lcd` — see [`boards/makerfabs-ili9488-r1/board.cpp`](../../boards/makerfabs-ili9488-r1/board.cpp).
 >   `esp_lcd` i80 was never made to work on this board, though that was tried before the pin map was
 >   understood, so it is untested on the correct pins.
 

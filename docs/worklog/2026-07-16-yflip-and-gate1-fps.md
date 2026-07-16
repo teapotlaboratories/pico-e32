@@ -339,6 +339,11 @@ can, 13× over), but "the screen updates 393 times a second" would be false.
 
 ## What changed
 
+> **Note (later the same day):** the files below were reorganised — `components/ili9488` and
+> `board_pins.h` were removed and this driver moved into `boards/makerfabs-ili9488-r1/board.cpp`, where
+> `.mirror_y` became the `MIRROR_Y` constant and `offset_rotation = MIRROR_Y ? 4 : 0`. The *change* here
+> is unchanged; only its home moved. See [the esp_lcd worklog's Postscript](2026-07-16-esp-lcd-vs-lovyangfx.md).
+
 | file | change |
 |---|---|
 | `boards/makerfabs-ili9488-r1/board_pins.h` | `.madctl = 0x48` (dead) → **`.mirror_y = true`** (the board fact), + why |

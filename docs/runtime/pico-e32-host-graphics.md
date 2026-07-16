@@ -10,7 +10,7 @@ Phase 1 is the full `ESP32Host` (fake-08 port): **input, audio, SD carts** — a
 parts not yet bought (I²C expander, MAX98357A, microSD). The **graphics half is not blocked on
 anything**, and it is the gap between what runs today and a playable cart:
 
-- **Gate #3** proved the *pipeline* (z8lua + `components/ili9488` + a frame loop, 161.5 fps) using a
+- **Gate #3** proved the *pipeline* (z8lua + the board display + a frame loop, 161.5 fps) using a
   hand-written cart that only needs `cls`/`pset`/`rectfill`/`circfill`/`line`.
 - **Gate #2** proved the *interpreter* on **real Celeste** (~15.8 ms/frame) — but with the draw calls
   **stubbed to no-ops** (`host_main.cpp:103`: `spr`, `sspr`, `map`, `print`, `camera`, `pal`, …).
