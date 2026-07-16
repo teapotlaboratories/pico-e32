@@ -54,12 +54,14 @@
   <h1>Trying esp_lcd i80 instead of LovyanGFX: why colour “broke”, and a real comparison</h1>
 
   <div class="tldr warn">
-    <span class="pill warn">⏸ CONCLUDED — esp_lcd parked, LovyanGFX stays</span><br>
+    <span class="pill warn">⏹ CONCLUDED — esp_lcd REMOVED, LovyanGFX only</span><br>
     esp_lcd i80 is <strong>1.5× faster</strong> (590 vs 393 fps, real zero-copy DMA) but its <strong>colour is
     broken on this board in a way byte-swapping does NOT fix</strong> — every bright fill renders the same
     teal, swap-invariant. Root-causing it needs a logic analyzer or owner board-wiring insight
     (<code>DP-2</code>). <code>DP-1</code> resolved: the “colour wrong” code comments were overclaims —
-    esp_lcd had never actually been tested on the correct pins before now.
+    esp_lcd had never actually been tested on the correct pins before now. <strong>Follow-up (same day):
+    the esp_lcd backend and the whole <code>components/ili9488</code> wrapper were removed; the board now
+    owns its display in <code>board.cpp</code> — see the Postscript.</strong>
   </div>
 
   <div class="tldr">
@@ -199,10 +201,31 @@
     (<code>Bus_RGB</code> + <code>Panel_ST7701</code>, with a bundled Makerfabs 4" config) and SPI panels —
     one library across the whole roadmap, which reinforces keeping it despite the 132 MB submodule.</p>
 
-  <h2>Board left as</h2>
-  <p>Restored to the known-good <strong>LovyanGFX</strong> <code>display-test</code> build on
-    <code>/dev/ttyUSB1</code> — palette bars, distinct colours, upright. The esp_lcd backend is in the tree
-    but not the default.</p>
+  <h2 id="postscript">Postscript — esp_lcd removed, and the <code>ili9488</code> wrapper with it</h2>
+  <p>Since LovyanGFX is the sole backend, the two-backend <code>components/ili9488</code> wrapper (a config
+    struct + build-time selector) earned its keep no more. Both were removed and the board took ownership of
+    its own display:</p>
+  <ul>
+    <li><strong>Deleted:</strong> <code>components/ili9488/</code> (both backends + header + CMake),
+      <code>boards/…/board_pins.h</code>, and the <code>ILI9488_BACKEND</code> Makefile plumbing.</li>
+    <li><strong>Added:</strong> <code>boards/makerfabs-ili9488-r1/board.{h,cpp}</code> — the same LovyanGFX
+      bring-up with this board's pins/orientation/byte-order baked in, behind a board-agnostic
+      <code>board_lcd_*</code> API. Apps compile <code>${BOARD_DIR}/board.cpp</code> into <code>main</code>
+      and link LovyanGFX directly; no shared display component.</li>
+    <li><strong>Apps:</strong> <code>display-test</code> and <code>host</code> call <code>board_lcd_*</code>
+      instead of <code>ili9488_*</code>.</li>
+  </ul>
+  <p>Why the whole wrapper, not just the esp_lcd file: with one board and one driver, the config-struct
+    indirection only spread board facts across two files. The board owning its display keeps the pin map,
+    orientation and byte order in one place — and a future board (the Phase-2 4" ST7701 RGB panel) becomes a
+    new <code>boards/&lt;board&gt;/board.{h,cpp}</code>, not an app edit. The esp_lcd <em>findings</em> are
+    preserved above; the code is recoverable from git (<code>e0a21cc</code>) if the teal is root-caused.</p>
+  <div class="tldr">
+    <strong>Verified after the refactor (behaviour-preserving):</strong> display-test still reports
+    <strong>393.0 / 210.6 fps</strong> (byte-identical), palette bars render in distinct hues, and the host
+    L-pattern is <strong>UPRIGHT</strong> with correct corners. All four apps build clean (display-test, host,
+    bench-cam, native host). Board left on the LovyanGFX <code>display-test</code> build.
+  </div>
 </div>
 </body>
 </html>

@@ -4,11 +4,13 @@
 incompatible things about the `esp_lcd` i80 driver on the correct rev-1 pins, and the LovyanGFX submodule
 is a 132 MB cost for one panel. Does esp_lcd actually work? If the only problem is colour, is it fixable?
 
-**Status:** ⏸️ **concluded — esp_lcd parked, LovyanGFX stays.** esp_lcd i80 is **1.5× faster** (590 vs
+**Status:** ⏹️ **concluded — esp_lcd REMOVED, LovyanGFX only.** esp_lcd i80 is **1.5× faster** (590 vs
 393 fps, real zero-copy DMA) but its **colour is broken on this board in a way byte-swapping does NOT fix**
 (every bright fill → the same teal, swap-invariant). Root-causing it needs a logic analyzer or owner
 board-wiring insight (`DP-2`). `DP-1` resolved: the "colour wrong" code comments were overclaims — esp_lcd
-had never been tested on the correct pins before now.
+had never been tested on the correct pins before now. **Follow-up (same day): the esp_lcd backend and the
+whole `components/ili9488` wrapper were removed; the board now owns its display in `board.cpp`. See the
+Postscript.**
 
 > **Read this worklog as a story with a twist.** The middle section builds a clean source-derived theory —
 > "it's just a byte swap" — and then **the hardware refutes it** (see *Result 2*). The refuted theory is
@@ -173,4 +175,30 @@ owner has board-wiring insight that explains the swap-invariant teal.
 ## Board left as
 
 Restored to the known-good **LovyanGFX** `display-test` build on `/dev/ttyUSB1` — palette bars, distinct
-colours, upright. The esp_lcd backend is in the tree but not default.
+colours, upright.
+
+## Postscript — esp_lcd removed, and the `ili9488` wrapper with it
+
+Decision after the comparison: since LovyanGFX is the sole backend, the two-backend `components/ili9488`
+wrapper (a config struct + build-time backend selector) was earning its keep no more. Both were removed
+and the board took ownership of its own display:
+
+- **Deleted:** `components/ili9488/` (both backends + header + CMake), `boards/…/board_pins.h`, and the
+  `ILI9488_BACKEND` plumbing in the Makefile.
+- **Added:** `boards/makerfabs-ili9488-r1/board.{h,cpp}` — the same LovyanGFX bring-up, this board's pins/
+  orientation/byte-order baked in, behind a board-agnostic `board_lcd_*` API (`board_lcd_init/blit/fill/
+  rgb565/selftest`, `BOARD_LCD_H_RES/V_RES/PCLK_HZ`). The apps compile `${BOARD_DIR}/board.cpp` into
+  `main` and link LovyanGFX directly — no shared display component.
+- **Apps updated:** `pico-e32-display-test` and `pico-e32-host` call `board_lcd_*` instead of `ili9488_*`.
+
+Why the whole wrapper, not just the esp_lcd file: with one board and one driver, the config-struct
+indirection only spread board facts across two files. The board owning its display keeps the pin map,
+orientation and byte order in exactly one place — and a future board (e.g. the Phase-2 4" ST7701 RGB
+panel) is a new `boards/<board>/board.{h,cpp}`, not an app edit. The `esp_lcd` **findings** are preserved
+above; the code is recoverable from git (`e0a21cc` has the hand-rolled i80 driver) if the teal is ever
+root-caused.
+
+**Verified after the refactor (behaviour-preserving):** display-test still reports **393.0 / 210.6 fps**
+(byte-identical), palette bars render in distinct hues, and the host L-pattern is **UPRIGHT** with correct
+corners — same as before. All four apps build clean (display-test, host, bench-cam, native host).
+Board left on the LovyanGFX `display-test` build.
