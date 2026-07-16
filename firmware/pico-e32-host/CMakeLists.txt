@@ -1,5 +1,5 @@
 # pico-e32-host — Phase-0 Gate #3: trivial cart end-to-end (minimal ESP32Host).
-# Build from the repo root:  make build APP=pico-e32-host BOARD=makerfabs-ili9488
+# Build from the repo root:  make build APP=pico-e32-host BOARD=makerfabs-ili9488-r1
 cmake_minimum_required(VERSION 3.16)
 
 # Shared components (z8lua runtime, ili9488 display) live at the repo root.

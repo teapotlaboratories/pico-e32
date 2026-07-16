@@ -6,3 +6,11 @@
 	path = components/z8lua
 	url = https://github.com/teapotlaboratories/z8lua.git
 	branch = pico-e32
+[submodule "components/LovyanGFX"]
+	path = components/LovyanGFX
+	url = https://github.com/lovyan03/LovyanGFX.git
+	shallow = true
+[submodule "references/makerfabs-parallel-tft-lvgl-lgfx"]
+	path = references/makerfabs-parallel-tft-lvgl-lgfx
+	url = https://github.com/radiosound-com/makerfabs-parallel-tft-lvgl-lgfx.git
+	shallow = true

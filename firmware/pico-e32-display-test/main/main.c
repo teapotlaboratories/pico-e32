@@ -1,6 +1,7 @@
 /* Phase-0 Track A — ILI9488 scaled PICO-8 blit + FPS (Gate #1).
  *
- * Board: Makerfabs "ESP32-S3 Parallel TFT with Touch (ILI9488)", 320x480,
+ * Board-agnostic: the panel wiring comes from boards/<BOARD>/board_pins.h (ILI9488_PINS),
+ * selected by BOARD at build time. Target board today: an ILI9488 320x480 parallel panel,
  * 16-bit Intel-8080 parallel. The display driver now lives in the reusable
  * components/ili9488 module; this file is just the Gate #1 test harness (board
  * pin map + PICO-8 palette test image + 2x scale + FPS loop).
@@ -21,10 +22,10 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "ili9488.h"
+#include "board_pins.h"
 
 static const char *TAG = "trackA";
 
-/* ---- Makerfabs ILI9488 parallel board pin map (vendor LovyanGFX config) ---- */
 #define LCD_H_RES 320
 #define LCD_V_RES 480
 
@@ -44,12 +45,7 @@ static uint16_t pal565[16];
 
 void app_main(void) {
     ili9488_config_t cfg = {
-        .pin_wr = 18, .pin_dc = 17, .pin_cs = 46, .pin_bl = 45,   /* RD (48) unused by the write path */
-        .data_pins = {47,21,14,13,12,11,10,9, 3,8,16,15,7,6,5,4},
-        .pclk_hz = 20 * 1000 * 1000,                              /* vendor runs up to 20 MHz */
-        .h_res = LCD_H_RES, .v_res = LCD_V_RES,
-        .madctl = 0x48,                                           /* MX + BGR */
-        .swap_color_bytes = true,                                 /* flip if colours look wrong */
+        ILI9488_PINS,                           /* boards/<BOARD>/board_pins.h — set by BOARD, not by us */
         .max_transfer_bytes = OUT * OUT * 2 + 16,
     };
     ESP_ERROR_CHECK(ili9488_init(&cfg));

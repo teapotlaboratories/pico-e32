@@ -6,7 +6,7 @@
 #
 #   make build                                    # default app + board (below)
 #   make build APP=pico-e32-display-test
-#   make flash-monitor BOARD=makerfabs-ili9488 PORT=/dev/ttyACM0
+#   make flash-monitor BOARD=makerfabs-ili9488-r1 PORT=/dev/ttyACM0
 #
 SHELL := /bin/bash
 
@@ -19,10 +19,12 @@ PORT              ?= /dev/ttyACM0
 
 # Defaults: the verified Gate #2 app on the first device.
 APP      ?= pico-e32-luabench
-BOARD    ?= makerfabs-ili9488
+BOARD    ?= makerfabs-ili9488-r1
 APP_DIR  := $(CURDIR)/firmware/$(APP)
 BOARD_DIR := $(CURDIR)/boards/$(BOARD)
 
+# BOARD_DIR is passed to CMake as well: boards/<BOARD>/board_pins.h holds the wiring, so
+# switching BOARD switches the pin map with it. Apps add ${BOARD_DIR} to INCLUDE_DIRS.
 # Board overlay first (owns CONFIG_IDF_TARGET + PSRAM), then the app's own config.
 SDKCONFIG_DEFAULTS := $(BOARD_DIR)/sdkconfig.defaults$(if $(wildcard $(APP_DIR)/sdkconfig.defaults),;$(APP_DIR)/sdkconfig.defaults)
 
@@ -51,6 +53,7 @@ IDF := source "$(IDF_PATH)/export.sh" >/dev/null 2>&1 && cd "$(APP_DIR)" && \
        idf.py -B "$(BUILD_DIR)" -b "$(BAUD)" \
               -D SDKCONFIG="$(BUILD_DIR)/sdkconfig" \
               -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_DEFAULTS)" \
+              -D BOARD_DIR="$(BOARD_DIR)" \
               $(WIFI_DEFS)
 
 .PHONY: help install build flash monitor flash-monitor clean fullclean menuconfig size erase
