@@ -254,6 +254,34 @@ only once at the end.** The worklog is a running record, not a final report writ
 - **Keep the companion HTML render current** at meaningful checkpoints (see below).
 - Trivial one-shot changes don't need a worklog (same bar as the "Plan first" TODO rule).
 
+## Agent memory — keep it current, and keep it a pointer
+
+Agents with a persistent memory (Claude Code: `~/.claude/projects/<project>/memory/`) **must keep it
+current as work happens** — not only at the end, and not only when asked. A fresh session starts with
+memory and nothing else; what is not there is re-derived, or re-broken.
+
+**But memory is a pointer, not a second copy of the repo.** Progress belongs in
+[the worklog](#worklogs--write-and-update-as-you-go) and `docs/pico-e32-todo.md`, which are reviewed,
+diffed and shared. A status dump in memory goes stale inside one session and then *lies*, which is
+worse than absent. So:
+
+- **Record in the repo:** what happened, what was measured, what failed, what is still unknown.
+- **Record in memory:** *where to look* (start here, read the newest worklog), and facts that are
+  **not derivable from the repo** — bench/hardware realities, owner preferences, tooling gotchas.
+- **Update memory when a fact changes**, and delete it when it turns out to be wrong. A confidently
+  wrong memory is the most expensive artifact in this project.
+
+**The rule that matters most — save the implication, not just the fact.** Memory already recorded
+*"this board is the older N16R2, Makerfabs did a silent revision swap"*. It was read at the start of
+every session. It still cost **two days**, because it drew only the RAM conclusion and never said
+**"…therefore the LCD is on different pins"**. The fact was saved; the consequence was not, so it read
+as trivia. When writing a memory, state what it means for the work — a fact nobody can act on is not
+saved, it is stored.
+
+**End a session so the next one is cheap:** worklog updated as you went (dead ends included), gate
+status honest (`unknown` and `void` are valid), the board left on a known-good build and noted, and
+memory pointing at the newest worklog.
+
 ## Worklog HTML renders
 
 **Every worklog (`docs/worklog/*.md`) must have a companion HTML render at
