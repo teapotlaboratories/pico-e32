@@ -1,12 +1,15 @@
 /* ILI9488 over LovyanGFX Bus_Parallel16 — see ili9488.h.
  *
- * WHY LOVYANGFX AND NOT esp_lcd: on this board (Makerfabs 3.5" ILI9488, **first revision**)
- * the esp_lcd i80 path does not drive the panel at all. Three variants were tried on real
- * hardware -- but every one of those attempts used the WRONG PIN MAP (the newer board's
- * WR=18/DC=17/CS=46). Retried fairly on the correct rev-1 pins (2026-07-16), esp_lcd i80
- * renders geometry correctly but gets COLOUR wrong: red and yellow come out blue/green, with
- * only two distinguishable hues instead of four. A missing primary is disqualifying for a
- * PICO-8 console, so LovyanGFX stays. See docs/worklog/2026-07-16-panel-rev1-pinmap.md.
+ * WHY LOVYANGFX AND NOT esp_lcd: LovyanGFX renders this rev-1 panel correctly (upright, distinct
+ * colours, 393 fps). An esp_lcd i80 backend was built and bench-tested on the correct rev-1 pins
+ * (2026-07-16, components/ili9488_esp_lcd.c): it is markedly FASTER (590 fps, true zero-copy DMA)
+ * but its COLOUR is broken on this board in a way that is NOT a byte swap -- every bright fill
+ * collapses to the same teal and toggling the pre-swap changes nothing. The likely cause is that
+ * this board's data-bus wiring needs LovyanGFX's GPIO-matrix data-pin crossover, which is entangled
+ * with how esp_lcd drives commands; confirming it needs a logic analyzer. So LovyanGFX stays the
+ * default. (Earlier code here claimed esp_lcd "gets colour wrong: red/yellow -> blue/green" as a
+ * measured result -- that was an overclaim inherited from wrong-pin runs; the real, and stranger,
+ * behaviour is above.) See docs/worklog/2026-07-16-esp-lcd-vs-lovyangfx.md.
  *
  * The config below comes from the REV-1 source of record:
  *   references/makerfabs-parallel-tft-lvgl-lgfx/main/LGFX_MakerFabs_Parallel_S3.hpp
@@ -65,7 +68,15 @@ public:
             p.pin_busy = -1;
             p.memory_width  = c->h_res;  p.memory_height = c->v_res;
             p.panel_width   = c->h_res;  p.panel_height  = c->v_res;
-            p.offset_x = 0; p.offset_y = 0; p.offset_rotation = 0;
+            p.offset_x = 0; p.offset_y = 0;
+            /* LovyanGFX owns orientation: Panel_LCD::setRotation computes
+             *   _internal_rotation = ((r + offset_rotation) & 3) | ((r & 4) ^ (offset_rotation & 4))
+             * so bit 2 is a MIRROR FLAG that is XORed in, never carried into the rotation
+             * bits. With the app's rotation at 0, offset_rotation=4 selects MADCTL MY|ML
+             * (0x98 with BGR) -- a pure vertical mirror, leaving MX and the axis-swap MV
+             * clear, so 320x480 and the centred blit are untouched. Values 1/3/5/7 set MV
+             * and would swap to 480x320; 2 would mirror X as well. Only 4 isolates Y. */
+            p.offset_rotation = c->mirror_y ? 4 : 0;
             p.dummy_read_pixel = 8; p.dummy_read_bits = 1;
             p.readable    = true;
             p.invert      = false;

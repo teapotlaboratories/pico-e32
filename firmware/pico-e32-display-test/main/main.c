@@ -12,8 +12,13 @@
  *       and print the sustained FPS over UART.
  *
  * GATE #1: >= 30 fps sustained for the 256x256 scaled full-refresh.
- * Measured 2026-07-14: 288 fps (bus-level; visual colour/orientation still needs
- * the bench camera). If colours/orientation are wrong, adjust MADCTL / SWAP below. */
+ *
+ * Orientation and colour are NOT adjusted here. Orientation is a board fact
+ * (ILI9488_PINS -> .mirror_y in boards/<BOARD>/board_pins.h); .swap_color_bytes decides
+ * only WHICH SIDE swaps the RGB565 bytes, not whether the colours come out right, so
+ * flipping it to chase a colour problem just costs fps. The 2026-07-14 "288 fps" that used
+ * to be quoted here was void -- it clocked DMA into unconnected pins on the wrong pin map.
+ * See docs/worklog/2026-07-16-yflip-and-gate1-fps.md. */
 
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -72,12 +77,77 @@ void app_main(void) {
     ili9488_blit(OX, OY, OUT, OUT, out);
     ESP_LOGI(TAG, "palette bars drawn at (%d,%d) %dx%d", OX, OY, OUT, OUT);
 
-    const int SECONDS = 5;
-    int frames = 0;
-    int64_t t0 = esp_timer_get_time(), t = t0;
-    while (t - t0 < SECONDS * 1000000LL) {
-        /* rotate the palette each frame so motion is visible while measuring */
-        if ((frames & 0x0F) == 0) {
+    /* The bus ceiling, derived from the pclk we ACTUALLY configured rather than pasted in as a
+     * constant. On Bus_Parallel16 the panel takes COLMOD 0x55 (RGB565, 16bpp) and dlen_16bit puts
+     * 16 bits on the wire per WR strobe -> exactly ONE bus cycle per pixel. (The ILI9488's
+     * infamous RGB666/18-bit coercion is SPI-only: LovyanGFX applies it only when
+     * busType()==bus_spi -- Panel_ILI948x.hpp:169-179. It does not apply to this board.)
+     *
+     * A hard-coded ceiling is what made the old log line incoherent: it kept saying
+     * "~305 fps @16-bit/20MHz" long after the bus moved to 40 MHz, so a perfectly physical
+     * 370 fps read as 21% past the theoretical maximum. Derive it, don't quote it. */
+    const double ceiling_fps = (double)cfg.pclk_hz / (double)(OUT * OUT);
+
+    ESP_LOGI(TAG, "bus ceiling %.1f fps  (%d-bit @ %.1f MHz, %dx%d RGB565, 1 cycle/px)",
+             ceiling_fps, 16, cfg.pclk_hz / 1e6, OUT, OUT);
+
+    /* Time N frames of `body`, reporting mean/min/max frame time and utilisation.
+     * A fixed FRAME COUNT, not a fixed wall-clock window: it makes the sample auditable and
+     * leaves no frames in flight at the edges. min/max matter because the gate asks for a
+     * SUSTAINED rate, and a mean hides a stall. */
+    #define MEASURE(label, N, body)                                                            \
+        do {                                                                                   \
+            for (int w = 0; w < 32; w++) { body; }          /* warm-up, untimed */             \
+            int64_t _lo = INT64_MAX, _hi = 0;                                                  \
+            int64_t _t0 = esp_timer_get_time(), _p = _t0;                                      \
+            for (int f = 0; f < (N); f++) {                                                    \
+                body;                                                                          \
+                int64_t _n = esp_timer_get_time(), _d = _n - _p; _p = _n;                      \
+                if (_d < _lo) _lo = _d;                                                        \
+                if (_d > _hi) _hi = _d;                                                        \
+            }                                                                                  \
+            int64_t _el = _p - _t0;                                                            \
+            double _fps = (N) * 1e6 / (double)_el;                                             \
+            ESP_LOGI(TAG, "%-10s %4d frames in %7.3f ms -> %6.1f fps  "                        \
+                          "(frame %.2f ms mean, %.2f min, %.2f max)  %.1f%% of ceiling",       \
+                     label, (N), _el / 1000.0, _fps,                                           \
+                     _el / 1000.0 / (N), _lo / 1000.0, _hi / 1000.0,                           \
+                     100.0 * _fps / ceiling_fps);                                              \
+            if (_fps > ceiling_fps)                                                            \
+                ESP_LOGE(TAG, "%s: %.1f fps EXCEEDS the %.1f fps bus ceiling -- the clock "    \
+                              "assumption is wrong, or the blit is not draining. The number "  \
+                              "is a bug, not a record.", label, _fps, ceiling_fps);            \
+        } while (0)
+
+    /* Gate #1 asks for ">= 30 fps sustained for the 256x256 scaled full-refresh" -- and the plan's
+     * A2 says "time the sustained FLUSH loop". Those are two different numbers, and reporting one
+     * of them as "the" fps is how a display that drew nothing once passed at 288 fps. So report
+     * both, always:
+     *
+     *   blit-only  -- push a pre-built 256x256 buffer. Answers "is the display path the
+     *                 bottleneck?" (It is not.) This is A2's flush loop.
+     *   end-to-end -- palette-expand + 2x scale + blit, EVERY frame. What a real cart pays, and
+     *                 the number Gate #3/#4 inherit.
+     *
+     * The old loop rebuilt on 1 frame in 16 and so reported neither: ~15/16 of a blit rate,
+     * labelled as the scaled full-refresh the gate actually asks about. */
+    ESP_LOGI(TAG, "==== Gate #1 — PASS if >= 30 fps ====");
+
+    while (1) {
+        MEASURE("blit-only", 600, ili9488_blit(OX, OY, OUT, OUT, out));
+
+        /* Yield between phases so IDLE0 can feed the task watchdog. The old loop never yielded,
+         * so the TWDT fired at t~5.78s -- INSIDE the 5s measurement window -- and its backtrace
+         * went out over a 115200 UART, depressing the very number being measured. Each phase here
+         * is well under the 5s TWDT timeout, and this sits outside every timed region. */
+        vTaskDelay(1);
+
+        /* The palette advances every frame, so the panel is VISIBLY ANIMATING for the whole timed
+         * window. That is deliberate and it is the point: a still of a static image is exactly
+         * what 288 fps of DMA into unconnected pins would also have produced. A bench-camera frame
+         * grabbed while this runs, showing content that changes between grabs, is the evidence
+         * that turns a throughput counter into a display measurement. */
+        MEASURE("end-to-end", 300, ({
             uint16_t p0 = pal565[1];
             for (int i = 1; i < 15; i++) pal565[i] = pal565[i + 1];
             pal565[15] = p0;
@@ -86,15 +156,9 @@ void app_main(void) {
                 uint16_t *dst = &out[y * OUT];
                 for (int x = 0; x < OUT; x++) dst[x] = pal565[src[x / SCALE]];
             }
-        }
-        ili9488_blit(OX, OY, OUT, OUT, out);
-        frames++;
-        t = esp_timer_get_time();
-    }
-    double fps = frames / ((t - t0) / 1e6);
-    ESP_LOGI(TAG, "==== Gate #1: %d frames in %.2fs = %.1f fps (256x256 blit) ====",
-             frames, (t - t0) / 1e6, fps);
-    ESP_LOGI(TAG, "PASS if >= 30 fps.  (bus ceiling ~305 fps @16-bit/20MHz)");
+            ili9488_blit(OX, OY, OUT, OUT, out);
+        }));
 
-    while (1) vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(1);
+    }
 }

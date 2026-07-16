@@ -56,6 +56,15 @@ cp tools/bench_cam.env.example tools/bench_cam.env   # set BENCH_CAM_HOST=<ip>
   not survive a replug. Join the group once — `sudo usermod -aG dialout $USER` — then log out
   and back in (`id -nG` should list `dialout`). For a shell that predates the change, prefix
   with `sg dialout -c '...'` rather than reaching for `chmod`.
+- **Identifying the boards resets the camera's tuning.** The `esptool.py flash_id` above — the very
+  command this doc tells you to run to tell the two boards apart — **power-cycles the target**. The
+  measuring settings below live in the **sensor's registers, not in flash**, so probing the camera
+  silently reverts it to auto-exposure/auto-white-balance. A bare `/capture` afterwards then quietly
+  measures with exactly the AWB this rig exists to avoid. **Re-apply the settings on the first capture
+  of any session** (they persist until the next reset):
+  ```sh
+  curl -o frame.jpg 'http://<ip>/capture?awb=0&exp=600&gain=0&sat=2'
+  ```
 - **Lens film:** these ship with a protective film over the lens — captures come back black,
   and auto-exposure will *not* save you. Peel it before blaming the firmware.
 - **A failed camera probe self-diagnoses:** if `esp_camera_init()` fails, the firmware scans the
@@ -96,7 +105,18 @@ mistake this rig has already caused; the rule is what survives them.
   only real defect the rig has found in the display path — the panel rendering **Y-flipped** — was
   caught by shape, and why every colour-based claim so far has been withdrawn.
 - **Judge relative colour, never absolute RGB.** "Which bar is red vs blue" is answerable; "is this
-  exactly `(255,0,77)`" is not.
+  exactly `(255,0,77)`" is not. Two colours can still be *told apart* by a channel: the Y-flip was
+  confirmed partly by separating green `11` from yellow `10` on their **red** channel (31 vs 82) —
+  a relative comparison between two markers in the same frame, which survives any cast.
+
+### The rig resolves the LCD pixel grid — that is a feature, and a trap for scripts
+
+At the tuned focus the individual LCD pixels are visible (that is the top of the focus curve below).
+So **any automated per-pixel analysis must smooth above the grid pitch first**, or it reads the grid as
+signal. This has already produced one false result: a script counting tear bands (abrupt colour steps
+along a panel row) reported tears in a *demonstrably static, clean* frame, because the pixel grid
+registers as steps along the same axis. Smoothing then found the panel edge instead. **Judge structure
+by eye first, and only trust a detector that reproduces what the eye plainly sees on a control frame.**
 
 ### Test patterns must be asymmetric
 
@@ -185,8 +205,8 @@ the master index [`docs/pico-e32-todo.md`](../pico-e32-todo.md).
 | # | Item | Why | Verified by | Status |
 |---|------|-----|-------------|--------|
 | BC-1 | ~~Aim/focus the rig~~ **DONE** | The rig was never the problem — it correctly reported a backlit, unaddressed panel ([wrong pin map](../worklog/2026-07-16-panel-rev1-pinmap.md)). Now tuned + taped: **968 px panel, 57 px/bar, LCD pixel grid visible**; settings and the focus curve are documented above | 16 palette bars individually resolvable ✅ | ✅ **done** |
-| BC-2 | **Gate #1 visual confirm** — palette bars: colour order (`swap_color_bytes`), MADCTL orientation, image sharp | FPS (288) and the draw log prove throughput, not what's on the glass | Captured frame vs the expected 16-bar pattern; state pass/fail against the frame | 🔨 unblocked — bars confirmed; **Y-flip open** |
-| BC-3 | **Gate #3 visual confirm** — trivial cart image on the panel | Framebuffer is byte-identical host↔device; only the panel transform is unproven | Captured frame vs the host-rendered reference | 🔨 unblocked — pending the Y-flip fix |
+| BC-2 | ~~**Gate #1 visual confirm**~~ **DONE** | FPS and the draw log prove throughput, not what's on the glass | Captured frame vs the expected pattern; pass/fail stated against the frame | ✅ **done (2026-07-16)** — bars sharp at 57 px/bar; **Y-flip found, fixed and re-verified upright**; and the rig supplied the thing a counter never could: the panel is **visibly updating during the timed window** (tearing while the palette animates). See [worklog](../worklog/2026-07-16-yflip-and-gate1-fps.md) |
+| BC-3 | ~~**Gate #3 visual confirm**~~ **DONE** | Framebuffer is byte-identical host↔device; only the panel transform was unproven | Captured frame vs the host-rendered reference | ✅ **done (2026-07-16)** — the L-pattern cart renders **upright** on the glass: L on top+left, notch top-left, red=TL green=TR blue=BL yellow=BR, stub right. Blob-detected and mapped back to cart coordinates, not eyeballed |
 | BC-4 | **Battery operation** — confirm the board survives on battery | `POWER_HOLD_PIN` (GPIO 33) is now asserted per the vendor library, but USB masks the whole issue — the fix is unproven | Unplug USB; the board stays up and still serves `/capture` | ❓ unverified |
 | BC-5 | **Port the probe diagnostics to `driver/i2c_master.h`** | They use the legacy `driver/i2c.h`, which forces `CONFIG_SCCB_HARDWARE_I2C_DRIVER_LEGACY` on the whole app; mixing the two aborts at boot | Diagnostics still run on a forced-failure map, with the override removed and no boot loop | 💤 low priority |
 | BC-6 | **Label the boards physically** and record the mapping here | `.ai/AGENTS.md` → *Hardware & flashing notes* says refer to boards by a stable label; `/dev/ttyUSB*` numbering already swapped once mid-session | This doc names each board by label, and `PORT=` is looked up rather than assumed | 📋 open |
