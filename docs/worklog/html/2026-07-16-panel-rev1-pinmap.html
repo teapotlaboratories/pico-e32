@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The panel was never broken: rev-1 pin map — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)}
+  .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;
+       font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:10px;padding:.8rem 1rem;overflow-x:auto;font-size:.82rem;line-height:1.5}
+  .pill{display:inline-block;font-size:.78rem;font-weight:600;padding:.16em .6em;border-radius:999px;border:1px solid var(--border)}
+  .pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+  .pill.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);
+        border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  .tldr.warn{border-left-color:var(--warn)}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .6rem;text-align:left}
+  th{background:var(--codebg)} td.n{text-align:right;font-family:ui-monospace,monospace}
+  .yes{color:var(--ok);font-weight:700} .no{color:var(--bad);font-weight:700}
+  .diagram{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.2rem;margin:1.4rem 0;overflow-x:auto}
+  .cap{color:var(--muted);font-size:.85rem;margin:.4rem 0 0;text-align:center}
+  .note{color:var(--muted);font-size:.92rem}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <p class="date">2026-07-16</p>
+  <h1>The panel was never broken: this board is rev 1, and its LCD is on different pins</h1>
+
+  <div class="tldr">
+    <span class="pill ok">✓ RESOLVED — the display works</span><br>
+    After ~two days of concluding the panel was dead, the cause was the <strong>pin map</strong>. This unit
+    is Makerfabs' <strong>first revision</strong>, whose LCD sits on <strong>WR=35 / DC=36 / CS=37</strong> —
+    not the <strong>18 / 17 / 46</strong> their current board and current example code use. Every command
+    we sent went to pins this board does not wire to the panel.
+  </div>
+
+  <div class="tldr warn">
+    <strong>The one-line lesson:</strong> “verified against the vendor's own source” is worthless if you
+    never check <strong>which revision that source describes</strong>.
+  </div>
+
+  <h2>Why two maps exist — it is the PSRAM</h2>
+  <div class="diagram">
+    <svg viewBox="0 0 720 200" role="img" aria-label="Octal PSRAM consumes GPIO 35-37 on the new board, so its LCD moved to 18/17/46; rev 1 has quad PSRAM leaving 35-37 free for the LCD.">
+      <rect x="10" y="24" width="330" height="150" rx="8" fill="none" stroke="var(--ok)"/>
+      <text x="26" y="48" fill="var(--ok)" font-size="13" font-weight="700">rev 1 — this unit</text>
+      <text x="26" y="70" fill="var(--fg)" font-size="12">N16R2 · 2 MB <tspan font-weight="700">QUAD</tspan> PSRAM</text>
+      <text x="26" y="96" fill="var(--muted)" font-size="12">GPIO 35/36/37 → <tspan fill="var(--ok)" font-weight="700">free</tspan></text>
+      <rect x="26" y="112" width="298" height="34" rx="5" fill="var(--codebg)" stroke="var(--ok)"/>
+      <text x="175" y="134" text-anchor="middle" fill="var(--ok)" font-size="13" font-weight="700">LCD: WR 35 · DC 36 · CS 37</text>
+      <text x="26" y="164" fill="var(--muted)" font-size="11">factory sketch SD16_3.5.ino · radiosound LGFX header</text>
+
+      <rect x="380" y="24" width="330" height="150" rx="8" fill="none" stroke="var(--bad)" stroke-dasharray="5 4"/>
+      <text x="396" y="48" fill="var(--bad)" font-size="13" font-weight="700">current rev — NOT this unit</text>
+      <text x="396" y="70" fill="var(--fg)" font-size="12">N16R8 · 8 MB <tspan font-weight="700">OCTAL</tspan> PSRAM</text>
+      <text x="396" y="96" fill="var(--muted)" font-size="12">GPIO 35/36/37 → <tspan fill="var(--bad)" font-weight="700">taken by PSRAM</tspan></text>
+      <rect x="396" y="112" width="298" height="34" rx="5" fill="var(--codebg)" stroke="var(--bad)"/>
+      <text x="545" y="134" text-anchor="middle" fill="var(--bad)" font-size="13" font-weight="700">LCD: WR 18 · DC 17 · CS 46</text>
+      <text x="396" y="164" fill="var(--muted)" font-size="11">Makerfabs IDF example — the map we used for two days</text>
+    </svg>
+    <p class="cap">Octal PSRAM consumes GPIO 35/36/37, so the newer board had to move its LCD. Data bus D0–D15 is identical on both — only WR/DC/CS moved, which is why nothing looked obviously wrong.</p>
+  </div>
+
+  <h2>What the failure looked like</h2>
+  <p>A backlit white panel, forever — while <strong>everything that could report success, did</strong>:
+  the i80 bus built, DMA completed, <strong>288 fps</strong> sustained, framebuffer checksums
+  <strong>byte-identical host↔device</strong>, panel init <code>ESP_OK</code>, the component logging
+  <em>“Initialization complete”</em>. All true; all meaningless — the bus was clocking into pins with
+  nothing on the other end.</p>
+  <div class="tldr warn">
+    Gate #1's own worklog predicted this in writing: <em>“a broken panel init could still clock DMA at
+    288 fps into a blank screen.”</em> It was right, and it still took two days.
+  </div>
+
+  <h2>Eliminated first — all correct, all irrelevant</h2>
+  <table>
+    <tr><th>suspect</th><th>test</th><th>verdict</th></tr>
+    <tr><td>camera aimed wrong</td><td>toggled backlight (GPIO 45) — capture swung <b>92</b></td><td class="no">camera images the panel</td></tr>
+    <tr><td>camera can't see content</td><td>black↔white swing <b>0.3</b>; R→G→B hue frozen</td><td class="yes">true, correctly measured</td></tr>
+    <tr><td>RD floating</td><td>drove GPIO 48 high</td><td class="no">no change</td></tr>
+    <tr><td>pclk too fast</td><td>20 → 10 MHz</td><td class="no">no change</td></tr>
+    <tr><td>hand-rolled init</td><td>swapped to <code>esp_lcd_ili9488</code></td><td class="no">no change</td></tr>
+    <tr><td>the SDK</td><td>built Makerfabs' <b>own</b> IDF example</td><td class="no"><b>also white</b></td></tr>
+    <tr><td>the panel is dead</td><td>—</td><td class="no">owner: “it works from the factory”</td></tr>
+  </table>
+  <p><strong>The two facts that broke it open were the owner's</strong>, not measurements: <em>“the LCD
+  works from the factory, only after you flash it does it stop”</em> (kills dead-hardware) and
+  <em>“this is the first revision”</em> (the actual answer). The decisive move was theirs too — pointing at
+  <a href="https://github.com/radiosound-com/makerfabs-parallel-tft-lvgl-lgfx">radiosound-com/makerfabs-parallel-tft-lvgl-lgfx</a>,
+  whose S3 header shows <strong>WR 35, RS 36, CS 37</strong>.</p>
+  <div class="tldr warn">
+    <strong>Makerfabs' own example failing was the most misleading evidence of all.</strong> It built and
+    booted cleanly and still showed nothing — reading as “even the vendor's code can't drive it, so the
+    hardware is dead.” It is written for their <em>newer</em> board. A vendor example is authoritative only
+    for <strong>the revision it targets</strong>.
+  </div>
+
+  <h2>Driver: now LovyanGFX — the plan's other branch</h2>
+  <p><code>components/ili9488</code> now delegates to <strong>LovyanGFX</strong> (submodule pinned
+  <code>1.2.25</code>, FreeBSD licence) with the factory sketch's rev-1 config: <code>Bus_Parallel16</code>
+  + <code>Panel_ILI9488</code>, <code>dlen_16bit=true</code>, <code>pin_cs=37</code>, 40 MHz. Public API
+  unchanged; both apps compile untouched.</p>
+  <p>The plan said so all along — §A1: <em>“start from <code>atanisoft/esp_lcd_ili9488</code> <strong>or a
+  LovyanGFX <code>Bus_Parallel16</code> config</strong>”</em>. The original Gate #1 driver followed
+  <strong>neither</strong> (hand-rolled); the first branch was then forced repeatedly after it failed.
+  <strong><code>esp_lcd</code> i80 remains untested on the correct pins.</strong></p>
+
+  <h2>What the camera proved, in the end</h2>
+  <p>The rig was <strong>right the whole time</strong> and was disbelieved. It reported a uniform
+  blue-white field that never responded to LCD content — exactly what a backlit, unaddressed panel looks
+  like. Two theories were built to explain it away rather than doubting the pin map.</p>
+  <ul>
+    <li>✅ 16 vertical palette bars, 256×256 centred — <strong>57 px/bar</strong>, LCD pixel grid visible</li>
+    <li>⚠️ <strong>Panel renders Y-flipped</strong> — caught by an <strong>asymmetric L-shape</strong>, so it is
+      camera-artifact-proof. Open (MADCTL / LovyanGFX <code>mirror</code>).</li>
+    <li>⏸️ Colour: <strong>not assessable</strong> with this rig. A confidently-diagnosed “double byte-swap”
+      was invented from camera colour casts and <strong>withdrawn</strong>.</li>
+  </ul>
+
+  <h2>Now unknown again</h2>
+  <p><strong>Gate #1's 288 fps is void</strong> — DMA into unconnected pins, at 20 MHz on <code>esp_lcd</code>.
+  The bus is now LovyanGFX at 40 MHz actually driving a panel. That measurement has never been taken.</p>
+
+  <h2>Next</h2>
+  <ul>
+    <li>Fix the <strong>Y-flip</strong>, verify against the L-pattern.</li>
+    <li><strong>Measure Gate #1 honestly</strong> — the first fps number that means anything.</li>
+    <li>Consider retrying <code>esp_lcd</code> i80 on the correct pins (132 MB of LovyanGFX is a real cost).</li>
+  </ul>
+</div>
+</body>
+</html>

@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32Host graphics: cart assets, the harness, and the font question — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)}
+  .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;
+       font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:10px;padding:.8rem 1rem;overflow-x:auto;font-size:.82rem;line-height:1.5}
+  .pill{display:inline-block;font-size:.78rem;font-weight:600;padding:.16em .6em;border-radius:999px;border:1px solid var(--border)}
+  .pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+  .pill.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);
+        border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  .tldr.warn{border-left-color:var(--warn)}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .6rem;text-align:left}
+  th{background:var(--codebg)} td.n{text-align:right;font-family:ui-monospace,monospace}
+  .yes{color:var(--ok);font-weight:700} .no{color:var(--bad);font-weight:700}
+  .diagram{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.2rem;margin:1.4rem 0;overflow-x:auto}
+  .cap{color:var(--muted);font-size:.85rem;margin:.4rem 0 0;text-align:center}
+  .note{color:var(--muted);font-size:.92rem}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <p class="date">2026-07-15</p>
+  <h1>ESP32Host graphics: cart assets, the harness, and the font question</h1>
+
+  <div class="tldr">
+    <span class="pill ok">✓ HG-1 done</span> <span class="pill ok">✓ HG-5 unblocked</span> <span class="pill warn">⚠ nothing renders yet</span><br>
+    Started the PICO-8 graphics surface — the one Phase-1 item that is neither parts- nor camera-blocked.
+    The sprite sheet is <strong>extracted and verified by eye</strong>; the font turns out to be
+    <strong>CC-0 from Lexaloffle</strong>, so no emulator's copy is needed. Two findings fell out that change
+    other people's work — one for <code>HG-4</code>, one a <strong>caveat on Gate #2's headline number</strong>.
+  </div>
+
+  <p class="note"><em>This log is updated as the work happens, at each checkpoint — unlike
+  <a href="2026-07-15-bench-camera.html">the bench-camera log</a>, which was reconstructed at the end.</em></p>
+
+  <h2>Why this, now</h2>
+  <p>Celeste's <em>logic</em> already runs at frame rate (Gate #2, ~15.8 ms/frame) and the <em>display path</em>
+  is proven (Gate #3, 161.5 fps) — but <code>spr</code>/<code>map</code>/<code>print</code> are <strong>no-op
+  stubs</strong>, so no Celeste pixel has ever been drawn. Input, audio and SD are all parts-blocked; graphics
+  is not. And it is verifiable <em>without</em> the bench camera, which matters while
+  <a href="../../hardware/pico-e32-bench-camera.md">BC-1</a> blocks the visual gates.</p>
+
+  <h2>HG-1 ✅ — <code>__gfx__</code> extraction</h2>
+  <p><code>gen_celeste_cart.py</code> already pulled <code>__lua__</code>, <code>__gff__</code> and
+  <code>__map__</code> out of the cart, but <strong>never <code>__gfx__</code></strong> — which is precisely why
+  <code>spr</code> was a stub: there were no sprites to draw.</p>
+  <p>The section is 128 lines × 128 hex chars, <strong>one hex char per pixel</strong>. Note this is <em>not</em>
+  PICO-8's in-memory packing (2 px per byte, low nibble = left), so it decodes as a straight char→value read —
+  no nibble swap. Emitted as <code>CELESTE_GFX[16384]</code>, <strong>unpacked</strong> (1 index per byte) rather
+  than 8 KB @ 4 bpp: it keeps the <code>spr()</code> inner loop free of a shift/mask per pixel, and 16 KB of flash
+  is noise against a 78%-free partition.</p>
+  <p><strong>Verified by looking at it</strong>, not by asserting a byte count: the decoded sheet rendered to PNG
+  shows Madeline's sprites, balloons, snow, spikes, the chest, strawberries and the CELESTE title logo, with all
+  16 palette entries in use. Round-tripped <em>out of the generated header</em>, so it tests the real artifact.</p>
+
+  <h2>HG-2 🔨 — the verification harness</h2>
+  <p><code>tools/p8_png.py</code> renders any indexed buffer (one palette index per byte) to PNG through the
+  PICO-8 palette. <strong>Stdlib <code>zlib</code> only</strong> — no Pillow, so it runs anywhere the repo does.
+  Its <code>PAL</code> must stay identical to <code>PAL888</code> in <code>host_main.cpp</code>; that equality
+  <em>is</em> the point, since the tool exists to show what the firmware would draw.</p>
+  <p><strong>Still to do:</strong> the host-side dump of live frames — <code>-DHOST_MAIN</code> already runs the
+  cart and prints <code>fb_hash</code>; it needs to also write the framebuffer out.</p>
+
+  <h2>Finding 1 — the sheet and the map share memory (changes HG-4)</h2>
+  <p>The rendered sheet's <strong>bottom half looked like noise</strong>. It is not a decode bug: PICO-8 aliases
+  sprite rows 64–127 onto <strong>map rows 32–63</strong> (<code>0x1000–0x1FFF</code>), and Celeste stores map
+  data there. Decoding that region as map bytes (<code>tile = px[2x] | (px[2x+1] &lt;&lt; 4)</code>) yields exactly
+  4096 bytes whose statistics match the known-real <code>__map__</code>:</p>
+  <table>
+    <tr><th></th><th>zeros (empty)</th><th>tile id &lt; 64</th><th>max id</th><th>distinct</th></tr>
+    <tr><td>gfx rows 64–127, decoded as map</td><td class="n">40%</td><td class="n">95%</td><td class="n">127</td><td class="n">92</td></tr>
+    <tr><td><code>__map__</code> rows 0–31 (known real)</td><td class="n">36%</td><td class="n">96%</td><td class="n">104</td><td class="n">—</td></tr>
+  </table>
+  <p>That is map data, conclusively. <strong>Celeste's map is 128×64 cells</strong> — 32 rooms of 16×16 in an 8×4
+  grid — and <code>__map__</code> carries only <strong>half</strong> of it. From the cart:
+  <code>level_index() = room.x%8 + room.y*8</code> and <code>load_room</code> reads
+  <code>mget(room.x*16+tx, room.y*16+ty)</code> (<code>celeste.p8:63</code>, <code>:1118</code>, <code>:1132</code>).</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 720 210" role="img" aria-label="Celeste's 8 by 4 room grid: levels 0 to 15 come from the map section, levels 16 to 31 come from the shared gfx region.">
+      <text x="10" y="18" fill="var(--muted)" font-size="12">Celeste map — 128×64 cells = 32 rooms of 16×16 (8 across, 4 down)</text>
+      <!-- rows 0-15 : __map__ -->
+      <rect x="10" y="30" width="560" height="70" rx="6" fill="none" stroke="var(--ok)"/>
+      <text x="20" y="50" fill="var(--ok)" font-size="12" font-weight="700">levels 0–15 · map rows 0–31 · from __map__</text>
+      <text x="20" y="70" fill="var(--muted)" font-size="11">4096 B — extracted since day one</text>
+      <text x="20" y="88" fill="var(--ok)" font-size="11">Gate #2 benchmarks levels 3–15 here ✓ (honest, correctly scoped)</text>
+      <!-- rows 32-63 : shared -->
+      <rect x="10" y="112" width="560" height="70" rx="6" fill="none" stroke="var(--bad)" stroke-dasharray="5 4"/>
+      <text x="20" y="132" fill="var(--bad)" font-size="12" font-weight="700">levels 16–31 · map rows 32–63 · from the SHARED gfx region</text>
+      <text x="20" y="152" fill="var(--muted)" font-size="11">4096 B — aliased onto sprite rows 64–127; never extracted until now</text>
+      <text x="20" y="170" fill="var(--bad)" font-size="11">mget returns 0 → rooms look empty, and the bench never measured them</text>
+      <text x="586" y="70" fill="var(--ok)" font-size="26" font-weight="700">½</text>
+      <text x="586" y="152" fill="var(--bad)" font-size="26" font-weight="700">½</text>
+    </svg>
+    <p class="cap">Half the world lives in memory the sprite sheet shares. Feeding <code>map()</code> from <code>__map__</code> alone renders rooms 0–15 and silently empties 16–31.</p>
+  </div>
+
+  <h2>Finding 2 — a caveat on Gate #2's headline number (not a bug)</h2>
+  <p><code>celeste_bench.cpp:17</code> bounds-checks <code>mget</code> at <strong><code>y&lt;32</code></strong>,
+  returning 0 above — the exact half-map behaviour. <strong>This does not invalidate the ~15.8 ms/frame
+  result:</strong> the bench deliberately averages <strong>levels 3–15 only</strong>
+  (<code>for (int lv=3; lv&lt;=15; lv++)</code>), all of which live in rows 0–31, and the code says so
+  (<code>:119</code> — <em>“all levels 0-15 are in <code>__map__</code>”</em>). The measurement is honest and
+  correctly scoped.</p>
+  <div class="tldr warn">
+    <strong>But:</strong> levels <strong>16–30 were never benchmarked</strong> — roughly <em>half the game</em>,
+    and the later, generally busier half — because their map data was not extracted. Gate #2's “solid 30 fps”
+    conclusion therefore rests on the first half. Now that HG-1 decodes the shared region, the bench can cover all
+    31 gameplay levels; if the later rooms are denser the average moves, and that feeds straight into the
+    30-vs-60 fps policy Gate #4 must set. (Level 31 is the title screen.)
+  </div>
+
+  <h2>HG-5 ✅ unblocked — the font is CC-0 from the vendor</h2>
+  <p><code>print</code> needs the PICO-8 font, which lives in the console, not the cart. The obvious shortcut was
+  fake-08's <a href="https://github.com/jtothebell/fake-08/blob/master/source/fontdata.cpp"><code>fontdata.cpp</code></a>.
+  Checked rather than assumed:</p>
+  <ul>
+    <li>fake-08 declares <strong>MIT</strong>
+      (<a href="https://github.com/jtothebell/fake-08/blob/master/LICENSE.MD">LICENSE.MD</a>); GitHub reports
+      <code>NOASSERTION</code> as it is an aggregate file. It credits ~15 components (z8lua, zepto8, tac08,
+      PicoLove, SDL, LodePNG…) and <strong>says nothing about the font</strong>.</li>
+    <li><code>fontdata.cpp</code> carries <strong>no copyright notice</strong> — its whole provenance is
+      <code>//taken from tac08</code>. The chain is PICO-8 → tac08 → fake-08 → us, and MIT's one obligation
+      (preserve the notice) has nothing to preserve. An emulator can license its own code; it cannot grant rights
+      to data taken from PICO-8.</li>
+  </ul>
+  <p><strong>All moot — the font is CC-0 at the source.</strong> Lexaloffle's
+  <a href="https://www.lexaloffle.com/pico-8.php?page=faq">FAQ</a>: <em>“Yes, please do. The palette and font are
+  both available under a CC-0 license.”</em>
+  (<a href="https://x.com/lexaloffle/status/873657107203080192">announcement</a>). No attribution, no notice, no
+  licence file — and the <strong>same sentence retroactively covers the <code>PAL888</code> palette already in
+  <code>host_main.cpp</code></strong>.</p>
+  <p><strong>Decision:</strong> take the glyph data from the source; do not vendor an emulator's font file. The
+  <em>data</em> is CC-0 wherever it is read, but a specific <em>file</em> is that project's MIT work — transcribe
+  the data, don't copy the file. This also avoids needing a <em>Porting / adapting upstream code</em> code-map doc:
+  we are not porting anyone's code.</p>
+  <div class="tldr warn">
+    <strong>Trademark is separate and stricter.</strong> The same FAQ: <em>“If you are making a separate software
+    product, <strong>a run of multiple hardware units</strong>, PICO-8 related merchandise, or anything else --
+    please write to me first.”</em> A personal DIY handheld is fine; more than one unit, or shipping under the
+    PICO-8 name, is a write-first situation. Easy to misread “the font is CC-0” as “the branding is free” — the FAQ
+    says the opposite in the same breath.
+  </div>
+
+  <h2>What's verified / what isn't</h2>
+  <ul>
+    <li><strong>Verified:</strong> <code>__gfx__</code> decode (by eye, from the generated header); the
+      shared-region-is-map-data claim (4096 B, statistics matching <code>__map__</code>); the level→map-row mapping
+      (read from the cart, cited); Gate #2's scoping (read from the bench, cited); font licensing (vendor's FAQ).</li>
+    <li><strong>Not verified:</strong> nothing renders yet — <code>spr</code> is still a stub. The 16 KB
+      unpacked-sheet decision is reasoned, not measured against a real <code>spr()</code> inner loop. Whether levels
+      16–30 move the Gate #2 average is <strong>unknown</strong>, not assumed.</li>
+  </ul>
+
+  <h2>Next</h2>
+  <ul>
+    <li>Finish <strong>HG-2</strong> (host frame dump) → then <strong>HG-3</strong> (<code>spr</code>), verified by
+      dumping a frame and looking at it.</li>
+    <li><strong>HG-4</strong>: feed map rows 32–63 from the shared region; then extend the Gate #2 bench to levels 16–30.</li>
+  </ul>
+</div>
+</body>
+</html>

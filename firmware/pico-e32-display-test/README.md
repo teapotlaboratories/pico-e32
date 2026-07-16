@@ -4,7 +4,7 @@ Proves the display path on the Makerfabs 3.5" ILI9488 board and measures how fas
 PICO-8 frame can be pushed over the 16-bit i80 bus.
 
 - **A1** — draw 16 PICO-8 palette bars (a 128×128 indexed image) → confirms the bus, pin
-  map, orientation and colour order. Verify with the ESP-EYE camera.
+  map, orientation and colour order. Verify with the bench camera.
 - **A2** — palette-expand + integer **2× scale to 256×256**, centred with black borders,
   redrawn in a loop → prints sustained **FPS** over UART.
 
@@ -14,14 +14,14 @@ so this should pass comfortably; if not, it's a pclk/DMA config issue, not the p
 ## Build
 ```sh
 # from the repo root (ESP-IDF v5.1+):
-make build flash monitor APP=pico-e32-display-test BOARD=makerfabs-ili9488
+make build flash monitor APP=pico-e32-display-test BOARD=makerfabs-ili9488-r1
 ```
 
 ## ⚠️ Not yet run on hardware
 **Compiles clean for esp32s3** with the vendored ESP-IDF v5.4.2 (`make build` → 231 KB image),
 so the `esp_lcd` i80 API usage and pin config are sound against real headers. What's
 **unverified** is on-hardware behaviour — chiefly the **ILI9488 init sequence**, orientation
-and colour order (these can only be confirmed on the panel, via the ESP-EYE). The pin map and
+and colour order (these can only be confirmed on the panel, via the bench camera). The pin map and
 the palette-expand → 2× scale → FPS logic are the high-confidence parts.
 
 If the panel is blank or colours/orientation are wrong, in `main/main.c`:

@@ -23,12 +23,61 @@ sources. Full context and the design rationale are in
 | Signal | GPIO |
 |--------|------|
 | LCD D0–D15 | 47, 21, 14, 13, 12, 11, 10, 9, 3, 8, 16, 15, 7, 6, 5, 4 |
-| WR / RD / DC(RS) / CS | 18 / 48 / 17 / 46 (tied low) |
+| **WR / RD / DC(RS) / CS** | **35 / 48 / 36 / 37** ← **rev 1**; see the revision warning below |
 | Backlight | 45 (PWM) |
 | Touch I²C SDA / SCL | 38 / 39 |
 | microSD CS / MOSI / MISO / CLK | 1 / 2 / 41 / 42 |
 
-Board config: [`boards/makerfabs-ili9488/`](../../boards/makerfabs-ili9488/).
+Board config: [`boards/makerfabs-ili9488-r1/`](../../boards/makerfabs-ili9488-r1/) — the **`-r1`
+suffix is deliberate**: the revision is part of the board's identity here, because rev 1 and the
+current rev need *different LCD pins*. A future N16R8 unit would be a separate `-r2` board dir with
+its own `board_pins.h`, not an edit to this one.
+
+> ## ⚠️ THIS BOARD HAS TWO PIN MAPS. The LCD pins depend on the PSRAM part.
+>
+> **This unit is Makerfabs' FIRST REVISION (N16R2, 2 MB *quad* PSRAM). Its LCD is on WR=35,
+> DC=36, CS=37.** Using the newer board's map (18/17/46) leaves the panel backlit-white while
+> DMA completes normally and framebuffer checksums stay correct — it looks exactly like dead
+> hardware. That mistake cost roughly two days here; see
+> [worklog](../worklog/2026-07-16-panel-rev1-pinmap.md).
+>
+> **Why the maps differ — it is the PSRAM:**
+>
+> | board | PSRAM | GPIO 35/36/37 | LCD WR / DC / CS |
+> |---|---|---|---|
+> | **rev 1 (this unit)** | **N16R2 — quad** | **free** | **35 / 36 / 37** |
+> | current rev | N16R8 — octal | **taken by PSRAM** | 18 / 17 / 46 |
+>
+> ESP32-S3 octal PSRAM occupies GPIO 35/36/37. The first revision's quad part leaves them free,
+> so the LCD used them; when Makerfabs moved to the octal N16R8 they had to relocate the LCD.
+> Both maps are published by Makerfabs, for different boards, with nothing marking which is which.
+>
+> **Sources — check the revision, not just the vendor:**
+>
+> - **rev 1 (this unit) — pinned locally:**
+>   [`references/makerfabs-parallel-tft-lvgl-lgfx`](../../references/makerfabs-parallel-tft-lvgl-lgfx/main/LGFX_MakerFabs_Parallel_S3.hpp)
+>   (`radiosound-com/makerfabs-parallel-tft-lvgl-lgfx` @ `6d4b014`) — WR 35, RS 36, CS 37, RD 48,
+>   40 MHz. This is the **source of record** for this board.
+> - **current rev — NOT pinned, and do not follow it:**
+>   [Makerfabs' `IDF/matouch/.../3-5-ili9488-ft6236/config.h`](https://github.com/Makerfabs/Makerfabs-ESP32-S3-Parallel-TFT-with-Touch/blob/7670a17/IDF/matouch/main/boards/3-5-ili9488-ft6236/config.h)
+>   @ `7670a17` — WR 18, DC 17, CS 46. **The map that does not work here.** Its LVGL example builds
+>   and boots on this unit and still shows nothing. (Kept as a URL, not a 323 MB submodule: its only
+>   job is to be the wrong answer.)
+>
+> ⚠️ **Makerfabs updated `firmware/SD16_3.5/SD16_3.5.ino` in place** when they revised the board — it
+> now reads WR=18/RS=17. Same repo, same path, different hardware, nothing marking the change. Do not
+> cite it for rev-1 pins.
+>
+> **Other facts, verified on hardware 2026-07-16:**
+>
+> - **RD (GPIO 48) must be driven HIGH** — `esp_lcd`'s i80 driver never touches it; the vendor's
+>   examples set it explicitly. `components/ili9488` does this via `pin_rd`.
+> - **RST is `NC`** — tied to the board reset; there is no panel reset line to drive.
+> - **pclk 40 MHz** works (the rev-1 reference's value). The data bus D0–D15 is **identical across
+>   both revisions** — only WR/DC/CS moved.
+> - **The driver is LovyanGFX**, not `esp_lcd` — see [`components/ili9488`](../../components/ili9488).
+>   `esp_lcd` i80 was never made to work on this board, though that was tried before the pin map was
+>   understood, so it is untested on the correct pins.
 
 ---
 
@@ -54,12 +103,20 @@ Board config: [`boards/makerfabs-ili9488/`](../../boards/makerfabs-ili9488/).
 | Touch I²C SDA / SCL / RST | 17 / 18 / 38 |
 | microSD SCK / MISO / MOSI / CS | 12 / 13 / 11 / 10 |
 
-Board config: [`boards/makerfabs-st7701-4in/`](../../boards/makerfabs-st7701-4in/).
+**No board config yet** — `boards/makerfabs-st7701-4in/` was removed as premature: this board is a
+Phase-2 target that must clear **Gate #5** (the RGB drift soak test) before it is trusted, and an
+unused sdkconfig invites someone to build against it. Recreate it when Gate #5 is actually run.
 
 ---
 
 ## Verification camera
 
-**Espressif ESP-EYE** — aimed at the panel for hardware-in-the-loop display verification (per
-[`.ai/AGENTS.md`](../../.ai/AGENTS.md) → *Verifying changes*). Discontinued/obsolete to buy new
-(modern equivalent: ESP32-S3-EYE), but already on hand.
+**M5Stack Timer Camera F** (ESP32-D0WDQ6-V3 + OV3660, fisheye, 8 MB PSRAM) — aimed at the panel
+for hardware-in-the-loop display verification (per [`.ai/AGENTS.md`](../../.ai/AGENTS.md) →
+*Verifying changes*). Setup, capture loop and gotchas:
+[`docs/hardware/pico-e32-bench-camera.md`](../hardware/pico-e32-bench-camera.md).
+
+> Replaced an **Espressif ESP-EYE**, whose OV2640 turned out to be dead: it answered on no pin
+> pair, at no address, under no XCLK, with either I2C driver, while the same firmware brought
+> the Timer Camera up first try. Worth knowing before buying another (the ESP-EYE is also EOL;
+> its modern equivalent is the ESP32-S3-EYE).
