@@ -11,3 +11,9 @@ idf_component_register(
 if(DEFINED CELESTE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE CELESTE=${CELESTE})
 endif()
+
+# Opt-in fps measurement: `... DEFS='-D CELESTE=1 -D MEASURE_FPS=1'` runs an instrumented loop that
+# times Step() vs drawFrame() over UART instead of fake-08's GameLoop. Off by default.
+if(DEFINED MEASURE_FPS)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE MEASURE_FPS=${MEASURE_FPS})
+endif()

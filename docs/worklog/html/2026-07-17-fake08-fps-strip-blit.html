@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fake-08 on-device fps: a 4.6× drawFrame fix — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8;
+        --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  :root[data-theme="light"]{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;--ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  :root[data-theme="dark"]{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;--border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)} .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;font-family:var(--mono)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left}
+  th{background:var(--codebg);font-family:var(--mono);font-size:.82rem}
+  td.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .bad{color:var(--bad);font-weight:600} .ok{color:var(--ok);font-weight:600}
+  /* before/after bars */
+  .bars{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.2rem 1.3rem;margin:1.3rem 0}
+  .bars h3{margin:.1rem 0 1rem;font-size:.95rem}
+  .bar{display:grid;grid-template-columns:120px 1fr;align-items:center;gap:.8rem;margin:.55rem 0}
+  .bar .lab{font:600 .82rem/1.2 var(--mono);color:var(--muted)}
+  .bar .track{position:relative;background:var(--codebg);border-radius:7px;height:30px;overflow:hidden}
+  .bar .fill{position:absolute;inset:0 auto 0 0;border-radius:7px;display:flex;align-items:center;justify-content:flex-end;padding-right:.55rem;
+             font:700 .8rem/1 var(--mono);color:#fff}
+  .fill.b{background:linear-gradient(90deg,#c0392b,#e0563f);width:100%}
+  .fill.a{background:linear-gradient(90deg,#1a7f4b,#2faa68);width:21.8%}
+  .scale{font:.72rem/1 var(--mono);color:var(--muted);text-align:right;margin-top:.3rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <h1>fake-08 on-device fps: a 4.6× drawFrame fix</h1>
+  <p class="date">2026-07-17 · measurement → optimization</p>
+
+  <div class="tldr">
+    Measured fake-08's real frame time on the ESP32-S3 (nobody had — Gate #2 measured the VM with drawing
+    <em>stubbed</em>). Found <code>drawFrame</code> at <b>16.5 ms</b>, ~9× the VM cost, because the 128 KB
+    scaled framebuffer didn't fit internal SRAM and fell back to <b>PSRAM</b>. Fixed by blitting in
+    <b>strips from a 16 KB internal buffer</b> (+ inlined nibble-unpack): <b class="ok">16.5 → 3.6 ms</b>,
+    frame ceiling 54 → 189 fps. The draw path is no longer the fps bottleneck.
+  </div>
+
+  <div class="bars">
+    <h3><code>drawFrame</code> cost per frame (measured on Celeste, ESP32-S3)</h3>
+    <div class="bar"><div class="lab">before · PSRAM fb</div><div class="track"><div class="fill b">16.5 ms</div></div></div>
+    <div class="bar"><div class="lab">after · SRAM strips</div><div class="track"><div class="fill a">3.6 ms</div></div></div>
+    <div class="scale">0 ────────────────────────────── ~17 ms · lower is better</div>
+  </div>
+
+  <h2>How it was measured</h2>
+  <p>An opt-in build (<code>DEFS='-D CELESTE=1 -D MEASURE_FPS=1'</code>) swaps fake-08's <code>GameLoop</code>
+  for an instrumented loop that times <code>vm-&gt;Step()</code> (the VM's <code>_update</code>/<code>_draw</code>)
+  vs <code>host-&gt;drawFrame()</code> (our unpack → RGB565 → 2× → blit) separately with <code>esp_timer</code>,
+  logging every 30 frames over UART (read with raw <code>stty 115200</code> + <code>cat</code>). Target = the
+  real Celeste cart; it parks on the title (input stubbed), but <code>drawFrame</code>'s cost is
+  content-independent so it's representative regardless.</p>
+
+  <h2>The finding</h2>
+  <table>
+    <tr><th></th><th>step</th><th>drawFrame</th><th>total</th><th>ceiling</th></tr>
+    <tr><td><b>before</b></td><td class="n">1.9</td><td class="n bad">16.5</td><td class="n">18.4</td><td class="n">54 fps</td></tr>
+    <tr><td><b>after</b></td><td class="n">1.7</td><td class="n ok">3.6</td><td class="n">5.3</td><td class="n ok">189 fps</td></tr>
+  </table>
+  <p>The boot log gave the cause away: <code>scaled fb fell back to PSRAM</code>, <code>fb=0x3c1004f8</code>
+  (PSRAM lives at <code>0x3C000000</code>+; internal DRAM at <code>0x3FC88000</code>+). The 256×256 scaled
+  frame is <b>128 KB</b> — too big for internal DMA-capable SRAM — so it fell to PSRAM, and both the
+  per-pixel writes and the blit-read then paid PSRAM latency.</p>
+
+  <h2>The fix — strips from internal SRAM</h2>
+  <p>Instead of one 128 KB framebuffer, build + blit the frame in <b>8 strips of 32 panel rows</b> through a
+  <b>16 KB internal DMA buffer</b> (<code>strip=0x3fcc99c8</code> — internal, no fallback). Every write and
+  the blit DMA now stay in fast internal SRAM. Also inlined the 4-bpp nibble-unpack (one byte → two pixels),
+  dropping the per-pixel <code>getPixelNibble</code> call. In the fork's <code>ESP32Host::drawFrame</code>
+  (<code>@8f4b6a6</code>); <code>source/</code> untouched.</p>
+
+  <h2>What it means for frame rate</h2>
+  <p><code>drawFrame</code> is now 3.6 ms and content-independent. With Gate #2's measured gameplay VM cost
+  (~15.8 ms avg, 5–40 ms per room):</p>
+  <ul>
+    <li><b>avg room</b> ≈ 15.8 + 3.6 = ~19 ms → <b class="ok">~51 fps</b> — comfortable 30, near 60</li>
+    <li><b>light rooms</b> ≈ 8 ms → <b>60 fps capable</b></li>
+    <li><b>densest rooms</b> ≈ 44 ms → ~23 fps — now <b>VM-bound</b>, not draw-bound</li>
+  </ul>
+  <p>So the draw path is settled; frame rate is now bounded by the
+  <a href="../../reference/z8lua-speedup-research.md">z8lua interpreter</a> on heavy rooms — to be tackled
+  only after profiling a representative cart on the S3.</p>
+
+  <p style="color:var(--muted);font-size:.9rem;margin-top:1.6rem">See also:
+    <a href="2026-07-17-fake08-port-vendor.md">the port worklog</a> ·
+    <a href="../../runtime/pico-e32-fake08-codemap.md">code-map</a></p>
+</div>
+</body>
+</html>
