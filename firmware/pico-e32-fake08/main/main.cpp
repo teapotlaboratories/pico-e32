@@ -13,6 +13,8 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_system.h"
+#include "esp_heap_caps.h"
 
 #include "board.h"    /* board_lcd_init() — the app owns board bring-up */
 #include "host.h"
@@ -90,27 +92,36 @@ extern "C" void app_main(void) {
      * 256×256 blit), so this draw number is representative even on Celeste's title; the Step number is
      * whatever the cart runs this frame. "max fps" = compute-bound ceiling = 1000 / (step+draw). Logs
      * every 30 frames over UART. drawMode is ignored by drawFrame, so pass 0. */
-    ESP_LOGI(TAG, "MEASURE_FPS: timing Step vs drawFrame (paced to target; max fps = compute ceiling)");
+    ESP_LOGI(TAG, "MEASURE_FPS: timing Step vs drawFrame + heap; spike frames (step>30ms) logged with heap delta");
     {
         int64_t acc_step = 0, acc_draw = 0, worst = 0;
         int frames = 0;
         long total = 0;
         while (true) {
+            uint32_t h0 = esp_get_free_heap_size();       /* total free before Step (Lua uses the sys heap) */
             int64_t t0 = esp_timer_get_time();
             vm->Step();
             int64_t t1 = esp_timer_get_time();
             host->drawFrame(vm->GetPicoInteralFb(), vm->GetScreenPaletteMap(), 0);
             int64_t t2 = esp_timer_get_time();
-            int64_t comp = t2 - t0;
-            acc_step += (t1 - t0);
+            uint32_t h1 = esp_get_free_heap_size();        /* after Step: net Lua alloc/free this frame */
+            int64_t step_us = t1 - t0, comp = t2 - t0;
+            /* isolate spike frames: is the heavy Step allocating (room-load spawn) or stable (pure compute)? */
+            if (step_us > 30000) {
+                ESP_LOGW(TAG, "SPIKE f%ld: step=%.1f ms | heap %u->%u (%+d B) | low-water %u | int-free %u",
+                         total, step_us / 1000.0, (unsigned)h0, (unsigned)h1, (int)(h1 - h0),
+                         (unsigned)esp_get_minimum_free_heap_size(),
+                         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+            }
+            acc_step += step_us;
             acc_draw += (t2 - t1);
             if (comp > worst) worst = comp;
             frames++;
             total++;
             if (frames >= 30) {
                 double s = acc_step / 1000.0 / frames, d = acc_draw / 1000.0 / frames, c = s + d;
-                ESP_LOGI(TAG, "f%ld: step=%.2f draw=%.2f total=%.2f ms | max %.1f fps | worst %.2f ms (%.0f fps)",
-                         total, s, d, c, 1000.0 / c, worst / 1000.0, 1000000.0 / (double)worst);
+                ESP_LOGI(TAG, "f%ld: step=%.2f draw=%.2f ms | max %.1f fps | worst %.2f ms | heap-free %u",
+                         total, s, d, 1000.0 / c, worst / 1000.0, (unsigned)esp_get_free_heap_size());
                 acc_step = acc_draw = 0;
                 frames = 0;
                 worst = 0;

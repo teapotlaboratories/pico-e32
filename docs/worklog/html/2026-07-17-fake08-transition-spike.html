@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chasing the fake-08 room-transition spike (compute, not GC) — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;
+        --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230}}
+  :root[data-theme="light"]{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;--ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6}
+  :root[data-theme="dark"]{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;--border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:860px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)} .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;font-family:var(--mono)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left}
+  th{background:var(--codebg);font-family:var(--mono);font-size:.82rem}
+  td.n{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .ok{color:var(--ok);font-weight:600} .bad{color:var(--bad);font-weight:600} .mut{color:var(--muted)}
+  .key{background:color-mix(in srgb,var(--ok) 12%,var(--surface));border:1px solid color-mix(in srgb,var(--ok) 40%,transparent);border-radius:10px;padding:.9rem 1.1rem;margin:1.3rem 0}
+  ul{padding-left:1.2rem} li{margin:.35rem 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">&larr; worklog index</a></p>
+  <h1>Chasing the room-transition spike</h1>
+  <p class="date">2026-07-17 &middot; and it&rsquo;s compute, not GC</p>
+
+  <div class="tldr">
+    Steady Celeste runs ~110 fps on the S3, but every room load costs a single <b>~95 ms</b> frame. Isolated
+    the spike frames (heap-instrumented <code>MEASURE_FPS</code>): they&rsquo;re <code>Step()</code>, and they
+    <b>allocate ~54 KB</b> &mdash; Celeste&rsquo;s <code>load_room</code> spawning a room&rsquo;s objects. Then a
+    decisive test: made z8lua&rsquo;s GC lazy and re-measured. The <code>load_room</code> spikes
+    <b>didn&rsquo;t budge</b> &rarr; the cost is inherent interpreter compute, <b>not GC</b>. No cheap fix.
+  </div>
+
+  <h2>The spike frames</h2>
+  <p><code>drawFrame</code> stays a flat 3.6 ms, so the ~95 ms is entirely the Lua VM. Heap deltas on spikes:</p>
+  <table>
+    <tr><th>frame</th><th>step</th><th>heap &Delta;</th><th>reading</th></tr>
+    <tr><td class="n">f0</td><td class="n">246 ms</td><td class="n">&minus;289 KB</td><td class="mut">boot / <code>_init</code> (one-time)</td></tr>
+    <tr><td class="n">f175</td><td class="n">104 ms</td><td class="n">+12 KB freed</td><td>a GC-dominant frame</td></tr>
+    <tr><td class="n">f387</td><td class="n">95 ms</td><td class="n">&minus;54 KB alloc</td><td><code>load_room</code> &mdash; spawns objects</td></tr>
+    <tr><td class="n">f611</td><td class="n">95 ms</td><td class="n">&minus;54 KB alloc</td><td><code>load_room</code> &mdash; spawns objects</td></tr>
+  </table>
+  <p>z8lua&rsquo;s incremental GC does collection work <em>proportional</em> to that 54 KB burst (default
+  <code>GCMUL=200</code> &rarr; ~2&times;, concentrated in the same frame). So: <code>load_room</code> logic, or GC?</p>
+
+  <h2>The decisive experiment</h2>
+  <p>Tuned our z8lua fork&rsquo;s GC lazy &mdash; <code>GCPAUSE 200&rarr;400</code>, <code>GCMUL 200&rarr;80</code>
+  (no fake-08 <code>source/</code> touched) &mdash; and re-measured the same spikes:</p>
+  <table>
+    <tr><th>spike</th><th>baseline</th><th>lazy GC</th><th>verdict</th></tr>
+    <tr><td>f175 &mdash; GC-dominant (+12 KB)</td><td class="n">104 ms</td><td class="n ok">77 ms</td><td>GC-bound &rarr; helped</td></tr>
+    <tr><td>f387 &mdash; <code>load_room</code> (&minus;54 KB)</td><td class="n">95 ms</td><td class="n bad">96 ms</td><td><b>unchanged</b></td></tr>
+    <tr><td>f611 &mdash; <code>load_room</code> (&minus;54 KB)</td><td class="n">95 ms</td><td class="n bad">96 ms</td><td><b>unchanged</b></td></tr>
+  </table>
+
+  <div class="key">
+    <b>The room-load spikes are inherent interpreter compute, not GC.</b> Halving the GC rate left them
+    untouched; it only sped a GC-dominant frame. GC tuning does <em>not</em> fix the transition hitch.
+  </div>
+
+  <h2>Implication</h2>
+  <p>There&rsquo;s <b>no cheap separate fix</b> for the transition spike &mdash; it&rsquo;s the same
+  z8lua-interpreter-speed limit, concentrated on the heaviest (room-load) frame. It&rsquo;s <b>acceptable
+  as-is:</b> steady play ~110 fps, room transitions carry a screen-wipe that masks a single dropped frame,
+  and transitions are infrequent in real play. Bytecode precompile would <em>not</em> help (it speeds cart
+  parse, not <code>load_room</code>).</p>
+  <p>So the perf roadmap simplifies: don&rsquo;t chase GC or a bespoke transition fix. The only lever is
+  general <a href="../../reference/z8lua-speedup-research.md">z8lua speed</a>, worth pursuing only if a
+  hitch-free 60 fps becomes a hard requirement &mdash; profile first.</p>
+
+  <h2>Landed / reverted</h2>
+  <ul>
+    <li><b>Kept:</b> the <code>MEASURE_FPS</code> heap + spike-isolation instrumentation (a better perf tool).</li>
+    <li><b>Reverted:</b> the z8lua GC tuning (didn&rsquo;t fix the real spike) and the temp <code>scanInput</code> auto-drive.</li>
+  </ul>
+
+  <p style="color:var(--muted);font-size:.9rem;margin-top:1.6rem">See also:
+    <a href="2026-07-17-fake08-fps-strip-blit.md">the fps worklog</a> &middot;
+    <a href="../../reference/z8lua-speedup-research.md">z8lua-speedup research</a></p>
+</div>
+</body>
+</html>
