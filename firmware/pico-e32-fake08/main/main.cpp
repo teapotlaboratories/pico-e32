@@ -23,6 +23,11 @@
 #include "Audio.h"
 #include "logger.h"
 
+#include "sd_mount.h"
+
+#include <vector>
+#include <string>
+
 static const char *TAG = "fake08";
 
 /* Cart source. Default build = the tiny test cart below (ours). An opt-in CELESTE build
@@ -65,6 +70,9 @@ extern "C" void app_main(void) {
         return;
     }
 
+    /* Mount the SD (SPI2) for carts. Non-fatal: with no card / no line pull-ups we fall back to flash. */
+    esp_err_t sd_ret = sd_mount();
+
     /* fake-08 boot sequence (mirrors source/main.cpp:39-51). */
     Host    *host   = new Host(0, 0);
     PicoRam *memory = new PicoRam();
@@ -76,10 +84,23 @@ extern "C" void app_main(void) {
     host->setUpPaletteColors();  /* must precede oneTimeSetup — it builds the RGB565 LUT */
     host->oneTimeSetup(audio);
     host->setTargetFps(30);
-    vm->SetCartList(host->listcarts());
 
-    ESP_LOGI(TAG, "loading %s (%u bytes)", CART_NAME, (unsigned)CART_LEN);
-    if (!vm->LoadCart(CART_BYTES, CART_LEN, false)) {
+    /* Cart source ladder: an SD cart if a card is mounted and holds a .p8/.p8.png, else the flash cart. */
+    host->setCartDirectory(SD_MOUNT_POINT);
+    std::vector<std::string> carts = host->listcarts();
+    vm->SetCartList(carts);
+
+    bool loaded = false;
+    if (sd_ret == ESP_OK && !carts.empty()) {
+        ESP_LOGI(TAG, "loading SD cart: %s", carts[0].c_str());
+        loaded = vm->LoadCart(carts[0], false); /* std::string overload -> reads the file over VFS */
+        if (!loaded) ESP_LOGW(TAG, "SD cart failed to load; falling back to the flash cart");
+    }
+    if (!loaded) {
+        ESP_LOGI(TAG, "loading %s (%u bytes)", CART_NAME, (unsigned)CART_LEN);
+        loaded = vm->LoadCart(CART_BYTES, CART_LEN, false);
+    }
+    if (!loaded) {
         ESP_LOGE(TAG, "LoadCart failed");
         return;
     }

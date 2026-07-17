@@ -7,4 +7,11 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 
 # z8lua opcode dispatch is faster with jump tables (see components/z8lua/CMakeLists.txt); the component
-# already forces them for the interpreter. Nothing else app-specific yet.
+# already forces them for the interpreter.
+
+# SD cart loader: FATFS long filenames (default IDF uses 8.3 short names, which mangle/hide .p8 cart
+# names). LFN_HEAP (not _STACK — the main task stack is already stretched for Lua); UTF-8 so non-ASCII
+# cart names survive.
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=255
+CONFIG_FATFS_API_ENCODING_UTF_8=y

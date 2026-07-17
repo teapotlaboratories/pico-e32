@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SD cart loader — fake-08 loads carts from microSD — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;
+        --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230}}
+  :root[data-theme="light"]{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;--ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6}
+  :root[data-theme="dark"]{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;--border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:860px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)} .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;font-family:var(--mono)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.35rem 0}
+  .fig{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem;margin:1.3rem 0;overflow-x:auto}
+  .fig svg{display:block;width:100%;height:auto;min-width:520px}
+  .cap{color:var(--muted);font-size:.85rem;margin:.6rem .2rem 0}
+  .g{background:color-mix(in srgb,var(--warn) 12%,var(--surface));border:1px solid color-mix(in srgb,var(--warn) 40%,transparent);border-radius:10px;padding:.8rem 1rem;margin:.9rem 0}
+  .g b{color:var(--fg)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">&larr; worklog index</a></p>
+  <h1>SD cart loader</h1>
+  <p class="date">2026-07-17 &middot; fake-08 loads carts from the onboard microSD</p>
+
+  <div class="tldr">
+    The fake-08 port goes from a one-cart flash demo to a <b>self-loading runtime</b>: it mounts the board's
+    onboard microSD (SPI2), scans for <code>.p8</code>/<code>.p8.png</code>, and loads one &mdash; falling
+    back to the flash cart when there's no card. <b>Verified on a real 32&nbsp;GB SDHC card:</b> mount,
+    graceful empty-card fallback, and a seeded cart rendering "LOADED FROM SD!" on the panel.
+  </div>
+
+  <h2>Not actually parts-blocked</h2>
+  <p>The 3.5" board has an <b>onboard microSD slot</b> (SPI: CS=1/MOSI=2/MISO=41/CLK=42). The port doc
+  called SD "parts-blocked", but only a card &mdash; a commodity &mdash; is needed. The SD pins are
+  <b>disjoint from the i80 LCD</b>, so the SD gets a private SPI2 bus, <b>no contention</b> (the "shared
+  bus" note was a 4"-board carry-over, DP-7 &mdash; confirmed against <code>board.cpp</code>).</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 250" role="img" aria-label="Two independent buses (i80 LCD, SPI2 SD) into the ESP32-S3, and the cart-source ladder: SD if present else flash.">
+      <defs><style>
+        text{font-family:ui-monospace,Menlo,Consolas,monospace}
+        .box{fill:var(--surface);stroke:var(--border)} .chip{fill:var(--codebg);stroke:var(--border)}
+        .ok{fill:color-mix(in srgb,var(--ok) 14%,var(--surface));stroke:var(--ok)}
+        .t{fill:var(--fg);font-size:12.5px} .tb{fill:var(--fg);font-size:13px;font-weight:700}
+        .mut{fill:var(--muted);font-size:11.5px} .acc{fill:var(--accent);font-size:12px;font-weight:700}
+        .arr{stroke:var(--accent);stroke-width:1.6;fill:none} .arrm{stroke:var(--muted);stroke-width:1.4;fill:none}
+      </style>
+        <marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="var(--accent)"/></marker>
+        <marker id="m" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="var(--muted)"/></marker>
+      </defs>
+      <!-- S3 -->
+      <rect class="box" x="360" y="96" width="140" height="58" rx="10"/>
+      <text class="tb" x="430" y="122" text-anchor="middle">ESP32-S3</text>
+      <text class="mut" x="430" y="140" text-anchor="middle">pico-e32-fake08</text>
+      <!-- LCD bus -->
+      <rect class="chip" x="40" y="60" width="230" height="52" rx="9"/>
+      <text class="t" x="56" y="82">i80 parallel LCD</text>
+      <text class="mut" x="56" y="100">WR35 DC36 CS37 + 16 data</text>
+      <path class="arrm" d="M270,86 L356,110" marker-end="url(#m)"/>
+      <!-- SD bus -->
+      <rect class="chip" x="40" y="140" width="230" height="52" rx="9"/>
+      <text class="t" x="56" y="162">microSD (private SPI2)</text>
+      <text class="mut" x="56" y="180">CS1 MOSI2 MISO41 CLK42</text>
+      <path class="arr" d="M270,166 L356,140" marker-end="url(#a)"/>
+      <text class="mut" x="300" y="128" text-anchor="middle">disjoint pins</text>
+      <!-- ladder -->
+      <text class="acc" x="560" y="70">cart source ladder</text>
+      <rect class="ok"  x="560" y="82" width="270" height="40" rx="9"/>
+      <text class="tb" x="576" y="106">1 &middot; SD cart  (/sdcard/*.p8)</text>
+      <rect class="box" x="560" y="130" width="270" height="38" rx="9"/>
+      <text class="t"  x="576" y="153">2 &middot; flash cart  (test / Celeste)</text>
+      <path class="arr" d="M500,120 L556,102" marker-end="url(#a)"/>
+      <path class="arrm" d="M500,132 L556,148" marker-end="url(#m)"/>
+      <text class="mut" x="576" y="188">graceful: no card / no cart &rarr; fall through</text>
+    </svg>
+    <p class="cap">The SD rides its own SPI2 bus, independent of the i80 LCD. At boot the app tries an SD
+      cart first and falls back to the flash cart &mdash; mount failure never aborts.</p>
+  </div>
+
+  <h2>What changed (source/ byte-identical)</h2>
+  <ul>
+    <li><b>app</b> &mdash; new <code>sd_mount.{h,cpp}</code> (<code>esp_vfs_fat_sdspi_mount</code>, graceful);
+      <code>main.cpp</code> sets <code>/sdcard</code> via the shared <code>setCartDirectory()</code> and runs
+      the ladder (<code>LoadCart(carts[0], false)</code> &rarr; VFS file read).</li>
+    <li><b>fork <code>ESP32Host</code></b> &mdash; un-stub <code>listcarts()</code> (scan the dir, ported
+      from gcw0) + <code>getCartDirectory()</code>.</li>
+    <li><b>shared <code>source/</code> untouched</b> &mdash; the file read (<code>get_file_contents</code>),
+      <code>setCartDirectory</code>, and the absolute-path cart load (<code>cart.cpp</code>) already exist.
+      <code>REQUIRES</code> gains <code>fatfs sdmmc esp_driver_sdspi esp_driver_spi</code>.</li>
+  </ul>
+
+  <h2>Two gotchas fixed</h2>
+  <div class="g"><b>Case.</b> FATFS <code>readdir</code> returns 8.3 short names <b>UPPERCASE</b>
+    (<code>HELLO.P8</code>), and fake-08's <code>isCartFile</code> checks <code>.p8</code>
+    <b>case-sensitively</b> &rarr; carts hidden. The fork's <code>listcarts</code> lowercases a copy before
+    the check; FAT open is case-insensitive, so the path keeps original case.</div>
+  <div class="g"><b>Long filenames.</b> Need <code>CONFIG_FATFS_LFN_HEAP</code> &mdash; and IDF applies
+    <code>sdkconfig.defaults</code> only when <em>generating</em> a fresh sdkconfig, so an existing build
+    silently ignored it. After a regen, long/lower-case names survive.</div>
+
+  <h2>Follow-ups</h2>
+  <ul>
+    <li><b>Cart selection</b> (a chooser, not just the first cart) needs input &mdash; parts-blocked. Today:
+      first cart by readdir order, deterministic, logged.</li>
+    <li>Line <b>pull-ups</b> are the #1 SD-SPI failure; this card worked, but a flaky socket may need them or
+      a lower <code>max_freq_khz</code> (a commented one-liner in <code>sd_mount.cpp</code>).</li>
+  </ul>
+
+  <p style="color:var(--muted);font-size:.9rem;margin-top:1.6rem">See also:
+    <a href="2026-07-17-fake08-port-vendor.md">the port worklog</a> &middot;
+    <a href="../../hardware/pico-e32-display.md">display doc (DP-7)</a></p>
+</div>
+</body>
+</html>
