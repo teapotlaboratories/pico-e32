@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fake-08 port: vendoring + the ESP32 platform, draw-only milestone — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)}
+  .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;
+       font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:10px;padding:.8rem 1rem;overflow-x:auto;font-size:.8rem;line-height:1.5}
+  .pill{display:inline-block;font-size:.78rem;font-weight:600;padding:.16em .6em;border-radius:999px;border:1px solid var(--border)}
+  .pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);
+        border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .6rem;text-align:left;vertical-align:top}
+  th{background:var(--codebg)}
+  figure{margin:1.4rem 0}
+  figcaption{color:var(--muted);font-size:.85rem;margin-top:.5rem;text-align:center}
+  .fig{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <h1>fake-08 port: vendoring + the ESP32 platform</h1>
+  <p class="date">2026-07-16 (UTC 07-17) · draw-only milestone</p>
+
+  <div class="tldr">
+    <span class="pill ok">milestone reached</span>
+    The runtime is now a <strong>port of fake-08</strong>. Forked to
+    <code>teapotlaboratories/fake-08&nbsp;@&nbsp;pico-e32</code>, added a <code>platform/esp32</code> Host
+    binding + an IDF component (<code>source/</code> byte-identical), and a <code>pico-e32-fake08</code> app.
+    It <strong>boots on the ESP32-S3 and renders a flash <code>.p8</code> cart upright on the panel</strong>
+    through fake-08's own <code>Vm::GameLoop</code> and the shared z8lua VM — retiring the plan's one real
+    unknown: <em>nobody had run fake-08 on an ESP32.</em>
+  </div>
+
+  <h2>The shape of the port</h2>
+  <p>fake-08's <code>Host</code> is one concrete class; each platform links its own method definitions. We
+  write <em>one</em> <code>ESP32Host</code> and reuse everything else — the Lua binding, the whole draw
+  API, the cart loader, the frame loop. The board display driver we already had becomes
+  <code>drawFrame</code>'s back end.</p>
+
+  <figure class="fig">
+    <svg viewBox="0 0 840 430" width="100%" role="img" aria-label="Port architecture: byte-identical fake-08 source plus a thin ESP32 platform binding, driving the board panel through the shared z8lua VM.">
+      <defs>
+        <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+          <path d="M0,0 L7,3 L0,6 Z" fill="#5b8bf0"/>
+        </marker>
+        <style>
+          .box{fill:#161b22;stroke:#2a323d;stroke-width:1.5;rx:10}
+          .lbl{fill:#e6edf3;font:600 14px ui-sans-serif,system-ui;}
+          .sub{fill:#9aa5b1;font:12px ui-monospace,monospace;}
+          .kept{fill:#12241a;stroke:#2f6b45;}
+          .new{fill:#141d33;stroke:#3a5bb0;}
+          .flow{stroke:#5b8bf0;stroke-width:2;fill:none;marker-end:url(#ah)}
+          .tag{fill:#3fb950;font:600 11px ui-sans-serif,system-ui;}
+          .tagn{fill:#5b8bf0;font:600 11px ui-sans-serif,system-ui;}
+        </style>
+      </defs>
+
+      <!-- upstream, kept -->
+      <rect class="box kept" x="20" y="30" width="360" height="150" rx="10"/>
+      <text class="tag" x="36" y="52">KEPT · byte-identical</text>
+      <text class="lbl" x="36" y="76">fake-08 source/</text>
+      <text class="sub" x="36" y="98">vm.cpp · graphics.cpp · cart.cpp</text>
+      <text class="sub" x="36" y="116">picoluaapi · Audio · GameLoop()</text>
+      <text class="sub" x="36" y="134">host.h  (the Host interface)</text>
+      <text class="sub" x="36" y="160">+ hostCommonFunctions.cpp → 13 Host methods</text>
+
+      <!-- shared VM -->
+      <rect class="box kept" x="20" y="210" width="360" height="70" rx="10"/>
+      <text class="tag" x="36" y="232">SHARED</text>
+      <text class="lbl" x="36" y="256">components/z8lua</text>
+      <text class="sub" x="36" y="272">fix32 VM · lua_setpico8memory · REQUIRES z8lua</text>
+
+      <!-- new binding -->
+      <rect class="box new" x="450" y="30" width="370" height="120" rx="10"/>
+      <text class="tagn" x="466" y="52">NEW · platform/esp32</text>
+      <text class="lbl" x="466" y="78">ESP32Host.cpp</text>
+      <text class="sub" x="466" y="98">drawFrame → board_lcd_blit (2× · 90°CW)</text>
+      <text class="sub" x="466" y="116">timing esp_timer/vTaskDelay · input/audio stub</text>
+      <text class="sub" x="466" y="138">fake08_board.h  (board_lcd_* contract)</text>
+
+      <!-- app -->
+      <rect class="box new" x="450" y="180" width="370" height="100" rx="10"/>
+      <text class="tagn" x="466" y="202">NEW · firmware/pico-e32-fake08</text>
+      <text class="lbl" x="466" y="228">app_main</text>
+      <text class="sub" x="466" y="248">board_lcd_init · boot seq · vm-&gt;GameLoop()</text>
+      <text class="sub" x="466" y="266">flash .p8 test cart (ours)</text>
+
+      <!-- board -->
+      <rect class="box" x="450" y="320" width="370" height="70" rx="10"/>
+      <text class="lbl" x="466" y="352">boards/…/board.cpp → ILI9488 panel</text>
+      <text class="sub" x="466" y="372">LovyanGFX · 320×480 · 90° rotation (DP-8)</text>
+
+      <!-- flows -->
+      <path class="flow" d="M380,120 L446,120"/>
+      <path class="flow" d="M380,245 L446,235"/>
+      <path class="flow" d="M635,150 L635,176"/>
+      <path class="flow" d="M635,280 L635,316"/>
+      <text class="sub" x="384" y="112">Host impl</text>
+      <text class="sub" x="384" y="262">VM</text>
+    </svg>
+    <figcaption>Byte-identical fake-08 <code>source/</code> + the shared z8lua VM, driven by a thin new
+      <code>platform/esp32</code> binding and app. Only the blue boxes are new code.</figcaption>
+  </figure>
+
+  <h2>Vendoring — the fork convention</h2>
+  <p>The repo already forks upstream into the org and pins a project branch (that's how
+  <code>teapotlaboratories/z8lua @ pico-e32</code> works). fake-08 itself carries per-system port branches
+  off <code>master</code> (<code>wiiu-standalone</code>, <code>rg35xx-libretro</code>, …), so an ESP32
+  branch fits its own convention. We forked to <code>teapotlaboratories/fake-08</code>, branched
+  <code>pico-e32</code>, and added it as a submodule at <code>components/fake08</code> — with fake-08's
+  nested <code>libs/z8lua</code> left un-inited (we link the shared <code>components/z8lua</code> instead).</p>
+
+  <h2>Build-integration fixes — meeting a modern toolchain</h2>
+  <p>fake-08's per-platform GNU Makefiles meet GCC 14.2 / C++23-default ESP-IDF. Three adaptations, all in
+  the fork's <code>CMakeLists.txt</code> — <strong>none touch <code>source/</code></strong>:</p>
+  <table>
+    <tr><th>Symptom</th><th>Fix</th><th>Why</th></tr>
+    <tr><td><code>lodepng::decode(…, filename)</code> — no matching overload</td>
+        <td>Leave lodepng disk I/O <em>enabled</em></td>
+        <td><code>cart.cpp:310</code> references the file overload unconditionally; <code>fopen</code> is
+            newlib, the path is dead code here</td></tr>
+    <tr><td><code>lerp</code> conflicts with a previous declaration</td>
+        <td>Compile the component at <code>-std=gnu++17</code></td>
+        <td>fake-08 is C++17; its global <code>lerp</code> collides with C++20 <code>std::lerp</code></td></tr>
+    <tr><td>fake-08 needs its VM's <code>lua_setpico8memory</code> / <code>fix32</code></td>
+        <td><code>REQUIRES z8lua</code> — the shared fork</td>
+        <td>Our z8lua exports exactly that API (<code>lua.h:260</code>); the whole runtime compiled against
+            it with no drift</td></tr>
+  </table>
+  <p>The PSRAM Lua-heap hook the plan called for (<code>vm.cpp:300</code>) turned out unnecessary for boot:
+  <code>CONFIG_SPIRAM_USE_MALLOC</code> already backs large allocations with PSRAM. Keeping the hot state
+  in internal SRAM is a later optimization. Result: an 846&nbsp;KB image, 19% partition free.</p>
+
+  <h2>On the panel — and one twist</h2>
+  <p>First flash: fake-08 booted and rendered — but <strong>rotated 90°</strong> (vertical bars became
+  horizontal, text went sideways). Was it the port, or had the bench camera moved? Reflashing the trivial
+  L-pattern host and capturing in the <em>same</em> position gave an exact match to the archived reference —
+  camera unchanged. So the <strong>display path itself renders PICO-8 content rotated 90°</strong>. The
+  L-pattern never revealed it (its top+left bars render as a plausible on-panel "L"); fake-08's <em>text</em>
+  is the first content that made it obvious. HG and fake-08 share the identical blit, so it's a whole-path
+  property — worked around in <code>drawFrame</code> (pre-rotate 90° CW) and logged for a systemic
+  <code>board.cpp</code> fix (<code>DP-8</code>). After the fix: bars vertical, text left-to-right, a live
+  frame counter. Milestone clean.</p>
+
+  <h2>What's next</h2>
+  <ul>
+    <li><strong>Parts-blocked seams</strong> — input (I²C expander), audio (MAX98357A), SD carts — fill in
+      the stubbed <code>Host</code> methods → Gate&nbsp;#4.</li>
+    <li><strong><code>DP-8</code></strong> — rotate once in <code>board.cpp</code> so every app agrees,
+      then drop the per-<code>drawFrame</code> rotate.</li>
+    <li>Optional: PSRAM Lua-heap allocator + internal-SRAM nursery once a heavy cart needs it.</li>
+  </ul>
+  <p style="color:var(--muted);font-size:.9rem;margin-top:1.4rem">Details + the function-level mapping:
+    <a href="../../runtime/pico-e32-fake08-codemap.md">code-map</a> ·
+    <a href="../2026-07-17-fake08-port-vendor.md">worklog (md)</a> ·
+    <a href="../../runtime/pico-e32-fake08-port.md">port plan</a></p>
+</div>
+</body>
+</html>

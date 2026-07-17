@@ -69,7 +69,14 @@ first real port milestone can happen **now**, on the bench, without any parts or
    deliberate-divergences section (per AGENTS.md → Porting). The `ESP32Host` methods and the `vm.cpp:300`
    heap hook are the first entries.
 
-## First milestone — draw-only, no parts (do this next)
+## First milestone — draw-only, no parts ✅ DONE (2026-07-16)
+
+**Reached.** fake-08's runtime boots on the ESP32-S3 and renders a flash-embedded `.p8` cart **upright** on
+the panel (16-colour bars + text + a live frame counter → `_update` and `_draw` both run through
+fake-08's own `Vm::GameLoop`). Vendored as `teapotlaboratories/fake-08 @ pico-e32` (submodule
+`components/fake08`) + the `firmware/pico-e32-fake08` app; the shared `components/z8lua` is the VM. See the
+[code-map](pico-e32-fake08-codemap.md) and the [worklog](../worklog/2026-07-17-fake08-port-vendor.md).
+One follow-up: the panel renders 90° rotated (worked around in `drawFrame`; systemic fix is display `DP-8`).
 
 Per plan §0.5 / development-plan.md:174: **a minimal `ESP32Host` (only `drawFrame` + timing; input/audio
 stubbed) running a flash-embedded cart on the panel.** This:
