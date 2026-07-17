@@ -5,6 +5,9 @@ Follow-up to the merged [fake-08 draw-only port](2026-07-17-fake08-port-vendor.m
 *every draw call stubbed*, so the actual `Step()` + `drawFrame()` cost was unknown. This is the load-bearing
 number for the 30-vs-60 fps policy. Measured it; found and fixed a real bottleneck.
 
+**Visual report:** [`pico-e32-fake08-fps-report.html`](../runtime/pico-e32-fake08-fps-report.html) — a
+frame-budget bar + an ESP32-S3 memory-map diagram of the fix.
+
 ## How it was measured
 
 An opt-in build — `make build APP=pico-e32-fake08 … DEFS='-D CELESTE=1 -D MEASURE_FPS=1'` — replaces
