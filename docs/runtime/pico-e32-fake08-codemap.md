@@ -27,7 +27,7 @@ framebuffer device that outputs `uint16` RGB565 with stubbed audio — the close
 
 | `ESP32Host.cpp` method | Declared | Modelled on (upstream) | Notes |
 |---|---|---|---|
-| `drawFrame(picoFb, screenPaletteMap, drawMode)` | `host.h:119` | `platform/bittboy/source/BittBoyHost.cpp:390` (default branch `:520`) | Same `getPixelNibble` unpack (`nibblehelpers.cpp:29`) + `_mapped16BitColors[screenPaletteMap[c]&0x8f]` LUT. Ours: `board_lcd_rgb565` LUT, 2× scale, **90° CW rotate** (divergence D4), one `board_lcd_blit`. Only default `drawMode`. |
+| `drawFrame(picoFb, screenPaletteMap, drawMode)` | `host.h:119` | `platform/bittboy/source/BittBoyHost.cpp:390` (default branch `:520`) | Same `getPixelNibble` unpack (`nibblehelpers.cpp:29`) + `_mapped16BitColors[screenPaletteMap[c]&0x8f]` LUT. Ours: `board_lcd_rgb565` LUT, 2× scale (**straight mapping**, `pico (x,y) -> (2x,2y)`, matching bittboy/HG), one `board_lcd_blit`. Only default `drawMode`. |
 | `oneTimeSetup(Audio*)` | `host.h:103` | `BittBoyHost.cpp:196` (LUT build `:222`) | Build the RGB565 LUT from `_paletteColors` via `board_lcd_rgb565`; alloc the scaled fb; clear the panel. No SDL. |
 | `setUpPaletteColors()` | — | `source/hostCommonFunctions.cpp:29` | **Reused as-is** (shared), fills `_paletteColors[144]` from `hostVmShared.h:11-44`. |
 | `scanInput()` | `host.h:111` | `BittBoyHost.cpp:292` | **Stub**: returns `InputState_t{}` (all zero) — divergence D3. |
@@ -62,9 +62,10 @@ All forced by the target (ESP32-S3 / ESP-IDF / a modern toolchain) and documente
   and yielding each frame feeds the FreeRTOS idle task / task watchdog.
 - **D3 — input + audio stubbed.** `scanInput` returns 0; the audio trio no-ops. *Why:* parts-blocked (no
   I²C expander / MAX98357A yet). Mirrors bittboy's already-stubbed audio.
-- **D4 — `drawFrame` rotates 90° CW.** *Why:* the board's display path presents PICO-8 content rotated 90°
-  (bench-verified via the L-pattern; see the worklog). Contained here for now; the systemic fix (rotate
-  once in `board.cpp`) is display backlog **`DP-8`**.
+- **D4 — retired (not a divergence).** An earlier revision rotated `drawFrame` 90° CW, believing the
+  display was rotated. It isn't — the **bench camera** is mounted 90° (`docs/…/pico-e32-bench-camera.md`,
+  bench-rig-gotchas: raw captures must be turned 90° CW to judge). `drawFrame` is the straight mapping,
+  identical in orientation to bittboy/HG. Slot kept so D5–D7 don't renumber.
 - **D5 — build: `-std=gnu++17`** (component-wide). *Why:* fake-08 is C++17; its global `lerp`
   (`mathhelpers.h:8`) collides with C++20 `std::lerp` under IDF's default. Build-level, in
   `components/fake08/CMakeLists.txt`.

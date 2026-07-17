@@ -106,7 +106,7 @@
       <!-- board -->
       <rect class="box" x="450" y="320" width="370" height="70" rx="10"/>
       <text class="lbl" x="466" y="352">boards/…/board.cpp → ILI9488 panel</text>
-      <text class="sub" x="466" y="372">LovyanGFX · 320×480 · 90° rotation (DP-8)</text>
+      <text class="sub" x="466" y="372">LovyanGFX · 320×480 · renders upright</text>
 
       <!-- flows -->
       <path class="flow" d="M380,120 L446,120"/>
@@ -149,23 +149,24 @@
   <code>CONFIG_SPIRAM_USE_MALLOC</code> already backs large allocations with PSRAM. Keeping the hot state
   in internal SRAM is a later optimization. Result: an 846&nbsp;KB image, 19% partition free.</p>
 
-  <h2>On the panel — and one twist</h2>
-  <p>First flash: fake-08 booted and rendered — but <strong>rotated 90°</strong> (vertical bars became
-  horizontal, text went sideways). Was it the port, or had the bench camera moved? Reflashing the trivial
-  L-pattern host and capturing in the <em>same</em> position gave an exact match to the archived reference —
-  camera unchanged. So the <strong>display path itself renders PICO-8 content rotated 90°</strong>. The
-  L-pattern never revealed it (its top+left bars render as a plausible on-panel "L"); fake-08's <em>text</em>
-  is the first content that made it obvious. HG and fake-08 share the identical blit, so it's a whole-path
-  property — worked around in <code>drawFrame</code> (pre-rotate 90° CW) and logged for a systemic
-  <code>board.cpp</code> fix (<code>DP-8</code>). After the fix: bars vertical, text left-to-right, a live
-  frame counter. Milestone clean.</p>
+  <h2>On the panel — and a camera trap I walked into</h2>
+  <p>First flash: fake-08 booted and rendered — but the raw <code>/capture</code> looked <strong>rotated
+  90°</strong>. I first blamed the display and rotated <code>drawFrame</code> 90° CW. <strong>Wrong.</strong>
+  The bench <strong>camera is mounted 90°</strong> — the bench-rig gotchas say it outright (<em>"rotate
+  captures 90° CW before judging; LEFT of frame = TOP of panel"</em>) — I just didn't apply the rule.
+  Rotating the raw capture 90° CW reveals the truth: the <em>rotated</em> <code>drawFrame</code> made the
+  <em>physical panel</em> wrong while the capture looked right. The straight mapping (matching HG) renders
+  the panel <strong>upright</strong>; its capture only <em>looks</em> rotated because of the camera.
+  Reverted, then re-verified the right way (capture → rotate 90° CW → vertical bars, horizontal
+  "FAKE-08 ON ESP32-S3", live frame counter). No display bug. The lesson: a bench capture that already looks
+  upright is the suspicious one — always rotate before judging.</p>
 
   <h2>What's next</h2>
   <ul>
     <li><strong>Parts-blocked seams</strong> — input (I²C expander), audio (MAX98357A), SD carts — fill in
       the stubbed <code>Host</code> methods → Gate&nbsp;#4.</li>
-    <li><strong><code>DP-8</code></strong> — rotate once in <code>board.cpp</code> so every app agrees,
-      then drop the per-<code>drawFrame</code> rotate.</li>
+    <li><strong>Nothing on orientation</strong> — the display is upright; <code>DP-8</code> is closed as
+      "not a bug" (the camera is 90°-mounted, per the bench-rig gotchas).</li>
     <li>Optional: PSRAM Lua-heap allocator + internal-SRAM nursery once a heavy cart needs it.</li>
   </ul>
   <p style="color:var(--muted);font-size:.9rem;margin-top:1.4rem">Details + the function-level mapping:

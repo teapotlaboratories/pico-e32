@@ -76,7 +76,8 @@ the panel (16-colour bars + text + a live frame counter → `_update` and `_draw
 fake-08's own `Vm::GameLoop`). Vendored as `teapotlaboratories/fake-08 @ pico-e32` (submodule
 `components/fake08`) + the `firmware/pico-e32-fake08` app; the shared `components/z8lua` is the VM. See the
 [code-map](pico-e32-fake08-codemap.md) and the [worklog](../worklog/2026-07-17-fake08-port-vendor.md).
-One follow-up: the panel renders 90° rotated (worked around in `drawFrame`; systemic fix is display `DP-8`).
+(Orientation note: the display renders **upright** with the straight `drawFrame`; raw bench captures merely
+*look* 90°-rotated because the camera is mounted 90° — see `DP-8` / bench-rig-gotchas.)
 
 Per plan §0.5 / development-plan.md:174: **a minimal `ESP32Host` (only `drawFrame` + timing; input/audio
 stubbed) running a flash-embedded cart on the panel.** This:

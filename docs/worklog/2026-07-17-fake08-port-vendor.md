@@ -139,30 +139,32 @@ hand-written `.p8` test cart running under fake-08:** 16 PICO-8 palette colour b
 own `Vm::GameLoop`). Palette and the built-in font are correct. **This retires the plan's one real unknown
 — "nobody has run fake-08 on an ESP32 specifically."** It does.
 
-## Orientation finding — the panel renders PICO-8 content rotated 90°
+## Orientation — a camera-mounting trap I walked into (and corrected)
 
-The first capture was **rotated 90°** (cart draws vertical bars + horizontal text; panel showed horizontal
-bars + vertical text). Ruled out a camera move by reflashing the trivial L-pattern host and capturing in
-the *same* camera position — it matched the archived `lpattern-after.jpg` exactly (camera unchanged).
+The first raw `/capture` looked **rotated 90°** (the cart draws vertical bars + horizontal text; the
+capture showed horizontal bars + sideways text). I first concluded the *display* was rotated and added a
+90° CW pre-rotation to `ESP32Host::drawFrame`. **That was wrong** — and it's worth recording exactly how,
+because the trap is documented and I still fell in.
 
-Root cause: the board's display path presents PICO-8 content **rotated 90°**, and the L-pattern cart never
-revealed it — it draws a top bar + left bar ("Γ") that happens to render as an on-panel "L", which *looks*
-plausibly upright. fake-08's **text** is the first content that makes the rotation obvious. HG and fake-08
-share the identical blit (`host_main.cpp:538-541` == `ESP32Host::drawFrame`), so this is a property of the
-whole display path, not fake-08-specific.
+The bench **camera is mounted 90° rotated.** [[bench-rig-gotchas]] states it plainly: *"captures need
+rotating 90° CW before judging (LEFT of frame = TOP of panel)."* I didn't apply that during the debug.
+Rotating the raw capture 90° CW (the documented method) shows the truth: with the *rotated* `drawFrame`,
+the **physical panel** rendered horizontal bars + sideways text — the "fix" made the real panel wrong while
+making the capture look right. The straight mapping (matching HG, `host_main.cpp:538`) renders the panel
+**upright**; its raw capture merely *looks* rotated because of the camera.
 
-Fix (contained, in `ESP32Host::drawFrame`): **pre-rotate 90° CW** — `pico (x,y) -> buf(row=2x,
-col=255-2y)` — so carts render upright. **✅ Verified on the bench:** after the fix the colour bars are
-vertical (as drawn) and the text reads left-to-right ("FAKE-08 ON ESP32-S3" / "FRAME nn"). Capture saved
-as `fake08-milestone-upright.jpg`.
+**Reverted** the rotation (`drawFrame` back to `pico (x,y) -> (2x,2y)`). Re-verified the right way: raw
+`/capture` → `convert -rotate 90` → the panel shows vertical bars + horizontal "FAKE-08 ON ESP32-S3" /
+"FRAME nn" = **upright** (`fake08-milestone-upright.jpg`). So there is **no display rotation bug**; the
+display was correct all along. `DP-8` is downgraded from a bug to a "not-a-bug — it's the camera" note.
 
-The *systemic* fix (rotate once in `board.cpp` so every app agrees, instead of per-`drawFrame`) is a
-follow-up — logged as **`DP-8`** in the display doc. The HG apps share the same latent rotation.
+**Lesson (reinforced in the memory): always rotate a bench capture 90° CW before judging orientation.** A
+capture that already looks upright is the suspicious one.
 
 ## Status — draw-only milestone DONE
 
 All five port tasks complete. fake-08 runs on the ESP32-S3: shared z8lua VM, flash `.p8` cart, upright
-render, animating. Landed: fork `pico-e32` branch pushed (`teapotlaboratories/fake-08@92e39de`), the
-`pico-e32` app + submodule committed. Parts-blocked seams (input, audio, SD) are the next phase; a code-map
+render (straight `drawFrame`, matching HG), animating. Landed: fork `pico-e32` branch pushed
+(`teapotlaboratories/fake-08@ebdd0e8`), the `pico-e32` app + submodule committed. Parts-blocked seams (input, audio, SD) are the next phase; a code-map
 (`docs/runtime/pico-e32-fake08-codemap.md`) records the new-code ↔ fake-08 mapping + the deliberate
 divergences.
