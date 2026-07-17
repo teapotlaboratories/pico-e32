@@ -1,4 +1,9 @@
-<title>fake-08 perf — drawFrame 16.5 → 3.6 ms (ESP32-S3)</title>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fake-08 perf &#8212; drawFrame 16.5 &#8594; 3.6 ms (ESP32-S3)</title>
 <style>
   :root{
     --bg:#eef1f6; --surface:#ffffff; --surface2:#f6f8fb; --fg:#161b22; --muted:#5a6472;
@@ -62,12 +67,13 @@
   .foot .m{font-size:.92em}
   ul{padding-left:1.2rem} li{margin:.35rem 0;max-width:66ch}
 </style>
-
+</head>
+<body>
 <div class="wrap">
 
-  <p class="eyebrow">Perf report · pico-e32 · ESP32-S3</p>
-  <h1>drawFrame: 16.5&nbsp;→&nbsp;3.6&nbsp;ms</h1>
-  <p class="lede">The PICO-8 draw path was <b>~9× the VM</b> and nobody had measured it. One buffer moved from PSRAM to internal SRAM. The frame is now <b>VM-bound</b>.</p>
+  <p class="eyebrow">Perf report &#183; pico-e32 &#183; ESP32-S3</p>
+  <h1>drawFrame: 16.5&nbsp;&#8594;&nbsp;3.6&nbsp;ms</h1>
+  <p class="lede">The PICO-8 draw path was <b>~9&#215; the VM</b> and nobody had measured it. One buffer moved from PSRAM to internal SRAM. The frame is now <b>VM-bound</b>.</p>
   <div class="palstrip" aria-hidden="true">
     <i style="background:#000000"></i><i style="background:#1D2B53"></i><i style="background:#7E2553"></i><i style="background:#008751"></i>
     <i style="background:#AB5236"></i><i style="background:#5F574F"></i><i style="background:#C2C3C7"></i><i style="background:#FFF1E8"></i>
@@ -105,7 +111,7 @@
 
       <!-- 60 fps guide at 16.7 ms -> x=734.5 -->
       <line class="g60ln" x1="734.5" y1="34" x2="734.5" y2="200"/>
-      <text class="g60tx" x="729" y="30" text-anchor="end">60 fps · 16.7 ms →|</text>
+      <text class="g60tx" x="729" y="30" text-anchor="end">60 fps &#183; 16.7 ms &#8594;|</text>
 
       <!-- BEFORE row y=58, h=46 -->
       <text class="rowlab" x="142" y="86" text-anchor="end">before</text>
@@ -124,32 +130,32 @@
 
       <!-- delta bracket between draw-ends: before 794 -> after 335.5, at y=190 -->
       <path class="brk" d="M794,110 L794,190 M335.5,178 L335.5,190 M335.5,190 L794,190"/>
-      <text class="delta" x="565" y="184" text-anchor="middle">−12.9 ms · 4.6× faster</text>
+      <text class="delta" x="565" y="184" text-anchor="middle">&#8722;12.9 ms &#183; 4.6&#215; faster</text>
     </svg>
-    <p class="cap">Measured on real Celeste (ESP32-S3), <code>esp_timer</code> around <code>Step()</code> vs <code>drawFrame()</code>. <b>Step</b> is the title screen (light); <b>drawFrame</b> is content-independent (always 128×128 px + one 256×256 blit). Ceilings are <b>compute-bound</b> (<code>1000/(step+draw)</code>), not paced or achieved fps.</p>
+    <p class="cap">Measured on real Celeste (ESP32-S3), <code>esp_timer</code> around <code>Step()</code> vs <code>drawFrame()</code>. <b>Step</b> is the title screen (light); <b>drawFrame</b> is content-independent (always 128&#215;128 px + one 256&#215;256 blit). Ceilings are <b>compute-bound</b> (<code>1000/(step+draw)</code>), not paced or achieved fps.</p>
   </div>
 
   <div class="stats">
-    <div class="stat"><div class="k ok">4.6×</div><div class="l">drawFrame speedup</div></div>
-    <div class="stat"><div class="k ok">54→189</div><div class="l">fps compute ceiling</div></div>
-    <div class="stat"><div class="k">3.6 ms</div><div class="l">draw · content-independent</div></div>
+    <div class="stat"><div class="k ok">4.6&#215;</div><div class="l">drawFrame speedup</div></div>
+    <div class="stat"><div class="k ok">54&#8594;189</div><div class="l">fps compute ceiling</div></div>
+    <div class="stat"><div class="k">3.6 ms</div><div class="l">draw &#183; content-independent</div></div>
     <div class="stat"><div class="k warn">VM-bound</div><div class="l">the new constraint</div></div>
   </div>
 
   <h2><span class="num">01</span> The blind spot</h2>
   <div class="callout note">
-    <p style="margin:0"><b>Nobody had measured the real frame.</b> Gate #2 (<code>luabench</code>) timed the z8lua VM with <b>every draw call stubbed</b> — so the actual <code>Step()</code> + <code>drawFrame()</code> cost was unknown, even though it's the load-bearing number for the 30-vs-60 fps policy. The draw-only port renders correctly; this is the first look at what it costs.</p>
+    <p style="margin:0"><b>Nobody had measured the real frame.</b> Gate #2 (<code>luabench</code>) timed the z8lua VM with <b>every draw call stubbed</b> &#8212; so the actual <code>Step()</code> + <code>drawFrame()</code> cost was unknown, even though it's the load-bearing number for the 30-vs-60 fps policy. The draw-only port renders correctly; this is the first look at what it costs.</p>
   </div>
 
   <h2><span class="num">02</span> How it was measured</h2>
-  <p>An opt-in build in <span class="chip">firmware/pico-e32-fake08/main/main.cpp</span> — under <code>#ifdef MEASURE_FPS</code> it swaps fake-08's <code>vm-&gt;GameLoop()</code> for an instrumented loop that times <code>vm-&gt;Step()</code> (the VM's <code>_update</code>/<code>_draw</code>) vs <code>host-&gt;drawFrame()</code> separately with <code>esp_timer_get_time()</code>, paces via <code>waitForTargetFps()</code>, and logs every 30 frames over UART:</p>
-  <p><span class="chip">f%ld: step=… draw=… total=… ms | max %.1f fps | worst …</span></p>
-  <p>Enable with <code>DEFS='-D CELESTE=1 -D MEASURE_FPS=1'</code>; read the UART with raw <code>stty 115200</code> + <code>cat</code> (idf.py monitor won't run headless). Target is the real Celeste cart — it parks on the title (input stubbed), so the <b>step</b> number is the title screen; <b>drawFrame</b> is representative regardless.</p>
+  <p>An opt-in build in <span class="chip">firmware/pico-e32-fake08/main/main.cpp</span> &#8212; under <code>#ifdef MEASURE_FPS</code> it swaps fake-08's <code>vm-&gt;GameLoop()</code> for an instrumented loop that times <code>vm-&gt;Step()</code> (the VM's <code>_update</code>/<code>_draw</code>) vs <code>host-&gt;drawFrame()</code> separately with <code>esp_timer_get_time()</code>, paces via <code>waitForTargetFps()</code>, and logs every 30 frames over UART:</p>
+  <p><span class="chip">f%ld: step=&#8230; draw=&#8230; total=&#8230; ms | max %.1f fps | worst &#8230;</span></p>
+  <p>Enable with <code>DEFS='-D CELESTE=1 -D MEASURE_FPS=1'</code>; read the UART with raw <code>stty 115200</code> + <code>cat</code> (idf.py monitor won't run headless). Target is the real Celeste cart &#8212; it parks on the title (input stubbed), so the <b>step</b> number is the title screen; <b>drawFrame</b> is representative regardless.</p>
 
-  <h2><span class="num">03</span> The finding — drawFrame was PSRAM-bound</h2>
-  <p><code>drawFrame</code> was <b>16.5 ms</b> — about <b>8.7×</b> the VM. The boot log named the culprit:</p>
-  <p><span class="chip" style="color:var(--warn)">W · scaled fb fell back to PSRAM</span> <span class="chip">fb = 0x3c1004f8</span></p>
-  <p>That address is a runtime observation, and it's consistent with the ESP32-S3 map: PSRAM is <code>0x3C000000</code>+, internal DRAM <code>0x3FC88000</code>+. The 256×256 scaled frame is <b>128 KB</b> — too big for internal DMA-capable SRAM — so it fell back to PSRAM, and both the per-pixel writes <em>and</em> the full-frame blit-read then paid PSRAM latency.</p>
+  <h2><span class="num">03</span> The finding &#8212; drawFrame was PSRAM-bound</h2>
+  <p><code>drawFrame</code> was <b>16.5 ms</b> &#8212; about <b>8.7&#215;</b> the VM. The boot log named the culprit:</p>
+  <p><span class="chip" style="color:var(--warn)">W &#183; scaled fb fell back to PSRAM</span> <span class="chip">fb = 0x3c1004f8</span></p>
+  <p>That address is a runtime observation, and it's consistent with the ESP32-S3 map: PSRAM is <code>0x3C000000</code>+, internal DRAM <code>0x3FC88000</code>+. The 256&#215;256 scaled frame is <b>128 KB</b> &#8212; too big for internal DMA-capable SRAM &#8212; so it fell back to PSRAM, and both the per-pixel writes <em>and</em> the full-frame blit-read then paid PSRAM latency.</p>
   <div class="tblwrap"><table>
     <thead><tr><th></th><th>step</th><th>drawFrame</th><th>total</th><th>ceiling*</th></tr></thead>
     <tbody>
@@ -159,7 +165,7 @@
   </table></div>
   <p class="cap">ms/frame, Celeste, ESP32-S3. *ceiling = compute-bound <code>1000/(step+draw)</code>, not achieved fps. step = title screen.</p>
 
-  <h2><span class="num">04</span> ★ Where the frame lived</h2>
+  <h2><span class="num">04</span> &#9733; Where the frame lived</h2>
   <div class="fig">
     <svg viewBox="0 0 1000 470" role="img" aria-label="ESP32-S3 address map. Left: a 128 KB framebuffer in the slow PSRAM region receiving per-pixel writes and a full-frame blit-read. Right: a 16 KB strip in fast internal SRAM that 8 strips cycle through.">
       <defs>
@@ -185,30 +191,30 @@
 
       <!-- LEFT lane: PSRAM -->
       <rect class="lane" x="30" y="54" width="405" height="386" rx="12"/>
-      <text class="mm hdr-slow" x="52" y="42">PSRAM · 0x3C000000+ · slow</text>
+      <text class="mm hdr-slow" x="52" y="42">PSRAM &#183; 0x3C000000+ &#183; slow</text>
       <rect class="mm fb" x="60" y="86" width="345" height="300" rx="8"/>
       <text class="mm tb" x="80" y="150">scaled fb</text>
-      <text class="mm t"  x="80" y="172">256 × 256 × 2</text>
+      <text class="mm t"  x="80" y="172">256 &#215; 256 &#215; 2</text>
       <text class="mm tb" x="80" y="200" fill="#f0684a">128 KB</text>
       <text class="mm tm" x="80" y="236">fb = 0x3c1004f8  (boot log)</text>
       <text class="mm ti" x="80" y="330">doesn't fit internal</text>
-      <text class="mm ti" x="80" y="348">DMA SRAM →</text>
+      <text class="mm ti" x="80" y="348">DMA SRAM &#8594;</text>
       <text class="mm ti" x="80" y="366">fell back to PSRAM</text>
       <!-- arrows in (slow) -->
       <path class="mm arr-slow" d="M470,150 L407,150" marker-end="url(#slow)"/>
       <text class="mm slow-tx" x="474" y="147">per-pixel write</text>
-      <text class="mm slow-tx" x="474" y="163">(16 384×)</text>
+      <text class="mm slow-tx" x="474" y="163">(16 384&#215;)</text>
       <path class="mm arr-slow" d="M470,300 L407,300" marker-end="url(#slow)"/>
       <text class="mm slow-tx" x="474" y="297">full-frame</text>
       <text class="mm slow-tx" x="474" y="313">blit-read (256 KB)</text>
 
       <!-- middle: the fix -->
       <text class="mm mid" x="590" y="228" text-anchor="start">the fix</text>
-      <text class="mm midm" x="590" y="246">move the buffer ↓</text>
+      <text class="mm midm" x="590" y="246">move the buffer &#8595;</text>
 
       <!-- RIGHT lane: internal SRAM -->
       <rect class="lane" x="565" y="54" width="405" height="386" rx="12"/>
-      <text class="mm hdr-fast" x="587" y="42">internal DRAM · 0x3FC88000+ · fast</text>
+      <text class="mm hdr-fast" x="587" y="42">internal DRAM &#183; 0x3FC88000+ &#183; fast</text>
       <!-- ghost strips (8 total) -->
       <rect class="mm strip-ghost" x="600" y="120" width="330" height="30" rx="5"/>
       <rect class="mm strip-ghost" x="600" y="156" width="330" height="30" rx="5"/>
@@ -217,7 +223,7 @@
       <rect class="mm strip-ghost" x="600" y="336" width="330" height="30" rx="5"/>
       <!-- the live strip -->
       <rect class="mm strip" x="600" y="192" width="330" height="30" rx="5"/>
-      <text class="mm tb" x="616" y="212">strip · 256 × 32 · 16 KB</text>
+      <text class="mm tb" x="616" y="212">strip &#183; 256 &#215; 32 &#183; 16 KB</text>
       <text class="mm tm" x="600" y="255">strip = 0x3fcc99c8  (boot log)</text>
       <text class="mm fast-tx" x="600" y="392">8 strips (32 panel rows each)</text>
       <text class="mm fast-tx" x="600" y="410">cycle through one 16 KB buffer</text>
@@ -231,32 +237,34 @@
       <path class="mm arr-fast" d="M765,150 L765,190" marker-end="url(#fast)" opacity=".6"/>
       <path class="mm arr-fast" d="M765,258 L765,222" marker-end="url(#fast)" opacity=".6"/>
     </svg>
-    <p class="cap">The whole story is the <b>region</b>: the buffer landed in the <code>0x3C…</code> PSRAM range; the fix puts it in the <code>0x3FC…</code> internal-SRAM range. Addresses are from the boot log, consistent with the S3 memory map.</p>
+    <p class="cap">The whole story is the <b>region</b>: the buffer landed in the <code>0x3C&#8230;</code> PSRAM range; the fix puts it in the <code>0x3FC&#8230;</code> internal-SRAM range. Addresses are from the boot log, consistent with the S3 memory map.</p>
   </div>
 
-  <h2><span class="num">05</span> The fix — strips from internal SRAM</h2>
-  <p>Don't materialise the 128 KB framebuffer at all. Build <em>and</em> blit the frame in <b>8 strips of 32 panel rows</b> through a single <b>16 KB internal DMA buffer</b> (<code>MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA</code>; <code>strip = 0x3fcc99c8</code> — internal, no fallback). Every write and the blit DMA now stay in fast SRAM. The 4-bpp nibble-unpack is also <b>inlined</b> — one byte <code>src[x&gt;&gt;1]</code> yields two pixels (low <code>b&amp;0x0f</code>, high <code>b&gt;&gt;4</code>) — dropping the per-pixel <code>getPixelNibble</code> call.</p>
-  <p>In the fork's <code>ESP32Host::drawFrame</code> <span class="chip">@ 8f4b6a6</span> — <b><code>source/</code> byte-untouched</b>, one file, <code>+37 / −25</code>.</p>
+  <h2><span class="num">05</span> The fix &#8212; strips from internal SRAM</h2>
+  <p>Don't materialise the 128 KB framebuffer at all. Build <em>and</em> blit the frame in <b>8 strips of 32 panel rows</b> through a single <b>16 KB internal DMA buffer</b> (<code>MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA</code>; <code>strip = 0x3fcc99c8</code> &#8212; internal, no fallback). Every write and the blit DMA now stay in fast SRAM. The 4-bpp nibble-unpack is also <b>inlined</b> &#8212; one byte <code>src[x&gt;&gt;1]</code> yields two pixels (low <code>b&amp;0x0f</code>, high <code>b&gt;&gt;4</code>) &#8212; dropping the per-pixel <code>getPixelNibble</code> call.</p>
+  <p>In the fork's <code>ESP32Host::drawFrame</code> <span class="chip">@ 8f4b6a6</span> &#8212; <b><code>source/</code> byte-untouched</b>, one file, <code>+37 / &#8722;25</code>.</p>
 
-  <h2><span class="num">06</span> What it means — draw-bound → VM-bound</h2>
-  <p><code>drawFrame</code> is now a fixed 3.6 ms. Against Gate #2's measured gameplay VM (~15.8 ms average, 5–40 ms per room), the frame budget flips: the display is settled and the interpreter is the constraint. Bars below: <span style="color:var(--neutral)">■</span> VM <code>Step</code> + <span style="color:var(--accent)">■</span> <code>drawFrame</code>, against the 33.3 ms / 30 fps budget (amber line).</p>
+  <h2><span class="num">06</span> What it means &#8212; draw-bound &#8594; VM-bound</h2>
+  <p><code>drawFrame</code> is now a fixed 3.6 ms. Against Gate #2's measured gameplay VM (~15.8 ms average, 5&#8211;40 ms per room), the frame budget flips: the display is settled and the interpreter is the constraint. Bars below: <span style="color:var(--neutral)">&#9632;</span> VM <code>Step</code> + <span style="color:var(--accent)">&#9632;</span> <code>drawFrame</code>, against the 33.3 ms / 30 fps budget (amber line).</p>
   <div class="rooms">
     <div class="room"><span class="rl">light room</span><div class="rt"><div class="seg vm" style="width:15%"></div><div class="seg draw" style="left:15%;width:10.8%"></div><div class="g60" style="left:90%"></div></div><span class="rv ok">~60 fps</span></div>
     <div class="room"><span class="rl">avg room</span><div class="rt"><div class="seg vm" style="width:47.4%"></div><div class="seg draw" style="left:47.4%;width:10.8%"></div><div class="g60" style="left:90%"></div></div><span class="rv ok">~51 fps</span></div>
     <div class="room"><span class="rl">densest room</span><div class="rt"><div class="seg vm" style="width:100%;background:var(--warn)"></div><div class="seg draw" style="left:100%;width:9%;background:var(--warn);opacity:.6"></div><div class="g60" style="left:90%"></div></div><span class="rv warn" style="color:var(--warn)">~23 fps</span></div>
   </div>
-  <p class="cap">light ≈ 5 + 3.6 ms · avg ≈ 15.8 + 3.6 ≈ 19.4 ms · densest ≈ 40 + 3.6 ≈ 43.6 ms (overruns 33.3 ms — now VM-bound). Amber line = 30 fps / 33.3 ms.</p>
-  <p>So the draw path is no longer the question. The remaining frame-rate lever is the <a href="https://github.com/teapotlaboratories/pico-e32">z8lua interpreter</a> on heavy rooms — the open speedup item, to be tackled only after profiling a representative cart on the S3.</p>
+  <p class="cap">light &#8776; 5 + 3.6 ms &#183; avg &#8776; 15.8 + 3.6 &#8776; 19.4 ms &#183; densest &#8776; 40 + 3.6 &#8776; 43.6 ms (overruns 33.3 ms &#8212; now VM-bound). Amber line = 30 fps / 33.3 ms.</p>
+  <p>So the draw path is no longer the question. The remaining frame-rate lever is the <a href="https://github.com/teapotlaboratories/pico-e32">z8lua interpreter</a> on heavy rooms &#8212; the open speedup item, to be tackled only after profiling a representative cart on the S3.</p>
 
   <h2><span class="num">07</span> Follow-ups</h2>
   <ul>
-    <li>A <b>direct gameplay <code>Step</code></b> measurement (drive Celeste past the title via <code>scanInput</code>) would firm up the ~15.8 ms extrapolation — currently the step number is the title screen.</li>
+    <li>A <b>direct gameplay <code>Step</code></b> measurement (drive Celeste past the title via <code>scanInput</code>) would firm up the ~15.8 ms extrapolation &#8212; currently the step number is the title screen.</li>
     <li><code>drawFrame</code> could inline further / use 32-bit stores, but at 3.6 ms it's no longer the bottleneck.</li>
   </ul>
 
   <div class="foot">
-    <b>Status:</b> <span class="m">PR #8 — open.</span> Durable refs: parent <span class="m">b83bcea</span>, fork <span class="m">teapotlaboratories/fake-08@8f4b6a6</span>.<br>
-    <b>See also:</b> <span class="m">docs/worklog/2026-07-17-fake08-fps-strip-blit.md</span> · <span class="m">docs/runtime/pico-e32-fake08-codemap.md</span> · the fake-08 port report · the z8lua-speedup research.
+    <b>Status:</b> <span class="m">PR #8 &#8212; open.</span> Durable refs: parent <span class="m">b83bcea</span>, fork <span class="m">teapotlaboratories/fake-08@8f4b6a6</span>.<br>
+    <b>See also:</b> <span class="m">docs/worklog/2026-07-17-fake08-fps-strip-blit.md</span> &#183; <span class="m">docs/runtime/pico-e32-fake08-codemap.md</span> &#183; the fake-08 port report &#183; the z8lua-speedup research.
   </div>
 
 </div>
+</body>
+</html>
