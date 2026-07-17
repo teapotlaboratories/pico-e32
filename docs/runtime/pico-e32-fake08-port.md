@@ -32,7 +32,7 @@ We write one **`ESP32Host`**. Everything else is fake-08's, ported as-is.
 | **Framebuffer flush** | `drawFrame(uint8_t* picoFb, uint8_t* paletteMap, uint8_t drawMode)` — `picoFb` = native **128×128 4-bpp indexed** (8 KB) | nibble→RGB565 line-expand + 2× scale → `board_lcd_blit` (the board display driver we already have) | 🟢 **ready** — driver done (393 fps, upright); the scale/blit exists, needs the **4-bpp/nibble** unpack (our HG harness fb is 8-bpp) |
 | **Timing** | `setTargetFps`, `waitForTargetFps`, `deltaTMs` | `esp_timer` + `vTaskDelay` (already used in Gate #1/#3) | 🟢 **ready** |
 | **Lua VM heap** | `luaL_newstate()` at `source/vm.cpp:300` | swap to `lua_newstate(psram_alloc,…)` with `MALLOC_CAP_SPIRAM`; keep `picoFb`, DMA buffers, GC nursery in **internal SRAM** | 🟢 **ready** — z8lua already vendored (`components/z8lua`), the VM fake-08 uses |
-| **Cart source** | `getFileContents`, `listcarts`, `saveCartData`, … | **now:** embed one cart in flash (like `celeste_cart.h`). **later:** SD (FatFs) / LittleFS via VFS | 🟡 flash-cart ready; SD is **parts-blocked** (no microSD yet) |
+| **Cart source** | `getFileContents`, `listcarts`, `saveCartData`, … | flash-embedded cart **and** the onboard microSD (SPI2, FatFs/VFS) | ✅ **done** — SD loader mounts the onboard microSD, scans for `.p8`/`.p8.png`, loads one, falls back to the flash cart. Verified on a 32 GB SDHC card. Was mislabelled parts-blocked — the slot is on-board. See the [SD worklog](../worklog/2026-07-17-fake08-sd-cart-loader.md) |
 | **Input** | `InputState_t scanInput()` → 8-bit mask (L/R/U/D/O/X/PAUSE) | read I²C GPIO expander → OR the bits. **now:** BOOT button / stub | 🔴 **parts-blocked** (no I²C expander/buttons yet) |
 | **Audio** | `Audio::FillAudioBuffer(...)` @ **22050 Hz S16**, the **pull/poll** path | ESP-IDF **I²S** feeder task → MAX98357A. **now:** stub | 🔴 **parts-blocked** (no MAX98357A/speaker yet) |
 
@@ -96,8 +96,8 @@ stubbed) running a flash-embedded cart on the panel.** This:
 - Needs **no parts** — it's the same draw+timing+VM+flash-cart we already have, just fake-08's runtime
   instead of the hand-written one.
 
-Then Phase 1 fills in the parts-blocked seams (input, audio, SD) → **Gate #4** (a real cart playable ≥30 fps
-with sound + input).
+Then Phase 1 fills in the parts-blocked seams (input, audio) → **Gate #4** (a real cart playable ≥30 fps
+with sound + input). SD carts are **done** (the slot is on-board, no parts).
 
 ## Open questions / risk
 
