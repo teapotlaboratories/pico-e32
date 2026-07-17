@@ -15,7 +15,9 @@
 CXX      ?= g++
 CXXFLAGS ?= -O2 -std=c++17 -DLUA_USE_LONGJMP -DHOST_MAIN -w
 Z8       := ../../../components/z8lua
-INC      := -I$(Z8)
+# assets/ is on the include path so the P8_SPRTEST harness can pick up CELESTE_GFX from the
+# (gitignored) celeste_cart.h when it has been generated; it falls back to a synthetic sheet if not.
+INC      := -I$(Z8) -I../../../assets
 
 # Skip the units linit never opens (they pull host OS / dlopen deps) -- mirrors the
 # exclude list in the component's CMakeLists.txt.

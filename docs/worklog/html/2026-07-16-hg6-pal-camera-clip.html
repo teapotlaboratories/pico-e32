@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HG-6: pal, camera, clip — the drawing surface is complete — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)}
+  .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;
+       font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:10px;padding:.8rem 1rem;overflow-x:auto;font-size:.8rem;line-height:1.5}
+  .pill{display:inline-block;font-size:.78rem;font-weight:600;padding:.16em .6em;border-radius:999px;border:1px solid var(--border)}
+  .pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);
+        border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .6rem;text-align:left}
+  th{background:var(--codebg)} td.n{text-align:right;font-family:ui-monospace,monospace}
+  .diagram{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.2rem;margin:1.4rem 0;overflow-x:auto}
+  .cap{color:var(--muted);font-size:.85rem;margin:.4rem 0 0;text-align:center}
+  .note{color:var(--muted);font-size:.92rem}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <p class="date">2026-07-16</p>
+  <h1>HG-6: <code>pal</code>, <code>camera</code>, <code>clip</code> — the drawing surface is complete</h1>
+
+  <div class="tldr">
+    <span class="pill ok">✓ done &amp; verified</span>
+    <span class="pill ok">surface complete: HG-1…HG-6</span><br>
+    The last of the graphics surface: <code>pal()</code> (colour remap — Celeste's flash), <code>camera()</code>
+    (offset — screen shake), <code>clip()</code> (bounded drawing). All three apply at the single
+    <code>px()</code> chokepoint, so every op honours them; identity defaults keep every earlier test
+    byte-identical. With this, <code>spr</code>+<code>map</code>+<code>print</code>+<code>camera</code>+<code>pal</code>
+    is every draw call a real Celeste <code>_draw</code> makes.
+  </div>
+
+  <h2>One chokepoint, three effects</h2>
+  <div class="diagram">
+    <svg viewBox="0 0 700 200" role="img" aria-label="Every draw op flows through px(); px applies camera offset, then a clip test, then the pal remap before writing the framebuffer. Identity defaults are a pass-through.">
+      <rect x="8" y="70" width="150" height="60" rx="8" fill="var(--codebg)" stroke="var(--border)"/>
+      <text x="83" y="95" text-anchor="middle" fill="var(--fg)" font-size="11" font-weight="700">spr · map · print</text>
+      <text x="83" y="112" text-anchor="middle" fill="var(--muted)" font-size="11">rectfill · line · …</text>
+
+      <line x1="158" y1="100" x2="196" y2="100" stroke="var(--line)" stroke-width="1.5"/><polygon points="196,100 188,96 188,104" fill="var(--line)"/>
+
+      <rect x="198" y="55" width="330" height="90" rx="10" fill="var(--codebg)" stroke="var(--accent)"/>
+      <text x="363" y="74" text-anchor="middle" fill="var(--accent)" font-size="12" font-weight="700" class="mono">px(x, y, c)</text>
+      <!-- three stages -->
+      <rect x="212" y="86" width="95" height="44" rx="6" fill="none" stroke="var(--border2,var(--line))"/>
+      <text x="259" y="104" text-anchor="middle" fill="var(--fg)" font-size="10.5" font-weight="700">1 · camera</text>
+      <text x="259" y="118" text-anchor="middle" fill="var(--muted)" font-size="9.5" class="mono">x-=cam_x</text>
+      <rect x="315" y="86" width="95" height="44" rx="6" fill="none" stroke="var(--line)"/>
+      <text x="362" y="104" text-anchor="middle" fill="var(--fg)" font-size="10.5" font-weight="700">2 · clip</text>
+      <text x="362" y="118" text-anchor="middle" fill="var(--muted)" font-size="9.5">reject outside</text>
+      <rect x="418" y="86" width="95" height="44" rx="6" fill="none" stroke="var(--line)"/>
+      <text x="465" y="104" text-anchor="middle" fill="var(--fg)" font-size="10.5" font-weight="700">3 · pal</text>
+      <text x="465" y="118" text-anchor="middle" fill="var(--muted)" font-size="9.5" class="mono">c → pal[c]</text>
+
+      <line x1="528" y1="100" x2="566" y2="100" stroke="var(--line)" stroke-width="1.5"/><polygon points="566,100 558,96 558,104" fill="var(--line)"/>
+      <rect x="568" y="70" width="122" height="60" rx="8" fill="var(--codebg)" stroke="var(--ok)"/>
+      <text x="629" y="95" text-anchor="middle" fill="var(--ok)" font-size="11" font-weight="700">framebuffer</text>
+      <text x="629" y="112" text-anchor="middle" fill="var(--muted)" font-size="10">128×128</text>
+
+      <text x="198" y="175" fill="var(--muted)" font-size="10.5">Identity defaults (cam 0, clip full-screen, pal identity) make all three a pass-through — so every</text>
+      <text x="198" y="189" fill="var(--muted)" font-size="10.5">earlier test is byte-identical, and effects only appear once a cart sets camera()/clip()/pal().</text>
+    </svg>
+  </div>
+
+  <p>Semantics, matched to what Celeste actually uses (checked against <code>celeste.p8</code>):</p>
+  <ul>
+    <li><strong><code>pal(c0,c1)</code></strong> — the <strong>draw</strong> palette (Celeste's flash). <code>pal()</code>
+      resets palette + transparency, as PICO-8 does. The <code>p=1</code> <strong>screen</strong> palette isn't
+      modelled — Celeste never uses it.</li>
+    <li><strong><code>camera([x],[y])</code></strong> — offsets drawing by <code>(-x,-y)</code>; Celeste's screen shake.</li>
+    <li><strong><code>clip([x,y,w,h])</code></strong> — bounds drawing to a rectangle. Celeste never uses it, but it's
+      cheap and part of the surface. (<code>palt</code> transparency was done in HG-3.)</li>
+  </ul>
+
+  <h2>Verification — numeric, then on a real room</h2>
+  <p><strong>Numeric</strong> (<code>P8_GFXTEST=1</code>, read from the framebuffer) — all pass:</p>
+  <pre>clip inside (30,30)=green      fb= 3   (full-screen fill, clipped to an 8..55 box)
+clip outside (60,60)=bg        fb= 0
+pal remap 8->12 (90,18)        fb=12   (rectfill colour 8, drawn under pal(8,12))
+pal control 8 (90,44)          fb= 8   (same rectfill, pal reset)
+camera marker screen(68,68)    fb=10   (drawn at world 100,100 under camera(36,36))
+camera: world(100,100)         fb= 0   (nothing there — it moved to screen space)</pre>
+  <p><strong>On a real Celeste room:</strong> <code>P8_CAMX=8 P8_CAMY=6</code> renders the room <strong>shifted</strong>
+    up-left (camera works on real content); <code>P8_FLASH=1</code> (<code>for i=0,15 do pal(i,7) end</code>) renders it
+    <strong>white-on-black</strong> — every colour remapped to 7, geometry preserved. That's PICO-8's death-flash;
+    confirmed the only non-background colour in the frame is 7.</p>
+
+  <h2>No regression</h2>
+  <p>Every prior test is <strong>byte-identical</strong> — the identity defaults change nothing.</p>
+  <table>
+    <tr><th>test</th><th>fb_hash</th></tr>
+    <tr><td>trivial cart</td><td class="mono">5e851a75</td></tr>
+    <tr><td>HG-3 sprtest</td><td class="mono">5e8744dd</td></tr>
+    <tr><td>HG-4 maptest room 1</td><td class="mono">df144d44</td></tr>
+    <tr><td>HG-5 texttest</td><td class="mono">1b77de61</td></tr>
+  </table>
+
+  <h2>The surface is complete — what's next</h2>
+  <p><strong>HG-1 through HG-6 are done.</strong> Only HG-7 (<code>sspr</code>, stretched blit — low priority) remains
+    on the draw side. The next milestone is bigger than one call: <strong>run the actual Celeste cart end-to-end</strong>
+    and render a real gameplay frame. That needs the cart's <code>_update</code> logic wired — <code>btn</code>,
+    <code>mget</code>, <code>rnd</code>, the object system — much of which the
+    <a href="2026-07-14-phase0-gate2-luabench.html">luabench harness</a> already implements (it runs Celeste headless).
+    Merging that input/logic layer with this draw layer is the step from "every call works in isolation" to "Celeste plays."</p>
+
+  <h2>Board / commit state</h2>
+  <p>Host-only. The pending commit now covers HG-3 → HG-6 + the on-panel demo + the font-header split. The board is still
+    on the on-panel Celeste demo.</p>
+</div>
+</body>
+</html>
