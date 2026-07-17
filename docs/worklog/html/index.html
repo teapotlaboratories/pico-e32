@@ -31,6 +31,39 @@
     <ul class="entries">
       <li>
         <span class="d">2026-07-16</span>
+        <a class="t" href="2026-07-16-hg6-pal-camera-clip.html">HG-6: pal, camera, clip — the drawing surface is complete</a>
+        <span class="s">The last of the graphics surface: <code>pal()</code> (colour remap — Celeste's flash), <code>camera()</code>
+          (screen shake), <code>clip()</code>. All three apply at the single <code>px()</code> chokepoint; identity defaults
+          keep every earlier test byte-identical. Verified numerically and on a real room (camera shift + a <code>pal(i,7)</code>
+          death-flash). <strong>HG-1…HG-6 done</strong> — every draw call a real Celeste frame needs is now in place.</span>
+      </li>
+      <li>
+        <span class="d">2026-07-16</span>
+        <a class="t" href="2026-07-16-hg5-print.html">HG-5: print(), and a font that carries no one else's licence</a>
+        <span class="s">Implemented <code>print()</code> + a 3×5 font. The glyphs are <strong>authored in-tree</strong> (not copied
+          or transcribed from any emulator's file — the most conservative licensing choice), with PICO-8 geometry so
+          layouts line up. Celeste's real UI strings — <strong>OLD SITE, DEATHS:12, MATT THORSON, TIME 3:07</strong> — all
+          render legibly. No Gate 3 regression.</span>
+      </li>
+      <li>
+        <span class="d">2026-07-16</span>
+        <a class="t" href="2026-07-16-hg4-map.html">HG-4: map(), and the other half of Celeste's world</a>
+        <span class="s">Implemented <code>map()</code> — a real Celeste <strong>room</strong> renders. Resolved the
+          shared-memory finding: <code>__map__</code> is only rooms 0–15 of 32; the rest are aliased onto the sprite
+          sheet. The generator now emits the <strong>full 128×64 map</strong>, and <strong>rooms 16–31 render as real
+          levels, not noise</strong>. Gate 2 unaffected (its map access clamps to the first half); the layer filter is a
+          verified strict subset.</span>
+      </li>
+      <li>
+        <span class="d">2026-07-16</span>
+        <a class="t" href="2026-07-16-hg3-spr.html">HG-3: spr(), the first real cart drawing</a>
+        <span class="s">Implemented PICO-8's <code>spr(n,x,y,[w,h],[flip_x,flip_y])</code> — the core of every cart.
+          Verified <strong>camera-free</strong> via the host frame-dump → PNG harness against Celeste's real sheet: a 64-sprite
+          grid renders recognisable sprites, a 2×2 block assembles a full Madeline, and an asymmetric “F” flips to
+          <strong>exact framebuffer mirrors</strong>. Caught the vacuous-test trap — Celeste's sprite 0 is blank. No Gate 3 regression.</span>
+      </li>
+      <li>
+        <span class="d">2026-07-16</span>
         <a class="t" href="2026-07-16-esp-lcd-vs-lovyangfx.html">Trying esp_lcd i80 instead of LovyanGFX: why colour “broke”, and a real comparison</a>
         <span class="s">Built an esp_lcd i80 backend to settle whether it really renders “colour wrong” on the rev-1 pins.
           It's <strong>1.5× faster</strong> (590 vs 393 fps, real zero-copy DMA) — but its <strong>colour is broken in a way

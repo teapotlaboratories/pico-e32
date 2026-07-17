@@ -1,8 +1,16 @@
 # ESP32Host — the PICO-8 graphics surface
 
-**Area backlog** for growing the minimal `ESP32Host` draw API into the surface a *real* cart
-needs. Reachable from the master index [`docs/pico-e32-todo.md`](../pico-e32-todo.md); the plan of
-record is [`docs/pico-e32-development-plan.md`](../pico-e32-development-plan.md) (Phase 1 / Gate #4).
+> ⚠️ **Status (2026-07-17): this was a Phase-0 DE-RISKING HARNESS, now superseded.** The `HG-*` items
+> below hand-wrote a from-scratch PICO-8 draw API (`spr`/`map`/`print`/`pal`/`camera`) to prove the display
+> + z8lua render real Celeste content, camera-free. That job is **done** (HG-1…HG-6). The actual runtime is
+> a **port of fake-08** ([`pico-e32-fake08-port.md`](pico-e32-fake08-port.md), and `.ai/AGENTS.md` →
+> Primary goal + the 1-to-1 rule) — fake-08's own graphics **replace** this hand-written code, which stays
+> as **reference/verification only** (the frame-dump harness and the findings below carry forward; the draw
+> code does not). Don't extend the `HG-*` draw API further — port fake-08 instead.
+
+**Area backlog** for the Phase-0 draw-API de-risking. Reachable from the master index
+[`docs/pico-e32-todo.md`](../pico-e32-todo.md); the plan of record is
+[`docs/pico-e32-development-plan.md`](../pico-e32-development-plan.md) (Phase 1 / Gate #4).
 
 ## Why this, why now
 
@@ -46,14 +54,18 @@ proves *the panel shows it*. The existing `fb_hash` host↔device compare is wha
 |---|------|-------|-------------|--------|
 | HG-1 | **`__gfx__` extraction** — sprite sheet out of the `.p8` | `gen_celeste_cart.py` now emits `CELESTE_GFX[16384]`, one palette index per byte (unpacked; see *Memory* below) | ✅ decoded sheet renders as Celeste's sprites — Madeline, balloons, spikes, chest, CELESTE logo, all 16 palette entries used | ✅ **done** |
 | HG-2 | **Frame dump on the host build** | `P8_DUMP=dir ./host` writes `frame_NNN.raw`; [`tools/p8_png.py`](../../tools/p8_png.py) renders it via the PICO-8 palette (stdlib `zlib`, no Pillow). Its `PAL` **must stay identical** to `PAL888` in `host_main.cpp`. Driven by the new [`firmware/pico-e32-host/host/Makefile`](../../firmware/pico-e32-host/host/Makefile) (`make dump`) | ✅ dumped frame of the trivial cart matches Gate #3's draw calls exactly (blue field, navy + green bars, grey midline, 12 circfills in cols 8–15) | ✅ **done** |
-| HG-3 | **`spr(n,x,y,[w,h],[flip_x,flip_y])`** | The core of every cart. Sprite `n` at `(n%16*8, n/16*8)` in the sheet | Celeste's player/objects appear at plausible positions | 📋 **next** |
-| HG-4 | **`map(celx,cely,sx,sy,celw,celh,[layer])` + `fget`/`fset`** | ⚠️ **See the shared-memory finding below — `__map__` alone is only half of Celeste's map.** `layer` filters on sprite flags (`__gff__`) | A recognisable Celeste room renders — **and rooms 16–31 render, not just 0–15** | 📋 |
-| HG-5 | **`print` + the PICO-8 font** | ✅ **unblocked — the font is CC-0 straight from Lexaloffle** (see *Font licensing* below). Take the glyph data from the source, don't inherit an emulator's copy | Text is legible in a dumped frame | 📋 |
-| HG-6 | **`pal`/`palt`, `camera`, `clip`** | Currently no-ops; Celeste uses `camera` for screen shake and `pal` for flashing | Room scroll/shake behaves; transparency correct | 📋 |
-| HG-7 | **`sspr`** | Stretched blit; lower priority | | 💤 |
+| HG-3 | **`spr(n,x,y,[w,h],[flip_x,flip_y])`** | The core of every cart. Sprite `n` at `(n%16*8, n/16*8)` in the sheet; reads the active sheet (`g_gfx`, null-safe so the trivial cart is unaffected); default colour-0 transparency, with a minimal `palt()` to control it (the `pal()` **remap** is still HG-6) | ✅ **done** — `P8_SPRTEST=1 make dump` renders a 64-sprite grid from Celeste's real `CELESTE_GFX` (Madeline, balloons, chest, spikes, all recognisable), a 2×2 (`w=h=2`) block assembling a full Madeline, and an asymmetric "F" flipped four ways whose renders are **exact framebuffer mirrors** (checked numerically). Trivial-cart `fb_hash` **unchanged** (no Gate #3 regression). See [worklog](../worklog/2026-07-16-hg3-spr.md) | ✅ **done** |
+| HG-4 | **`map(celx,cely,sx,sy,celw,celh,[layer])` + `mget`/`mset` + `fget`/`fset`** | The shared-memory finding is **resolved**: `gen_celeste_cart.py` now emits the **full 128×64 map** (rows 32–63 unpacked from gfx rows 64–127). `map()` draws each non-zero tile as a sprite (tile 0 skipped); `layer` filters on sprite flags via `fget`. Gate #2/luabench unaffected — its `mget` clamps to `y<32`, so the 4096→8192 resize is safe, and the first 4096 bytes are byte-identical | ✅ **done** — `P8_MAPTEST=1 P8_ROOM=n make dump` renders recognisable Celeste rooms; **rooms 16–31 (the shared region) render as real levels, not noise**; the `layer` filter is a verified strict subset (flag bits 0–2 used). Trivial-cart `fb_hash` unchanged. See [worklog](../worklog/2026-07-16-hg4-map.md) | ✅ **done** |
+| HG-5 | **`print` + a 3×5 font** | ✅ done. Glyphs live in [`assets/pico8_font.h`](../../assets/pico8_font.h) (**authored**, not copied from any emulator's file — the most conservative licensing choice; see *Font licensing*). **📋 placeholder — backlog RT-FONT: rebuild it from a real PICO-8 font.** PICO-8 geometry: 3px glyphs, 4px advance, 6px line; lowercase → caps. `print(str,[x],[y],[col])` | ✅ **done** — `P8_TEXTTEST=1 make dump` renders the full glyph set and Celeste's real UI strings ("OLD SITE", "DEATHS:12", "MATT THORSON", "TIME 3:07", …) **all legible**. Trivial-cart `fb_hash` unchanged. See [worklog](../worklog/2026-07-16-hg5-print.md) | ✅ **done** |
+| HG-6 | **`pal`, `camera`, `clip`** (`palt` done in HG-3) | All three applied at the single `px()` chokepoint, so every op honours them; identity defaults leave existing output byte-identical. `pal` is the DRAW palette (Celeste's flash) — the `p=1` screen palette isn't modelled (Celeste doesn't use it), nor does Celeste use `clip` | ✅ **done** — `P8_GFXTEST=1` verifies all three numerically (clip bounds a fill, `pal(8,12)` remaps, `camera` maps world→screen), and on a real room: `P8_CAMX=8` shifts it, `P8_FLASH=1` (`pal(i,7)`) flashes it all-white (death-flash). Prior tests byte-identical. See [worklog](../worklog/2026-07-16-hg6-pal-camera-clip.md) | ✅ **done** |
+| HG-7 | **`sspr`** | Stretched blit. Done for completeness (owner call) even though the port supersedes it — Celeste barely uses it | ✅ **done** — `P8_SSPRTEST=1`: 1:1 `sspr` matches plain `spr` (identical), 2× is a correct nearest-neighbour upscale, flip-x mirrors, stretched region draws; all numeric. Trivial-cart `fb_hash` unchanged | ✅ **done** |
 
 **Suggested order:** HG-1 + HG-2 first (they are the *verification harness* — without them every later
 item is unverifiable), then HG-3 → HG-4 gets a recognisable room on screen, then HG-6, then HG-5.
+**HG-1 through HG-7 are ALL done** — the entire PICO-8 draw surface is implemented and verified
+(`spr`/`sspr`/`map`/`print`/`pal`/`camera`/`clip`, `palt`, `fget`/`fset`/`mget`/`mset`). This closes the
+Phase-0 de-risking harness. Per the port plan, this hand-written code is now **reference/verification only**
+— the next work is the **[fake-08 port](pico-e32-fake08-port.md)**, whose own graphics replace all of it.
 
 ## Verified finding — the sprite sheet and the map share memory (HG-4 depends on this)
 
@@ -71,10 +83,13 @@ Decoding gfx rows 64–127 as map bytes (a gfx byte packs 2 px, **low nibble = l
 | gfx rows 64–127, decoded as map | 40% | 95% | 127 |
 | `__map__` rows 0–31 (known real) | 36% | 96% | 104 |
 
-**Consequence for HG-4:** a `map()` fed only from `__map__` renders **half the world** — rooms 0–15
-of 32. The generator must also emit the shared region as map rows 32–63. Note `CELESTE_MAP` is
-currently `[4096]` and non-`const` (poke-able) and is **already used by `pico-e32-luabench`** — check
-that consumer before resizing it to 8192, so the Gate #2 benchmark doesn't break.
+**Consequence for HG-4 — RESOLVED (2026-07-16).** `gen_celeste_cart.py` now emits the full 8192-byte
+map: rows 0–31 from `__map__`, rows 32–63 packed from gfx rows 64–127 (`tile = px[2x] | px[2x+1]<<4`).
+Rooms 16–31 verified to render as real Celeste levels (not noise) via `P8_MAPTEST=1 P8_ROOM=16`. The
+consumer check held: `pico-e32-luabench`'s `mget`/`mset` clamp to `y<32` (`celeste_bench.cpp:17,22`), so
+they only index `[0,4096)` — the 4096→8192 resize is safe and the first 4096 bytes are byte-identical, so
+**Gate #2 is unaffected**. (luabench's `y<32` clamp still hides rooms 16–31 from the *benchmark* — extending
+it to `y<64` + running levels 16–30 would benchmark the full game; that's a Gate #2 re-scope, not HG-4.)
 
 ## Open questions
 
@@ -89,7 +104,28 @@ that consumer before resizing it to 8192, so the Gate #2 benchmark doesn't break
 
 ## Font licensing — take it from the source, not from an emulator (HG-5)
 
-**Decision: use the PICO-8 font data directly; it is CC-0. Do not vendor another emulator's font file.**
+**What shipped (2026-07-16): the glyphs were AUTHORED** — 3×5 row-strings in
+[`assets/pico8_font.h`](../../assets/pico8_font.h) (moved out of the firmware; `host_main.cpp` includes it
+and decodes it) — not copied or transcribed from anyone's file. That is the most conservative option of
+all — it carries no third-party data, CC-0 or otherwise, so none of the provenance analysis below can
+bite. It renders Celeste's UI legibly (verified). The trade-off is fidelity: these are *PICO-8-style*
+glyphs, not pixel-identical to PICO-8's.
+
+> ### 📋 Backlog — RT-FONT: rebuild `assets/pico8_font.h` from a real PICO-8 font
+> `pico8_font.h` is a **hand-authored placeholder**. Replace it with PICO-8's **actual** font, which is
+> CC-0: export PICO-8's built-in font (as a PNG, or dump its font memory — 8 bytes/char, 8×8 bitfield,
+> **bit LSB = leftmost pixel**) and convert it to the table — ideally via an `assets/gen_font.py` that
+> emits `pico8_font.h`, the same pattern `gen_celeste_cart.py` uses for the sprite sheet. That gets
+> pixel-exact, genuinely-CC-0 glyphs with zero hand-drawing, and drops the placeholder. **Blocked only on
+> obtaining the font bytes** (needs a PICO-8 install to export; this dev box has none, and the exact bytes
+> can't be fetched reliably). Format refs:
+> [Lexaloffle BBS](https://www.lexaloffle.com/bbs/?tid=50948),
+> [PICO-8 manual](https://www.lexaloffle.com/dl/docs/pico-8_manual.html);
+> Lexaloffle also posts a vector [PICO-8.ttf](https://www.lexaloffle.com/bbs/?tid=3760) (for editors — the
+> in-cart bitmap above is the faithful source).
+
+**The original decision (still valid as a fidelity option): use the PICO-8 font data directly; it is CC-0.
+Do not vendor another emulator's font file.**
 
 Lexaloffle's own FAQ is unambiguous ([lexaloffle.com/pico-8.php?page=faq](https://www.lexaloffle.com/pico-8.php?page=faq),
 asked about using the palette/font in your own projects):

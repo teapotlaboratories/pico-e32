@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HG-3: spr(), the first real cart drawing — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)}
+  .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;
+       font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:10px;padding:.8rem 1rem;overflow-x:auto;font-size:.82rem;line-height:1.5}
+  .pill{display:inline-block;font-size:.78rem;font-weight:600;padding:.16em .6em;border-radius:999px;border:1px solid var(--border)}
+  .pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+  .pill.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);
+        border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  .tldr.warn{border-left-color:var(--warn)}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .6rem;text-align:left}
+  th{background:var(--codebg)} td.n{text-align:right;font-family:ui-monospace,monospace}
+  .yes{color:var(--ok);font-weight:700} .no{color:var(--bad);font-weight:700}
+  .diagram{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.2rem;margin:1.4rem 0;overflow-x:auto}
+  .cap{color:var(--muted);font-size:.85rem;margin:.4rem 0 0;text-align:center}
+  .note{color:var(--muted);font-size:.92rem}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .toc{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.8rem 1.1rem;margin:1.4rem 0;font-size:.93rem}
+  .toc ul{margin:.4rem 0 0;columns:2;column-gap:2rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <p class="date">2026-07-16</p>
+  <h1>HG-3: <code>spr()</code>, the first real cart drawing</h1>
+
+  <div class="tldr">
+    <span class="pill ok">✓ done &amp; verified</span>
+    <span class="pill warn">commit held — work hours</span><br>
+    Implemented PICO-8's <code>spr(n,x,y,[w,h],[flip_x,flip_y])</code> (+ a minimal <code>palt()</code>) in
+    the host draw API — the core of every cart, and the gap between “Celeste's logic runs” (Gate 2) and
+    “Celeste draws a pixel”. Verified <strong>camera-free</strong> via the host frame-dump → PNG harness
+    against Celeste's real sprite sheet: a 64-sprite grid renders recognisable sprites, a 2×2 block
+    assembles a full Madeline, and an asymmetric “F” flips to <strong>exact framebuffer mirrors</strong>.
+    Trivial-cart <code>fb_hash</code> unchanged — no Gate 3 regression.
+  </div>
+
+  <div class="toc">
+    <strong>On this page</strong>
+    <ul>
+      <li><a href="#what">What landed</a></li>
+      <li><a href="#datapath">The spr() datapath</a></li>
+      <li><a href="#verify">Verification — 3 mechanics</a></li>
+      <li><a href="#gotcha">The sprite-0-blank gotcha</a></li>
+      <li><a href="#next">No regression &amp; next</a></li>
+    </ul>
+  </div>
+
+  <h2 id="what">What landed</h2>
+  <ul>
+    <li><strong><code>spr(n,x,y,[w,h],[flip_x,flip_y])</code></strong> — blits sprite <code>n</code> (8×8,
+      or a <code>w*8 × h*8</code> block) from the active sheet to <code>(x,y)</code>, skipping transparent
+      colours. Sprite <code>n</code>'s top-left is <code>(n%16*8, n/16*8)</code>; the flips mirror the
+      whole block about its own centre.</li>
+    <li><strong><code>g_gfx</code></strong> — the active sheet pointer (128×128 palette indices, HG-1's
+      <code>CELESTE_GFX</code> layout). <strong>Null-safe</strong>: the trivial cart sets no sheet, so
+      <code>spr()</code> is a no-op there and the Gate 3 output is untouched.</li>
+    <li><strong>Minimal <code>palt()</code></strong> — default colour-0 transparency + control. The colour
+      <em>remap</em> half of <code>pal</code>/<code>palt</code> stays HG-6.</li>
+  </ul>
+
+  <h2 id="datapath">The <code>spr()</code> datapath</h2>
+  <div class="diagram">
+    <svg viewBox="0 0 700 180" role="img" aria-label="Sprite sheet -> spr(n,x,y,flip) with transparency skip -> 128x128 framebuffer -> dump/PNG or scale/blit to panel.">
+      <rect x="8" y="45" width="150" height="70" rx="8" fill="var(--codebg)" stroke="var(--border)"/>
+      <text x="83" y="72" text-anchor="middle" fill="var(--fg)" font-size="12" font-weight="700">sheet (g_gfx)</text>
+      <text x="83" y="90" text-anchor="middle" fill="var(--muted)" font-size="10">128×128 indices</text>
+      <text x="83" y="104" text-anchor="middle" fill="var(--muted)" font-size="10">sprite n @ (n%16·8, n/16·8)</text>
+
+      <line x1="158" y1="80" x2="205" y2="80" stroke="var(--line)" stroke-width="1.5"/><polygon points="205,80 197,76 197,84" fill="var(--line)"/>
+
+      <rect x="207" y="40" width="170" height="80" rx="8" fill="var(--codebg)" stroke="var(--accent)"/>
+      <text x="292" y="64" text-anchor="middle" fill="var(--accent)" font-size="12" font-weight="700">spr(n,x,y,w,h,fx,fy)</text>
+      <text x="292" y="82" text-anchor="middle" fill="var(--muted)" font-size="10">for each px: source col/row</text>
+      <text x="292" y="96" text-anchor="middle" fill="var(--muted)" font-size="10">mirror if fx/fy;</text>
+      <text x="292" y="110" text-anchor="middle" fill="var(--muted)" font-size="10">skip if palt[c] (transparent)</text>
+
+      <line x1="377" y1="80" x2="424" y2="80" stroke="var(--line)" stroke-width="1.5"/><polygon points="424,80 416,76 416,84" fill="var(--line)"/>
+
+      <rect x="426" y="45" width="120" height="70" rx="8" fill="var(--codebg)" stroke="var(--border)"/>
+      <text x="486" y="76" text-anchor="middle" fill="var(--fg)" font-size="12" font-weight="700">framebuffer</text>
+      <text x="486" y="94" text-anchor="middle" fill="var(--muted)" font-size="10">128×128 indexed</text>
+
+      <line x1="546" y1="80" x2="590" y2="80" stroke="var(--line)" stroke-width="1.5"/><polygon points="590,80 582,76 582,84" fill="var(--line)"/>
+      <rect x="592" y="34" width="100" height="42" rx="6" fill="var(--codebg)" stroke="var(--ok)"/>
+      <text x="642" y="52" text-anchor="middle" fill="var(--ok)" font-size="10.5" font-weight="700">dump → PNG</text>
+      <text x="642" y="66" text-anchor="middle" fill="var(--muted)" font-size="9.5">verify (no camera)</text>
+      <rect x="592" y="84" width="100" height="42" rx="6" fill="var(--codebg)" stroke="var(--border)"/>
+      <text x="642" y="102" text-anchor="middle" fill="var(--fg)" font-size="10.5" font-weight="700">scale → blit</text>
+      <text x="642" y="116" text-anchor="middle" fill="var(--muted)" font-size="9.5">to the panel</text>
+
+      <text x="8" y="150" fill="var(--muted)" font-size="10.5">Same framebuffer, two consumers. The host dump proves the framebuffer is right; the fb_hash host↔device</text>
+      <text x="8" y="164" fill="var(--muted)" font-size="10.5">compare proves the device produces the same one. spr() is null-safe on g_gfx, so a sheet-less cart is unaffected.</text>
+    </svg>
+  </div>
+
+  <h2 id="verify">Verification — three mechanics, one camera-free harness</h2>
+  <p>Behind <code>P8_SPRTEST=1</code> (so the default <code>make dump</code> still runs the trivial cart),
+    the test prefers Celeste's <strong>real</strong> <code>CELESTE_GFX</code> (guarded
+    <code>__has_include</code>, synthetic fallback if the asset isn't generated) and exercises all of
+    <code>spr()</code>:</p>
+  <table>
+    <tr><th>test</th><th>what it draws</th><th>proves</th></tr>
+    <tr><td>64-sprite grid</td><td><code>spr(ry*16+rx, rx*8, ry*8)</code> for the top 4 rows</td><td>decode + position + transparency (Madeline, balloons, chest, spikes, clouds all recognisable; blue <code>cls(1)</code> shows through colour-0)</td></tr>
+    <tr><td>2×2 block</td><td><code>spr(0,80,104,2,2)</code> → sprites 0/1/16/17</td><td>the <code>w</code>/<code>h</code> multi-tile path (assembles a full Madeline)</td></tr>
+    <tr><td>flip ×4</td><td>an asymmetric “F” drawn normal / flip-X / flip-Y / both</td><td><code>flip_x</code>, <code>flip_y</code> — see below</td></tr>
+  </table>
+
+  <p>The flip result, read straight from the dumped framebuffer — <strong>exact mirrors, not approximate</strong>:</p>
+  <pre>F non-bg pixels: 17            (non-blank ✓)
+F asymmetric under X: True     (a mirror is actually different — the test isn't vacuous)
+F asymmetric under Y: True
+flip_x  == horizontal mirror of normal:  True
+flip_y  == vertical   mirror of normal:  True
+flip_xy == both-axis   mirror of normal: True</pre>
+
+  <h2 id="gotcha">The gotcha: Celeste's sprite 0 is blank</h2>
+  <div class="tldr warn">
+    The flip test first used sprite 0 — and passed <strong>vacuously</strong>. Sprite 0 is <strong>blank</strong>
+    in Celeste (Madeline starts at sprite 1), so “flip of nothing == mirror of nothing” is trivially true
+    and proves nothing. Fix: paint a known <strong>asymmetric, non-blank “F”</strong> into sprite 64 (below
+    the grid) and flip-test that, plus <em>assert the F is asymmetric</em> so the mirror check can't pass
+    for free. The L-pattern lesson again: an asymmetric known pattern beats “looks roughly right.”
+  </div>
+
+  <h2 id="next">No regression, and what's next</h2>
+  <p>The trivial cart (Gate 3 / device path) still prints <code>fb_hash=5e851a75</code> —
+    <strong>byte-identical</strong> to before HG-3. <code>spr()</code> being null-safe on <code>g_gfx</code>
+    means registering it changed nothing for a cart that never calls it.</p>
+  <ul>
+    <li><strong>HG-4 — <code>map()</code></strong> is next, with the shared-memory gotcha: <code>__map__</code>
+      alone is only rooms 0–15 of 32; the generator must also emit sheet rows 64–127 as map rows 32–63
+      (and <code>CELESTE_MAP[4096]</code> is used by luabench — resize with care).</li>
+    <li><strong>HG-6</strong> adds the <code>pal()</code> colour remap; <code>spr()</code> honours the
+      transparency table but not a remap yet.</li>
+    <li>The panel itself is a separate camera check (BC-2/BC-3); the host↔device <code>fb_hash</code>
+      compare ties the host proof to the device.</li>
+  </ul>
+
+  <h2>Board / commit state</h2>
+  <p>No device flashing (host-only verification). Nothing committed — held for after 17:00 Pacific per the
+    work-hours rule; the changes sit in the tree on the #6 branch.</p>
+</div>
+</body>
+</html>

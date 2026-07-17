@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HG-4: map(), and the other half of Celeste's world — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)}
+  .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;
+       font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:10px;padding:.8rem 1rem;overflow-x:auto;font-size:.82rem;line-height:1.5}
+  .pill{display:inline-block;font-size:.78rem;font-weight:600;padding:.16em .6em;border-radius:999px;border:1px solid var(--border)}
+  .pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+  .pill.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);
+        border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  .tldr.warn{border-left-color:var(--warn)}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .6rem;text-align:left}
+  th{background:var(--codebg)} td.n{text-align:right;font-family:ui-monospace,monospace}
+  .diagram{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.2rem;margin:1.4rem 0;overflow-x:auto}
+  .cap{color:var(--muted);font-size:.85rem;margin:.4rem 0 0;text-align:center}
+  .note{color:var(--muted);font-size:.92rem}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .toc{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.8rem 1.1rem;margin:1.4rem 0;font-size:.93rem}
+  .toc ul{margin:.4rem 0 0;columns:2;column-gap:2rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <p class="date">2026-07-16</p>
+  <h1>HG-4: <code>map()</code>, and the other half of Celeste's world</h1>
+
+  <div class="tldr">
+    <span class="pill ok">✓ done &amp; verified</span>
+    <span class="pill warn">commit held — work hours</span><br>
+    Implemented <code>map()</code> (+ <code>mget</code>/<code>mset</code>/<code>fget</code>/<code>fset</code>)
+    so a real Celeste <strong>room</strong> renders — and resolved the shared-memory finding: Celeste's
+    <code>__map__</code> section is only rooms 0–15 of 32; the other 16 rooms are aliased onto the sprite
+    sheet. The generator now emits the <strong>full 128×64 map</strong>, and <strong>rooms 16–31 render as
+    real levels, not noise</strong>. Gate 2 unaffected; trivial-cart hash unchanged.
+  </div>
+
+  <div class="toc">
+    <strong>On this page</strong>
+    <ul>
+      <li><a href="#shared">The shared-memory problem</a></li>
+      <li><a href="#gate2">Gate 2 is safe</a></li>
+      <li><a href="#verify">Verification — real rooms</a></li>
+      <li><a href="#layer">The layer filter</a></li>
+      <li><a href="#next">Next</a></li>
+    </ul>
+  </div>
+
+  <h2 id="shared">The shared-memory problem, resolved</h2>
+  <p>PICO-8's map is <strong>128×64 cells</strong>, but the <code>__map__</code> section carries only
+    <strong>rows 0–31</strong>. Rows 32–63 share memory with the <strong>bottom half of the sprite sheet</strong>
+    (gfx rows 64–127), and Celeste uses it — rooms 16–31 live there. A <code>map()</code> fed only from
+    <code>__map__</code> draws half the game.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 700 250" role="img" aria-label="PICO-8 memory: gfx rows 0-63 are real sprites; gfx rows 64-127 (0x1000-0x1FFF) double as map rows 32-63; the __map__ section (0x2000) holds map rows 0-31. The generator packs the shared gfx region into the map's second half.">
+      <!-- sprite sheet column -->
+      <text x="90" y="24" text-anchor="middle" fill="var(--muted)" font-family="ui-monospace,monospace" font-size="11" font-weight="700">sprite sheet</text>
+      <rect x="20" y="34" width="140" height="70" fill="none" stroke="var(--ok)"/>
+      <text x="90" y="64" text-anchor="middle" fill="var(--ok)" font-size="11" font-weight="700">gfx rows 0–63</text>
+      <text x="90" y="80" text-anchor="middle" fill="var(--muted)" font-size="10">real sprites (spr uses)</text>
+      <rect x="20" y="104" width="140" height="70" fill="none" stroke="var(--warn)" stroke-dasharray="4 3"/>
+      <text x="90" y="132" text-anchor="middle" fill="var(--warn)" font-size="11" font-weight="700">gfx rows 64–127</text>
+      <text x="90" y="148" text-anchor="middle" fill="var(--muted)" font-family="ui-monospace,monospace" font-size="10">0x1000–0x1FFF</text>
+      <text x="90" y="192" text-anchor="middle" fill="var(--muted)" font-size="10">— shared —</text>
+
+      <!-- arrow: pack -->
+      <path d="M162 139 C 230 139, 250 139, 300 139" stroke="var(--warn)" fill="none" stroke-width="2"/>
+      <polygon points="300,139 291,134 291,144" fill="var(--warn)"/>
+      <text x="232" y="128" text-anchor="middle" fill="var(--warn)" font-size="10" font-weight="700">pack 2px/byte</text>
+
+      <!-- map column -->
+      <text x="430" y="24" text-anchor="middle" fill="var(--muted)" font-family="ui-monospace,monospace" font-size="11" font-weight="700">map (128×64)</text>
+      <rect x="360" y="34" width="140" height="70" fill="none" stroke="var(--ok)"/>
+      <text x="430" y="60" text-anchor="middle" fill="var(--ok)" font-size="11" font-weight="700">rows 0–31</text>
+      <text x="430" y="76" text-anchor="middle" fill="var(--muted)" font-size="10">from __map__ (0x2000)</text>
+      <text x="430" y="90" text-anchor="middle" fill="var(--muted)" font-size="10">rooms 0–15</text>
+      <rect x="360" y="104" width="140" height="70" fill="var(--codebg)" stroke="var(--warn)"/>
+      <text x="430" y="130" text-anchor="middle" fill="var(--warn)" font-size="11" font-weight="700">rows 32–63</text>
+      <text x="430" y="146" text-anchor="middle" fill="var(--fg)" font-size="10" font-weight="700">now emitted ✓</text>
+      <text x="430" y="160" text-anchor="middle" fill="var(--muted)" font-size="10">rooms 16–31</text>
+
+      <text x="360" y="212" fill="var(--muted)" font-family="ui-monospace,monospace" font-size="10.5">tile = px[2x] | px[2x+1]&lt;&lt;4</text>
+      <text x="360" y="228" fill="var(--muted)" font-size="10.5">low nibble = left pixel</text>
+      <!-- stats confirm -->
+      <text x="20" y="228" fill="var(--muted)" font-size="10.5">both halves: ~38% zeros, ~95% tiles&lt;64 → real map, not noise</text>
+    </svg>
+    <p class="cap">The generator packs gfx rows 64–127 into the map's second half. The two halves' tile statistics are near-identical — the first sign it's real level data.</p>
+  </div>
+
+  <h2 id="gate2">Gate 2 (luabench) is unaffected — the consumer check held</h2>
+  <p><code>CELESTE_MAP</code> grew 4096 → 8192, and it's shared with <code>pico-e32-luabench</code>. Safe,
+    because luabench's <code>mget</code>/<code>mset</code> <strong>clamp to <code>y&lt;32</code></strong>
+    (<code>celeste_bench.cpp:17,22</code>) — they only index <code>[0,4096)</code>, and <code>map=nop</code>
+    there (headless). The first 4096 bytes are byte-identical (fingerprint <code>408a1f31</code>, max tile
+    104) and luabench builds clean against the 8192 array. <strong>Gate 2 sees exactly what it saw before.</strong></p>
+
+  <h2 id="verify">Verification — real rooms, including the shared half</h2>
+  <p><code>P8_MAPTEST=1 P8_ROOM=n make dump</code> draws Celeste room <em>n</em> full-screen and dumps it to
+    PNG (camera-free):</p>
+  <table>
+    <tr><th>room</th><th>source</th><th>renders as</th></tr>
+    <tr><td>Room 1</td><td><code>__map__</code> (rows 0–31)</td><td>a real Celeste room — ice/snow platforms, rock, spikes, a spring, Madeline, a berry</td></tr>
+    <tr><td><strong>Room 16, 24</strong></td><td><strong>shared</strong> (rows 32–63)</td><td><strong>also real, coherent rooms</strong> — platforms, spikes, a key, a chest, waterfalls, Madeline. <strong>Not noise.</strong></td></tr>
+  </table>
+  <p>This is the decisive result: the shared-memory extraction produces real levels, and the packing nibble
+    order is right (rooms are coherent, not scrambled or mirrored). <strong>Trivial-cart <code>fb_hash</code>
+    unchanged</strong> (<code>5e851a75</code>) — the new calls are null-safe, so a cart that never calls them
+    is untouched. No Gate 3 regression.</p>
+
+  <h2 id="layer">The <code>layer</code> filter — a verified strict subset</h2>
+  <p>Rendered room 1 with each single-bit layer and compared to the full render:</p>
+  <pre>full room 1: 10827 lit px
+  layer 0x01:  6720 px   subset-of-full = True
+  layer 0x02:  6869 px   subset-of-full = True
+  layer 0x04:  3916 px   subset-of-full = True
+  layer 0x08..0x80:  0 px   (Celeste doesn't use those flag bits)
+  union of all layers: 10785 px  (vs full 10827)</pre>
+  <p>Every layered render is a strict subset; flag bits 0–2 carry content (real <code>CELESTE_GFF</code> via
+    <code>fget</code>); the union reconstructs the full render <strong>minus 42 px</strong> — the flagless
+    tiles, which PICO-8 draws only at <code>layer=0</code>. Correct behaviour, confirmed.</p>
+
+  <h2 id="next">Next</h2>
+  <ul>
+    <li><strong>HG-5 — <code>print()</code> + the PICO-8 font</strong> (CC-0 from Lexaloffle; transcribe the
+      glyph data, don't copy an emulator's file), then <strong>HG-6</strong> (<code>pal</code> remap,
+      <code>camera</code>, <code>clip</code>).</li>
+    <li>With <code>spr</code> + <code>map</code> + <code>print</code> + <code>camera</code>, a real Celeste
+      <code>_draw</code> would render an actual playable-looking frame — the end-of-surface milestone.</li>
+    <li>Optional Gate 2 re-scope: extend luabench's <code>mget</code> to <code>y&lt;64</code> and run levels
+      16–30 to benchmark the full game (the map data now exists).</li>
+  </ul>
+
+  <h2>Board / commit state</h2>
+  <p>Host-only (no device flashing). Nothing committed — held for after 17:00 Pacific; changes sit in the
+    tree on the #6 branch. The regenerated <code>assets/celeste_cart.h</code> stays gitignored (third-party
+    cart data) — only the generator change is committed.</p>
+</div>
+</body>
+</html>

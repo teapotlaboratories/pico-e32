@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HG-5: print() and a font that carries no one else's licence — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)}
+  .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;
+       font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:10px;padding:.8rem 1rem;overflow-x:auto;font-size:.82rem;line-height:1.5}
+  .pill{display:inline-block;font-size:.78rem;font-weight:600;padding:.16em .6em;border-radius:999px;border:1px solid var(--border)}
+  .pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+  .pill.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);
+        border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  .tldr.warn{border-left-color:var(--warn)}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  .diagram{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.2rem;margin:1.4rem 0;overflow-x:auto}
+  .cap{color:var(--muted);font-size:.85rem;margin:.4rem 0 0;text-align:center}
+  .note{color:var(--muted);font-size:.92rem}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <p class="date">2026-07-16</p>
+  <h1>HG-5: <code>print()</code> and a font that carries no one else's licence</h1>
+
+  <div class="tldr">
+    <span class="pill ok">✓ done &amp; verified</span>
+    <span class="pill warn">commit held — work hours</span><br>
+    Implemented <code>print(str,[x],[y],[col])</code> + a 3×5 font. The glyphs live in
+    <code>assets/pico8_font.h</code> — <strong>authored</strong>, not copied or transcribed from anyone's file
+    (the most conservative licensing choice) — with PICO-8 geometry so layouts line up. A
+    <strong>placeholder</strong>: backlog RT-FONT is to rebuild it from a real PICO-8 font. Celeste's real UI
+    strings all render <strong>legible</strong> in a dumped frame. Trivial-cart hash unchanged.
+  </div>
+
+  <h2>The font: authored, not sourced</h2>
+  <p>The <a href="../../runtime/pico-e32-host-graphics.md">host-graphics doc</a> established that PICO-8's
+    font is <strong>CC-0</strong>, and that an emulator's <em>file</em> (fake-08's <code>fontdata.cpp</code>,
+    MIT, with no font copyright notice) shouldn't be copied — the data may be transcribed, but not the file.
+    For HG-5 I went one step more conservative: <strong>the glyphs are authored</strong> as 3×5 row-strings
+    in <code>assets/pico8_font.h</code>, so there is <strong>no third-party data at all</strong> — CC-0 or
+    otherwise — and the whole provenance question is moot. The trade-off is fidelity: these are
+    <em>PICO-8-style</em> glyphs, not pixel-identical.</p>
+  <div class="tldr warn">
+    <strong>📋 Backlog RT-FONT — rebuild <code>pico8_font.h</code> from a real PICO-8 font.</strong> The
+    header is a hand-authored <em>placeholder</em>. PICO-8's own font is CC-0 (8 bytes/char, 8×8 bitfield,
+    LSB = left pixel); export it (a PNG or a font-memory dump) and convert it — ideally via an
+    <code>assets/gen_font.py</code> that emits <code>pico8_font.h</code>, the same pattern
+    <code>gen_celeste_cart.py</code> uses for the sprite sheet — for pixel-exact glyphs with zero
+    hand-drawing. Blocked only on obtaining the font bytes (no PICO-8 on this dev box). A separate
+    <code>.h</code> makes the eventual swap a one-file change that never touches the renderer.
+  </div>
+
+  <div class="diagram">
+    <svg viewBox="0 0 640 210" role="img" aria-label="Font anatomy: a 3-pixel-wide by 5-pixel-tall glyph cell for the letter A, authored as row strings; the cursor advances 4px per character and 6px per line.">
+      <text x="20" y="24" fill="var(--muted)" font-family="ui-monospace,monospace" font-size="12" font-weight="700">authored:</text>
+      <text x="20" y="52" fill="var(--fg)" font-family="ui-monospace,monospace" font-size="15">{'A',{" # ","# #","###","# #","# #"}}</text>
+
+      <!-- decoded grid -->
+      <text x="120" y="96" text-anchor="middle" fill="var(--muted)" font-family="ui-monospace,monospace" font-size="11">→ 3×5 bitmap</text>
+      <g transform="translate(70,110)">
+        <!-- draw the A: rows: .#. / #.# / ### / #.# / #.# -->
+        <!-- grid cells 18px -->
+        <g fill="var(--ok)">
+          <rect x="18" y="0"  width="16" height="16"/>
+          <rect x="0"  y="18" width="16" height="16"/><rect x="36" y="18" width="16" height="16"/>
+          <rect x="0"  y="36" width="16" height="16"/><rect x="18" y="36" width="16" height="16"/><rect x="36" y="36" width="16" height="16"/>
+          <rect x="0"  y="54" width="16" height="16"/><rect x="36" y="54" width="16" height="16"/>
+          <rect x="0"  y="72" width="16" height="16"/><rect x="36" y="72" width="16" height="16"/>
+        </g>
+        <!-- grid outline -->
+        <g stroke="var(--border)" fill="none">
+          <rect x="0" y="0" width="54" height="90"/>
+        </g>
+      </g>
+
+      <!-- advance -->
+      <line x1="300" y1="150" x2="440" y2="150" stroke="var(--accent)" stroke-width="1.5"/>
+      <polygon points="440,150 432,146 432,154" fill="var(--accent)"/>
+      <text x="370" y="142" text-anchor="middle" fill="var(--accent)" font-family="ui-monospace,monospace" font-size="11" font-weight="700">+4px / char</text>
+      <text x="300" y="188" fill="var(--muted)" font-size="11">cursor advances 4px per character, 6px per line — matching PICO-8, so cart layouts line up</text>
+      <text x="470" y="60" fill="var(--muted)" font-size="11">lowercase → caps</text>
+      <text x="470" y="78" fill="var(--muted)" font-family="ui-monospace,monospace" font-size="10.5">a-z copy A-Z glyphs</text>
+      <text x="470" y="96" fill="var(--muted)" font-size="11">(as PICO-8 does; Celeste's</text>
+      <text x="470" y="112" fill="var(--muted)" font-size="11">text is lowercase)</text>
+    </svg>
+    <p class="cap">Each glyph is authored as five 3-char row-strings, decoded to a bitmap at init. Readable in the source, so a wrong glyph is visible and fixable.</p>
+  </div>
+
+  <h2>Verification — the glyph set + Celeste's real strings</h2>
+  <p><code>P8_TEXTTEST=1 make dump</code> renders the whole printable set and Celeste's actual UI strings:</p>
+  <pre>abcdefghijklm  nopqrstuvwxyz          &lt;- lowercase, shown as caps
+0123456789     .,:;!?-+=/%*#()
+old site       deaths:12
+x1000          100 m
+matt thorson   noel berry
+summit         time 3:07</pre>
+  <p>All <strong>legible</strong> in the dumped frame — the alphabet, digits, punctuation, and every Celeste
+    UI string (<code>OLD SITE</code>, <code>DEATHS:12</code>, <code>MATT THORSON</code>, <code>TIME 3:07</code>,
+    …) read cleanly. The weakest glyph is <code>N</code> (a 3px diagonal), still readable in
+    <code>THORSON</code>/<code>NOEL</code>. <strong>Trivial-cart <code>fb_hash</code> unchanged</strong>
+    (<code>5e851a75</code>) — <code>print</code> is null-safe. No Gate 3 regression.</p>
+
+  <h2>Next</h2>
+  <ul>
+    <li><strong>HG-6 — <code>pal()</code> colour remap, <code>camera</code>, <code>clip</code>.</strong>
+      <code>camera</code> (screen offset) is what a real Celeste <code>_draw</code> needs to scroll/shake;
+      <code>pal</code> does the flash effects; <code>clip</code> bounds drawing.</li>
+    <li>After HG-6, a real Celeste <code>_draw</code> (spr + map + print + camera) renders a full
+      playable-looking frame — the end of the graphics surface, and the natural place to run the actual
+      cart on the panel.</li>
+  </ul>
+
+  <h2>Board / commit state</h2>
+  <p>Host-only (no device flashing). Nothing committed — held for after 17:00 Pacific; changes sit in the
+    tree on the #6 branch.</p>
+</div>
+</body>
+</html>

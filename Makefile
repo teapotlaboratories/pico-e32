@@ -49,11 +49,16 @@ BUILD_DIR := $(CURDIR)/build/$(APP)/$(BOARD)
 # after flashing if you don't want them lingering on disk.
 WIFI_DEFS := $(if $(WIFI_SSID),-D WIFI_SSID="$(WIFI_SSID)") $(if $(WIFI_PASS),-D WIFI_PASS="$(WIFI_PASS)")
 
+# Generic escape hatch for extra CMake -D options, e.g. an app compile flag:
+#   make build APP=pico-e32-host BOARD=makerfabs-ili9488-r1 DEFS='-D CELESTE_DEMO=1'
+DEFS ?=
+
 IDF := source "$(IDF_PATH)/export.sh" >/dev/null 2>&1 && cd "$(APP_DIR)" && \
        idf.py -B "$(BUILD_DIR)" -b "$(BAUD)" \
               -D SDKCONFIG="$(BUILD_DIR)/sdkconfig" \
               -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_DEFAULTS)" \
               -D BOARD_DIR="$(BOARD_DIR)" \
+              $(DEFS) \
               $(WIFI_DEFS)
 
 .PHONY: help install build flash monitor flash-monitor clean fullclean menuconfig size erase
