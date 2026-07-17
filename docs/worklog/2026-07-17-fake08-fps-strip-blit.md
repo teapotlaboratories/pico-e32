@@ -55,8 +55,29 @@ So the draw path is no longer the fps concern; frame rate is now bounded by the 
 heavy rooms** — i.e. the open [z8lua-speedup](../reference/z8lua-speedup-research.md) question, to be tackled
 only after profiling a representative cart on the S3.
 
+## Addendum — direct gameplay measurement (later same day)
+
+Drove Celeste into real gameplay (a **temporary** auto-drive in `scanInput` — walk right / jump / climb;
+reverted immediately after) and re-ran `MEASURE_FPS` for 30 windows across room traversal, turning the
+draw+VM *extrapolation* into a measured distribution:
+
+- **`drawFrame`: 3.60–3.62 ms, dead flat** every window — confirms it's content-independent.
+- **Steady gameplay: step ~5 ms + draw 3.6 ≈ 8.5 ms/frame → ~110 fps compute ceiling.** Far above 30,
+  comfortably 60-capable. Lighter than Gate #2's 15.8 ms avg — the crude auto-drive likely never reached
+  the object-densest rooms.
+- **Occasional within-room worst frames: ~15–21 ms (57–75 fps)** — still above 30.
+- **Room-load/transition spikes: ~80–105 ms (~10–12 fps), roughly every ~7 s** — a *single* heavy frame
+  when a room loads (level setup / object spawn), i.e. a momentary hitch, not a sustained slowdown.
+
+**This refines the earlier extrapolation.** The concern is *not* "dense rooms sustain ~23 fps" — steady
+gameplay is fast. The real artifact is the **per-room ~100 ms transition spike** (one dropped frame per
+room change). That's the targeted next perf question — likely a one-time room-load cost, not general
+interpreter speed. Caveat: the auto-drive may not have hit Celeste's heaviest rooms, so Gate #2's 40 ms
+remains the sustained worst-case estimate for those; **nothing in this run sustained below 30 fps.**
+
 ## Follow-ups
 
-- A **direct gameplay `Step` measurement** (drive Celeste past the title via `scanInput`) would firm up the
-  ~15.8 ms extrapolation — currently the `Step` number measured is the title screen.
+- **Investigate the ~100 ms room-transition spike** — is it cart parse, `vm_reload`, object spawn, or GC?
+  A one-time cost is very different from an interpreter-speed problem. This is the real next perf lever.
+- A cleaner gameplay drive (real input, once parts land) would sample the heaviest rooms directly.
 - `drawFrame` could inline further / use 32-bit stores, but at 3.6 ms it's no longer the bottleneck.
