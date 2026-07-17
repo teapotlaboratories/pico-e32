@@ -13,7 +13,9 @@ sources. Full context and the design rationale are in
 - **Display:** ILI9488, 320×480, **16-bit Intel-8080 (i80) parallel**, RGB565, ~20 MHz pclk,
   panel has its own GRAM. Backlight PWM on **GPIO45**.
 - **Touch:** FT6236 capacitive, I²C **0x38**, SDA=38 / SCL=39 (polled; INT/RST NC).
-- **microSD:** SPI 1-bit — CS=1, MOSI=2, MISO=41, CLK=42 (bus shared with the LCD).
+- **microSD:** SPI 1-bit — CS=1, MOSI=2, MISO=41, CLK=42 (a **private SPI2 bus, NOT shared with the LCD** —
+  the LCD is the i80 parallel bus on WR35/DC36/CS37 + data pins; the SD pins are disjoint. The old
+  "shared with the LCD" note was carried over from the 4" board — see `DP-7` and the SD-loader worklog).
 - **Expansion:** Mabee (Grove) = I²C on 38/39 + 1 GPIO (**GPIO40**, not ADC). ~1 free GPIO
   overall → buttons via an I²C expander at addr ≠ 0x38.
 - **USB:** dual USB-C — native (19/20) + CP2104 UART (43/44). **Power: USB-C 5 V only, no

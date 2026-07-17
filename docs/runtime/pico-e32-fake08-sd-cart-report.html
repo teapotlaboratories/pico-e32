@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fake-08 SD cart loader &mdash; flash-baked to self-loading (ESP32-S3)</title>
+<style>
+  :root{
+    --bg:#eef1f6; --surface:#ffffff; --surface2:#f6f8fb; --fg:#161b22; --muted:#5a6472;
+    --border:#dfe4ec; --line:#c7cfda; --accent:#1f6feb; --accent-soft:#e7f0ff;
+    --kept:#127a45; --kept-soft:#e4f5ec; --warn:#9a6410; --warn-soft:#fbf1e0; --bad:#c53a2c;
+    --code:#eef1f6; --shadow:0 1px 2px rgba(20,30,50,.06),0 8px 24px rgba(20,30,50,.06);
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --bg:#0b0f15; --surface:#131922; --surface2:#0f151d; --fg:#e6edf3; --muted:#93a0b0;
+    --border:#232d38; --line:#2b3742; --accent:#4d9dff; --accent-soft:#132539;
+    --kept:#3fb950; --kept-soft:#12241a; --warn:#d6a02a; --warn-soft:#241d10; --bad:#f0685a;
+    --code:#161d27; --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
+  }}
+  :root[data-theme="light"]{--bg:#eef1f6;--surface:#fff;--surface2:#f6f8fb;--fg:#161b22;--muted:#5a6472;--border:#dfe4ec;--line:#c7cfda;--accent:#1f6feb;--accent-soft:#e7f0ff;--kept:#127a45;--kept-soft:#e4f5ec;--warn:#9a6410;--warn-soft:#fbf1e0;--bad:#c53a2c;--code:#eef1f6}
+  :root[data-theme="dark"]{--bg:#0b0f15;--surface:#131922;--surface2:#0f151d;--fg:#e6edf3;--muted:#93a0b0;--border:#232d38;--line:#2b3742;--accent:#4d9dff;--accent-soft:#132539;--kept:#3fb950;--kept-soft:#12241a;--warn:#d6a02a;--warn-soft:#241d10;--bad:#f0685a;--code:#161d27}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 var(--sans);-webkit-font-smoothing:antialiased}
+  .wrap{max-width:940px;margin:0 auto;padding:2.4rem 1.25rem 4rem}
+  h1{font-size:clamp(2rem,5vw,2.9rem);line-height:1.05;letter-spacing:-.03em;margin:.25rem 0 .35rem;text-wrap:balance;font-weight:800}
+  h2{font-size:1.28rem;letter-spacing:-.015em;margin:2.7rem 0 .8rem;font-weight:700;display:flex;align-items:baseline;gap:.6rem}
+  h2 .num{font:600 .78rem/1 var(--mono);color:var(--accent);border:1px solid var(--border);border-radius:6px;padding:.3em .5em;background:var(--surface)}
+  p{margin:.7rem 0;max-width:68ch}
+  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+  code{font-family:var(--mono);font-size:.86em;background:var(--code);padding:.12em .42em;border-radius:5px}
+  .eyebrow{font:600 .74rem/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  .lede{font-size:1.1rem;color:var(--muted);max-width:62ch;margin:.5rem 0 0}
+  .lede b{color:var(--fg)}
+  .palstrip{display:flex;height:8px;border-radius:5px;overflow:hidden;margin:1.4rem 0 0;box-shadow:var(--shadow)}
+  .palstrip i{flex:1}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.7rem;margin:1.5rem 0 0}
+  .stat{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:.85rem 1rem;box-shadow:var(--shadow)}
+  .stat .k{font:800 1.4rem/1.1 var(--mono);letter-spacing:-.01em}
+  .stat .k.ok{color:var(--kept)}
+  .stat .l{font:600 .7rem/1.25 var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:.4rem}
+  .fig{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1.1rem;margin:1.4rem 0;box-shadow:var(--shadow);overflow-x:auto}
+  .fig svg{display:block;width:100%;height:auto;min-width:620px}
+  .cap{color:var(--muted);font-size:.85rem;margin:.7rem .2rem 0;line-height:1.5}
+  .tblwrap{overflow-x:auto;margin:1rem 0;border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow)}
+  table{border-collapse:collapse;width:100%;font-size:.9rem;background:var(--surface)}
+  th,td{text-align:left;padding:.55rem .8rem;border-bottom:1px solid var(--border);vertical-align:top}
+  thead th{background:var(--surface2);font:600 .72rem/1.2 var(--mono);text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  tbody tr:last-child td{border-bottom:0}
+  .path{font-family:var(--mono);font-size:.85em}
+  .tag{display:inline-block;font:600 .68rem/1 var(--mono);padding:.32em .5em;border-radius:6px;border:1px solid var(--border);white-space:nowrap}
+  .t-new{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+  .t-kept{color:var(--kept);border-color:color-mix(in srgb,var(--kept) 45%,transparent)}
+  .callout{border-radius:12px;padding:.9rem 1.1rem;margin:1rem 0}
+  .warn{background:var(--warn-soft);border:1px solid color-mix(in srgb,var(--warn) 40%,transparent)}
+  .warn b{color:var(--fg)}
+  ul{padding-left:1.2rem} li{margin:.35rem 0;max-width:66ch}
+  .foot{margin-top:3rem;padding-top:1.2rem;border-top:1px solid var(--border);color:var(--muted);font-size:.88rem;line-height:1.7}
+  .foot .m{font-family:var(--mono);font-size:.92em}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <p class="eyebrow">pico-e32 &middot; fake-08 runtime &middot; PR&nbsp;#10</p>
+  <h1>Flash-baked &rarr; self-loading</h1>
+  <p class="lede">fake-08 now loads carts off the board&rsquo;s <b>onboard microSD</b>. The new SD path is as
+  separable from the shared fake-08 engine as the SD pins are from the LCD bus &mdash; a private four-wire
+  bus, and a byte-identical <code>source/</code>.</p>
+  <div class="palstrip" aria-hidden="true">
+    <i style="background:#000000"></i><i style="background:#1D2B53"></i><i style="background:#7E2553"></i><i style="background:#008751"></i>
+    <i style="background:#AB5236"></i><i style="background:#5F574F"></i><i style="background:#C2C3C7"></i><i style="background:#FFF1E8"></i>
+    <i style="background:#FF004D"></i><i style="background:#FFA300"></i><i style="background:#FFEC27"></i><i style="background:#00E436"></i>
+    <i style="background:#29ADFF"></i><i style="background:#83769C"></i><i style="background:#FF77A8"></i><i style="background:#FFCCAA"></i>
+  </div>
+
+  <!-- KEY DIAGRAM -->
+  <div class="fig">
+    <svg viewBox="0 0 900 560" role="img" aria-label="Top: the i80 parallel LCD (21 GPIOs) and the microSD on a private SPI2 bus (4 GPIOs) converge on the ESP32-S3, sharing zero pins. Bottom: at boot, an SD cart is tried first, else the flash cart, then GameLoop.">
+      <defs>
+        <marker id="an" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" class="fn"/></marker>
+        <marker id="aa" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" class="fa"/></marker>
+        <marker id="ak" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" class="fk"/></marker>
+        <style>
+          text{font-family:ui-monospace,Menlo,Consolas,monospace}
+          .die{fill:var(--surface);stroke:var(--accent);stroke-width:1.6}
+          .lcd{fill:var(--surface2);stroke:var(--border);stroke-width:1.4}
+          .sd{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.6}
+          .pill{fill:var(--kept-soft);stroke:var(--kept);stroke-width:1.4}
+          .node{fill:var(--surface);stroke:var(--border);stroke-width:1.4}
+          .node-k{fill:var(--kept-soft);stroke:var(--kept);stroke-width:1.5}
+          .node-t{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.6}
+          .dec{fill:var(--surface2);stroke:var(--border);stroke-width:1.4}
+          .t{fill:var(--fg);font-size:12.5px} .tb{fill:var(--fg);font-size:13px;font-weight:700}
+          .mut{fill:var(--muted);font-size:11px} .acc{fill:var(--accent);font-size:11.5px;font-weight:700}
+          .kept{fill:var(--kept);font-size:11.5px;font-weight:700}
+          .pin{fill:var(--fg);font-size:11.5px}
+          .arrN{stroke:var(--line);stroke-width:5;fill:none} .fn{fill:var(--line)}
+          .arrA{stroke:var(--accent);stroke-width:2;fill:none} .fa{fill:var(--accent)}
+          .flowK{stroke:var(--kept);stroke-width:1.8;fill:none} .fk{fill:var(--kept)}
+          .flowM{stroke:var(--muted);stroke-width:1.6;fill:none}
+          .flowA{stroke:var(--accent);stroke-width:1.8;fill:none}
+          .divider{stroke:var(--border);stroke-width:1;stroke-dasharray:3 4}
+        </style>
+      </defs>
+
+      <!-- ===== TOP BAND: two buses converge ===== -->
+      <rect class="pill" x="360" y="12" width="180" height="26" rx="13"/>
+      <text class="kept" x="450" y="29" text-anchor="middle">disjoint &middot; 0 shared pins</text>
+
+      <rect class="die" x="392" y="120" width="116" height="58" rx="10"/>
+      <text class="tb" x="450" y="146" text-anchor="middle">ESP32-S3</text>
+      <text class="mut" x="450" y="164" text-anchor="middle">one die</text>
+
+      <!-- LCD panel (left, neutral, wide) -->
+      <rect class="lcd" x="24" y="58" width="330" height="150" rx="11"/>
+      <text class="tb" x="42" y="82">i80 parallel LCD &middot; Bus_Parallel16</text>
+      <text class="mut" x="42" y="103">CONTROL</text>
+      <text class="pin" x="122" y="103">WR 35  DC 36  CS 37  RD 48  BL 45</text>
+      <text class="mut" x="42" y="127">DATA 16</text>
+      <text class="pin" x="122" y="127">47 21 14 13 12 11 10 9</text>
+      <text class="pin" x="122" y="147">3 8 16 15 7 6 5 4</text>
+      <text class="mut" x="42" y="185">21 GPIOs &middot; parallel, not SPI</text>
+      <path class="arrN" d="M354,150 L388,150" marker-end="url(#an)"/>
+      <text class="mut" x="358" y="142">16-bit</text>
+
+      <!-- SD panel (right, accent, smaller) -->
+      <rect class="sd" x="596" y="98" width="240" height="90" rx="11"/>
+      <text class="tb" x="614" y="122">microSD &middot; private SPI2_HOST</text>
+      <text class="pin" x="614" y="146">CS 1  MOSI 2  MISO 41  CLK 42</text>
+      <text class="acc" x="614" y="170">4-wire &middot; its own bus</text>
+      <path class="arrA" d="M594,150 L512,150" marker-end="url(#aa)"/>
+      <text class="acc" x="536" y="142">SPI</text>
+
+      <line x1="24" y1="238" x2="876" y2="238" class="divider"/>
+      <text class="mut" x="24" y="262">boot cart ladder &mdash; graceful, never aborts</text>
+
+      <!-- ===== BOTTOM BAND: cart ladder ===== -->
+      <path class="flowA" d="M450,178 L450,286" marker-end="url(#aa)"/>
+      <rect class="dec" x="270" y="288" width="360" height="46" rx="10"/>
+      <text class="t" x="450" y="309" text-anchor="middle">SD mounted &amp; a cart file (.p8 / .png) present?</text>
+      <text class="mut" x="450" y="325" text-anchor="middle">listcarts() scans /sdcard</text>
+
+      <path class="flowK" d="M330,318 L210,318 L210,382" marker-end="url(#ak)"/>
+      <text class="kept" x="250" y="336">yes</text>
+      <rect class="node-k" x="60" y="384" width="300" height="60" rx="10"/>
+      <text class="tb" x="80" y="408">/sdcard/HELLO.P8</text>
+      <text class="mut" x="80" y="430">vm.LoadCart(path) &rarr; VFS file read</text>
+
+      <path class="flowM" d="M570,318 L690,318 L690,382" marker-end="url(#aa)"/>
+      <text class="mut" x="600" y="336">no card / empty</text>
+      <rect class="node" x="540" y="384" width="300" height="60" rx="10"/>
+      <text class="tb" x="560" y="408">flash cart</text>
+      <text class="mut" x="560" y="430">LoadCart(CART_BYTES, CART_LEN)</text>
+
+      <path class="flowK" d="M210,444 L210,486 L436,486" marker-end="url(#aa)"/>
+      <path class="flowM" d="M690,444 L690,486 L464,486" marker-end="url(#aa)"/>
+      <rect class="node-t" x="360" y="500" width="180" height="42" rx="10"/>
+      <text class="tb" x="450" y="526" text-anchor="middle">vm.GameLoop()</text>
+    </svg>
+    <p class="cap">Every pin number is quoted from <code>board.cpp</code> (LCD) and <code>sd_mount.cpp</code>
+      (SD); the two buses share <b>zero</b> GPIOs. The disjoint hardware rhymes with the disjoint software
+      seam &mdash; the new code is as separable from the shared engine as the SD pins are from the LCD&rsquo;s.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="k">SPI2</div><div class="l">private SD bus</div></div>
+    <div class="stat"><div class="k ok">0</div><div class="l">pins shared with the LCD</div></div>
+    <div class="stat"><div class="k">SD &rarr; flash</div><div class="l">graceful cart ladder</div></div>
+    <div class="stat"><div class="k ok">0&Delta;</div><div class="l">byte-identical source/</div></div>
+  </div>
+
+  <h2><span class="num">01</span> It was never actually parts-blocked</h2>
+  <p>The port doc listed SD carts as <em>parts-blocked</em>. But the 3.5" board has an <b>onboard microSD
+  slot</b> &mdash; only a card (a commodity) is needed, not a parts order. The "microSD bus shared with the
+  LCD" note that implied a conflict was a <b>carry-over from the 4" board</b> (DP-7), wrong for rev-1. This
+  report is the correction of record; the stale line in the board reference has now been fixed too.</p>
+
+  <h2><span class="num">02</span> Two buses, disjoint</h2>
+  <p>The LCD is an <b>i80 parallel bus</b> (<code>Bus_Parallel16</code>) on 21 GPIOs; the SD rides its own
+  <b><code>SPI2_HOST</code></b> on four. Their pin sets don&rsquo;t intersect &mdash; <b>0 shared GPIOs</b> &mdash;
+  so the SD gets a fully private bus with no contention. Mount via <code>esp_vfs_fat_sdspi_mount</code> with
+  <code>format_if_mount_failed=false</code> (never auto-wipe a card).</p>
+
+  <h2><span class="num">03</span> The cart ladder, graceful by contract</h2>
+  <p>At boot: <code>setCartDirectory(/sdcard)</code> &rarr; <code>listcarts()</code> &rarr; if a cart is present,
+  <code>vm.LoadCart(carts[0], false)</code> (the <code>std::string</code> overload &mdash; a VFS file read);
+  else fall through to the flash cart. A mount failure logs a warning, frees the bus, and returns &mdash;
+  <b>it never aborts boot</b>, so there&rsquo;s always something to run.</p>
+
+  <h2><span class="num">03&middot;5</span> Where the code lives</h2>
+  <div class="tblwrap"><table>
+    <thead><tr><th>Piece</th><th>Where</th><th>Kind</th></tr></thead>
+    <tbody>
+      <tr><td class="path">sd_mount.{h,cpp}</td><td>app (new) &mdash; SPI2 mount, graceful</td><td><span class="tag t-new">new</span></td></tr>
+      <tr><td class="path">main.cpp</td><td>app &mdash; setCartDirectory + the cart ladder</td><td><span class="tag t-new">new</span></td></tr>
+      <tr><td class="path">listcarts() / getCartDirectory()</td><td>fork ESP32Host.cpp (@77091e1, +28/&minus;3)</td><td><span class="tag t-new">new</span></td></tr>
+      <tr><td class="path">setCartDirectory &middot; get_file_contents &middot; LoadCart(string)</td><td>shared source/ &mdash; already existed</td><td><span class="tag t-kept">unchanged</span></td></tr>
+    </tbody>
+  </table></div>
+  <p>The mount is app-side, the scan methods are in the fork&rsquo;s platform binding, and the file read +
+  cart-load path were already in shared <code>source/</code> &mdash; so <b><code>source/</code> stays
+  byte-identical</b> to upstream fake-08.</p>
+
+  <h2><span class="num">04</span> Two gotchas between &ldquo;mounts&rdquo; and &ldquo;loads&rdquo;</h2>
+  <div class="callout warn"><b>Case.</b> FATFS <code>readdir</code> returns 8.3 short names <b>UPPERCASE</b>
+    (<code>HELLO.P8</code>), and fake-08&rsquo;s <code>isCartFile</code> checks the extension
+    <b>case-sensitively</b> (it accepts <code>.p8</code> / <code>.png</code>, incl. <code>.p8.png</code>) &rarr;
+    carts were hidden. The fork&rsquo;s <code>listcarts</code> lowercases a <em>copy</em> for the test but
+    keeps the original-case name in the path (FAT open is itself case-insensitive).</div>
+  <div class="callout warn"><b>Long filenames.</b> Need <code>CONFIG_FATFS_LFN_HEAP</code> (+ <code>MAX_LFN=255</code>,
+    UTF-8). IDF applies <code>sdkconfig.defaults</code> only when <em>generating</em> a fresh sdkconfig, so a
+    pre-existing build silently ignores a newly-added option &mdash; it needs a fresh generation.</div>
+
+  <h2><span class="num">05</span> Verified on hardware</h2>
+  <p class="cap" style="margin:0 0 .5rem">Observed on the bench per PR #10; the log strings are confirmed in source.</p>
+  <ul>
+    <li>A real <b>32 GB SDHC card mounts</b> (<code>SD mounted at /sdcard</code>).</li>
+    <li><b>Empty card &rarr; graceful fallback</b> to the flash cart &mdash; no crash.</li>
+    <li>A seeded <code>hello.p8</code> was <b>loaded from SD and rendered</b> ("LOADED FROM SD!" on the panel).</li>
+    <li>Clean production build boot: <code>SD mounted</code> &rarr; <code>loading SD cart: /sdcard/HELLO.P8</code> &rarr; <code>entering GameLoop</code>.</li>
+  </ul>
+
+  <h2><span class="num">06</span> Follow-ups</h2>
+  <ul>
+    <li><b>Cart selection</b> (a chooser, not just the first cart) needs input &mdash; parts-blocked. Today: first cart by readdir order, deterministic, logged.</li>
+    <li>Line <b>pull-ups</b> are the #1 SD-SPI failure mode; a flaky socket may need them, or dropping <code>host.max_freq_khz</code> from 20&nbsp;MHz (a commented one-liner in <code>sd_mount.cpp</code>).</li>
+  </ul>
+
+  <div class="foot">
+    <b>Status:</b> <span class="m">PR&nbsp;#10 &mdash; OPEN</span> (base <span class="m">main</span>, head <span class="m">fake08-sd-cart-loader</span>, 1 commit). Durable refs: parent <span class="m">3373dc6</span>, fork <span class="m">teapotlaboratories/fake-08@77091e1</span>.<br>
+    <b>See also:</b> <span class="m">docs/worklog/2026-07-17-fake08-sd-cart-loader.md</span> &middot; the fake-08 port &amp; fps reports.
+  </div>
+
+</div>
+</body>
+</html>

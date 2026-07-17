@@ -5,6 +5,9 @@ board's onboard microSD and loads a `.p8`/`.p8.png` from it, falling back to the
 card. Design grounded via a research workflow (fake-08 cart seam / IDF SD-SPI / board wiring), then every
 load-bearing fact verified in code before writing a line.
 
+**Visual report:** [`pico-e32-fake08-sd-cart-report.html`](../runtime/pico-e32-fake08-sd-cart-report.html) —
+the two-band diagram (disjoint hardware buses + the graceful SD → flash cart ladder).
+
 ## Why it wasn't actually parts-blocked
 
 The 3.5" board has an **onboard microSD slot** on SPI (CS=1 / MOSI=2 / MISO=41 / CLK=42). The port doc
