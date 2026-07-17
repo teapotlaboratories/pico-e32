@@ -31,6 +31,15 @@
     <ul class="entries">
       <li>
         <span class="d">2026-07-17</span>
+        <a class="t" href="2026-07-17-fake08-fps-strip-blit.html">fake-08 on-device fps: a 4.6× drawFrame fix</a>
+        <span class="s">Measured fake-08's real frame time on the S3 (Gate #2 had measured the VM with drawing
+          <em>stubbed</em>). Found <code>drawFrame</code> at <strong>16.5 ms</strong> — the 128 KB scaled framebuffer
+          didn't fit internal SRAM and fell back to PSRAM. Fixed by blitting in <strong>strips from a 16 KB internal
+          buffer</strong> (+ inlined nibble-unpack): <strong>16.5 → 3.6 ms</strong>, ceiling 54 → 189 fps. The draw
+          path is no longer the fps bottleneck — frame rate is now VM-bound on dense rooms.</span>
+      </li>
+      <li>
+        <span class="d">2026-07-17</span>
         <a class="t" href="2026-07-17-fake08-port-vendor.html">fake-08 port: vendoring + the ESP32 platform — draw-only milestone</a>
         <span class="s">The runtime becomes a <strong>port of fake-08</strong>. Forked to
           <code>teapotlaboratories/fake-08&nbsp;@&nbsp;pico-e32</code>, added a <code>platform/esp32</code> Host

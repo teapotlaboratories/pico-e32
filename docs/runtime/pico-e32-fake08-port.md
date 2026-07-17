@@ -80,6 +80,11 @@ fake-08's own `Vm::GameLoop`). Vendored as `teapotlaboratories/fake-08 @ pico-e3
 (Orientation note: the display renders **upright** with the straight `drawFrame`; raw bench captures merely
 *look* 90°-rotated because the camera is mounted 90° — see `DP-8` / bench-rig-gotchas.)
 
+**fps (measured on-device, 2026-07-17):** `drawFrame` = **3.6 ms** (after moving the scaled frame off PSRAM
+to internal-SRAM strips — was 16.5 ms), VM `Step` = 1.7 ms on the Celeste title. With Gate #2's gameplay VM
+(~15.8 ms avg), gameplay ≈ **~51 fps avg** (60 in light rooms; densest rooms ~23 fps, now **VM-bound** not
+draw-bound). See the [fps worklog](../worklog/2026-07-17-fake08-fps-strip-blit.md).
+
 Per plan §0.5 / development-plan.md:174: **a minimal `ESP32Host` (only `drawFrame` + timing; input/audio
 stubbed) running a flash-embedded cart on the panel.** This:
 - **De-risks the real unknown** the plan flags: *"nobody has run fake-08 on an ESP32 specifically"* — so

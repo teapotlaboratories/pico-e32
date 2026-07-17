@@ -12,6 +12,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include "board.h"    /* board_lcd_init() — the app owns board bring-up */
 #include "host.h"
@@ -82,6 +83,43 @@ extern "C" void app_main(void) {
     }
     vm->vm_run(); /* starts the cart coroutine */
 
+#ifdef MEASURE_FPS
+    /* Opt-in fps measurement (DEFS='-D MEASURE_FPS=1'). Run our own loop, paced to the target fps, and
+     * time Step() (fake-08's _update/_draw in the VM) vs drawFrame() (our unpack → RGB565 → 2× → blit)
+     * separately. drawFrame's cost is ~content-independent (it always processes all 128×128 px + one
+     * 256×256 blit), so this draw number is representative even on Celeste's title; the Step number is
+     * whatever the cart runs this frame. "max fps" = compute-bound ceiling = 1000 / (step+draw). Logs
+     * every 30 frames over UART. drawMode is ignored by drawFrame, so pass 0. */
+    ESP_LOGI(TAG, "MEASURE_FPS: timing Step vs drawFrame (paced to target; max fps = compute ceiling)");
+    {
+        int64_t acc_step = 0, acc_draw = 0, worst = 0;
+        int frames = 0;
+        long total = 0;
+        while (true) {
+            int64_t t0 = esp_timer_get_time();
+            vm->Step();
+            int64_t t1 = esp_timer_get_time();
+            host->drawFrame(vm->GetPicoInteralFb(), vm->GetScreenPaletteMap(), 0);
+            int64_t t2 = esp_timer_get_time();
+            int64_t comp = t2 - t0;
+            acc_step += (t1 - t0);
+            acc_draw += (t2 - t1);
+            if (comp > worst) worst = comp;
+            frames++;
+            total++;
+            if (frames >= 30) {
+                double s = acc_step / 1000.0 / frames, d = acc_draw / 1000.0 / frames, c = s + d;
+                ESP_LOGI(TAG, "f%ld: step=%.2f draw=%.2f total=%.2f ms | max %.1f fps | worst %.2f ms (%.0f fps)",
+                         total, s, d, c, 1000.0 / c, worst / 1000.0, 1000000.0 / (double)worst);
+                acc_step = acc_draw = 0;
+                frames = 0;
+                worst = 0;
+            }
+            host->waitForTargetFps();
+        }
+    }
+#else
     ESP_LOGI(TAG, "entering GameLoop");
     vm->GameLoop(); /* fake-08's own loop; never returns */
+#endif
 }
