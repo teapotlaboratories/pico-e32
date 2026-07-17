@@ -37,8 +37,8 @@
           binding + IDF component (<code>source/</code> byte-identical), and a <code>pico-e32-fake08</code> app.
           It <strong>boots and renders a flash <code>.p8</code> cart upright on the panel</strong> via fake-08's own
           <code>GameLoop</code> and the shared z8lua VM — retiring the "nobody has run fake-08 on an ESP32" unknown.
-          Build-integration fixes (gnu++17, lodepng disk) kept out of <code>source/</code>; the panel's 90° rotation
-          found and worked around (<code>DP-8</code>).</span>
+          Build-integration fixes (gnu++17, lodepng disk) kept out of <code>source/</code>. A raw-capture
+          "90° rotation" turned out to be the 90°-mounted bench camera, not the display — corrected (<code>DP-8</code>).</span>
       </li>
       <li>
         <span class="d">2026-07-16</span>
