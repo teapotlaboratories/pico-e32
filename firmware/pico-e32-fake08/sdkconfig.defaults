@@ -1,0 +1,10 @@
+# App-level config for pico-e32-fake08. Board/target/PSRAM come from boards/<BOARD>/sdkconfig.defaults
+# (layered first by the top-level Makefile).
+
+# app_main runs fake-08's GameLoop directly; the Lua pcall path + graphics calls want a roomy C stack.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768
+
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# z8lua opcode dispatch is faster with jump tables (see components/z8lua/CMakeLists.txt); the component
+# already forces them for the interpreter. Nothing else app-specific yet.
