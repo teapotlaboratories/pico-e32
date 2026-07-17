@@ -31,6 +31,15 @@
     <ul class="entries">
       <li>
         <span class="d">2026-07-17</span>
+        <a class="t" href="2026-07-17-fake08-transition-spike.html">Chasing the room-transition spike (compute, not GC)</a>
+        <span class="s">Steady Celeste runs ~110 fps on the S3, but each room load costs a single ~95 ms frame.
+          Heap-instrumented <code>MEASURE_FPS</code> shows those frames allocate ~54 KB (<code>load_room</code>
+          spawning objects). Decisive test: made z8lua's GC lazy — the load-room spikes <strong>didn't budge</strong>,
+          so it's inherent interpreter compute, <strong>not GC</strong>. No cheap fix; the lever is general z8lua speed,
+          only if a hitch-free 60 fps is ever required.</span>
+      </li>
+      <li>
+        <span class="d">2026-07-17</span>
         <a class="t" href="2026-07-17-fake08-fps-strip-blit.html">fake-08 on-device fps: a 4.6× drawFrame fix</a>
         <span class="s">Measured fake-08's real frame time on the S3 (Gate #2 had measured the VM with drawing
           <em>stubbed</em>). Found <code>drawFrame</code> at <strong>16.5 ms</strong> — the 128 KB scaled framebuffer
