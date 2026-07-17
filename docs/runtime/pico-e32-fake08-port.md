@@ -75,7 +75,8 @@ first real port milestone can happen **now**, on the bench, without any parts or
 the panel (16-colour bars + text + a live frame counter → `_update` and `_draw` both run through
 fake-08's own `Vm::GameLoop`). Vendored as `teapotlaboratories/fake-08 @ pico-e32` (submodule
 `components/fake08`) + the `firmware/pico-e32-fake08` app; the shared `components/z8lua` is the VM. See the
-[code-map](pico-e32-fake08-codemap.md) and the [worklog](../worklog/2026-07-17-fake08-port-vendor.md).
+[code-map](pico-e32-fake08-codemap.md), the [worklog](../worklog/2026-07-17-fake08-port-vendor.md), and the
+**[visual port report](pico-e32-fake08-port-report.html)** (diagrams + where each file lives + on-panel evidence).
 (Orientation note: the display renders **upright** with the straight `drawFrame`; raw bench captures merely
 *look* 90°-rotated because the camera is mounted 90° — see `DP-8` / bench-rig-gotchas.)
 
