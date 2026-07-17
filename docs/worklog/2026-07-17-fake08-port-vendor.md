@@ -168,3 +168,18 @@ render (straight `drawFrame`, matching HG), animating. Landed: fork `pico-e32` b
 (`teapotlaboratories/fake-08@ebdd0e8`), the `pico-e32` app + submodule committed. Parts-blocked seams (input, audio, SD) are the next phase; a code-map
 (`docs/runtime/pico-e32-fake08-codemap.md`) records the new-code ↔ fake-08 mapping + the deliberate
 divergences.
+
+## Real-cart validation — actual Celeste renders
+
+The draw-only milestone used a synthetic test cart. To close the plan's *"run a real cart through
+fake-08's draw path — if it matches, the port is real"* check, added an **opt-in `CELESTE` build**
+(`make build … DEFS='-D CELESTE=1'`, mirroring the HG `CELESTE_DEMO` pattern): `main.cpp` embeds the
+**actual Celeste `.p8`** from the gitignored `assets/celeste_p8.h` (generated from `assets/celeste.p8`;
+both copyrighted, **never committed** — only the opt-in guard + `CMakeLists` include are). fake-08 parses
+the 87 KB `.p8` text via the `"pico"` magic and runs it.
+
+**Result:** the panel shows Celeste's **title screen** — the "CELESTE" logo, the mountain, "X+C", the
+"MATT THORSON / NOEL BERRY" credits, snow particles — upright, through fake-08's real runtime. It parks on
+the title (input is stubbed). This exercises the full draw path (`spr`/`map`/`print`/`pal` + the particle
+system) with real content, not a test pattern. Binary 933 KB (11% partition free). **The port renders
+genuine PICO-8 games.** (Evidence: `fake08-celeste-panel.jpg`, bench-only — depicts copyrighted content.)
