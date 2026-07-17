@@ -4,6 +4,7 @@ The authoritative backlog root. This file only **points**; the detail lives in t
 docs (per [`.ai/AGENTS.md`](../.ai/AGENTS.md) → *Plan first*).
 
 - **Plan of record:** [`pico-e32-development-plan.md`](pico-e32-development-plan.md)
+- **★ PRIMARY GOAL — port fake-08:** [`runtime/pico-e32-fake08-port.md`](runtime/pico-e32-fake08-port.md) — the runtime is a **port of fake-08** (MIT), not hand-written; replace only its `Host` layer. **Draw-only milestone is unblocked (no parts).** See plan §5.
 - **Evidence base:** [`design-specification/`](design-specification/) (runtime feasibility, silicon decision)
 - **Hardware reference:** [`reference/pico-e32-makerfabs-boards.md`](reference/pico-e32-makerfabs-boards.md)
 - **Display path (ILI9488 + driver):** [`hardware/pico-e32-display.md`](hardware/pico-e32-display.md) — pin map/bus/orientation status + its backlog (`DP-1`…`DP-7`); **`DP-1` — the repo contradicts itself about whether `esp_lcd` was retried**
@@ -27,7 +28,10 @@ docs (per [`.ai/AGENTS.md`](../.ai/AGENTS.md) → *Plan first*).
   `spr`/`map`/`print` are still **no-op stubs**, so Celeste's logic runs at frame rate but has never drawn
   a pixel. **Not parts-blocked, and verifiable without the camera** (host frame dump → PNG) — the one
   Phase-1 item that can move right now. `HG-1` ✅ (sprite sheet extracted), `HG-5` ✅ unblocked (font is CC-0 from Lexaloffle). See [worklog](worklog/2026-07-15-host-graphics.md).
-- Full `ESP32Host` (fake-08 port): I²C-expander input, I²S audio (external MAX98357A), SD carts. **Parts-blocked.**
+- **Port fake-08** → `ESP32Host` — the primary runtime goal. **Draw-only port (drawFrame + timing, flash
+  cart) is unblocked and next**; input (I²C expander), audio (MAX98357A), SD carts are **parts-blocked**.
+  The hand-written `HG-*` draw API is a de-risking harness, **superseded** by fake-08's own graphics. Plan
+  in [`runtime/pico-e32-fake08-port.md`](runtime/pico-e32-fake08-port.md).
 - **Gate #4:** a real cart playable ≥ 30 fps with sound + input; set the 30-vs-60 fps policy.
 - Parts to buy: I²C GPIO expander + buttons + MAX98357A + speaker + microSD (see plan §7).
 

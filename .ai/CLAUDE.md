@@ -6,6 +6,14 @@ Project guidance for AI coding agents lives in [AGENTS.md](AGENTS.md) — read i
 project, so most changes are judged on real hardware, not just a clean build.
 
 Most important rules:
+- **PRIMARY GOAL — the runtime is a PORT of fake-08**, not written from scratch. Port
+  [fake-08](https://github.com/jtothebell/fake-08) (`jtothebell/fake-08`, MIT — the reference
+  PICO-8 player); replace only its `Host` layer (display/input/audio/storage/timing) for the
+  ESP32-S3. **Don't reimplement PICO-8 API behaviour fake-08 already provides.** Every ported
+  unit is **1-to-1 with fake-08** (function/line match) unless a target constraint forces a
+  **documented** divergence. Anything hand-rolled before the port is reference-only, to be
+  superseded. See [AGENTS.md → About this project](AGENTS.md) + [→ Porting](AGENTS.md#porting--adapting-upstream-code),
+  and [`docs/runtime/pico-e32-fake08-port.md`](../docs/runtime/pico-e32-fake08-port.md).
 - **Every feature starts as a documented TODO** (in its area backlog, indexed from
   `docs/pico-e32-todo.md`) before you build it. See
   [AGENTS.md → Plan first](AGENTS.md#plan-first--every-feature-starts-as-a-documented-todo).

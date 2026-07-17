@@ -10,6 +10,18 @@ input, audio, power) that runs it. It is an **embedded** project: most changes e
 up flashed to a microcontroller and judged on real hardware, so "did it build" is
 never the whole story — see [Verifying changes](#verifying-changes).
 
+**PRIMARY GOAL — the runtime is a PORT of fake-08.** The fantasy-console runtime is
+**not written from scratch**: it is a port of **[fake-08](https://github.com/jtothebell/fake-08)**
+(`jtothebell/fake-08`, MIT — the reference open-source PICO-8 player), with only its
+`Host` layer (display, input, audio, storage, timing) replaced for the ESP32-S3. **Do
+not reimplement PICO-8 API behaviour that fake-08 already provides — take it from
+fake-08.** The port itself is the deliverable; the ESP32 `Host` seam and the hardware
+bring-up are the original work around it. This overrides any impulse to hand-roll a
+runtime. Detail: [`docs/pico-e32-development-plan.md`](../docs/pico-e32-development-plan.md)
+§5 and [`docs/runtime/pico-e32-fake08-port.md`](../docs/runtime/pico-e32-fake08-port.md).
+See also the **1-to-1** porting rule in
+[Porting / adapting upstream code](#porting--adapting-upstream-code).
+
 ## Plan first — every feature starts as a documented TODO
 
 **Before implementing a feature or any non-trivial change, write it down as a TODO
@@ -196,6 +208,19 @@ a clean baseline. Note in the worklog what's currently flashed.
 If a change ports or closely adapts an upstream implementation — a Lua/fantasy-console
 VM, a reference runtime, a vendor display/audio driver — treat the port itself as a
 reviewable deliverable, not a black box.
+
+**fake-08 ports are 1-to-1 by default.** The runtime is a port of fake-08 (see the **PRIMARY GOAL** note at
+the top of this file), so every ported unit must **match fake-08 function-for-function and, as far as the
+target allows, line-for-line** — same structure, same control
+flow, same names — so a reviewer can diff it against upstream. Do **not** rewrite, "clean up",
+re-architect, rename, or reimplement a fake-08 behaviour in your own style, however tempting. A divergence
+is permitted **only when a target constraint forces it** — ESP32 memory / PSRAM placement, no-OS /
+FreeRTOS, fixed-point, the ESP-IDF build, a missing/host-only dependency — and then it is **recorded as a
+deliberate divergence, with its reason,** in the port's code-map (below). *"It reads cleaner my way"* /
+*"I'd structure it differently"* is **not** a permitted reason. When unsure whether a change is truly
+forced, keep fake-08's version. (Anything hand-rolled *before* the port — e.g. the from-scratch PICO-8
+draw API in `firmware/pico-e32-host` grown for Phase-0 de-risking — is **reference/verification only**, to
+be **superseded** by fake-08's own implementation, not extended.)
 
 **Least-destructive vendor edits.** When adapting vendored or upstream code, change as
 little as possible — keep the source tree **byte-identical to upstream** wherever you can and
