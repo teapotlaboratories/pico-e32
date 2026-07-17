@@ -27,3 +27,4 @@ assets/celeste_cart.h
 # bench-camera local config + captured frames (churn/binaries)
 tools/bench_cam.env
 captures/
+assets/celeste_p8.h

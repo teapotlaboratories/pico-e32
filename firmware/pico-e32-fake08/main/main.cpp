@@ -22,6 +22,18 @@
 
 static const char *TAG = "fake08";
 
+/* Cart source. Default build = the tiny test cart below (ours). An opt-in CELESTE build
+ * (`make build … DEFS='-D CELESTE=1'`) instead embeds the real Celeste .p8 from the gitignored
+ * assets/celeste_p8.h — to exercise the full draw path (spr/map/print). Copyrighted; never committed. */
+#if defined(CELESTE) && __has_include("celeste_p8.h")
+#include "celeste_p8.h"
+#define CART_BYTES CELESTE_P8
+#define CART_LEN   CELESTE_P8_LEN
+#define CART_NAME  "celeste.p8"
+#else
+#define CART_BYTES ((const unsigned char *)TEST_CART)
+#define CART_LEN   (sizeof(TEST_CART) - 1)
+#define CART_NAME  "test cart"
 /* A minimal PICO-8 cart (ours): 16 colour bars + text + a frame counter. The Cart ctor detects the
  * "pico" magic and parses this as .p8 text (loadCartFromString). Exercises cls / rectfill / print and
  * both _update (the counter) and _draw. No __gfx__ needed — print() uses fake-08's built-in font. */
@@ -40,6 +52,7 @@ static const char TEST_CART[] =
     " print(\"fake-08 on esp32-s3\",4,58,7)\n"
     " print(\"frame \"..t,4,68,7)\n"
     "end\n";
+#endif
 
 extern "C" void app_main(void) {
     ESP_LOGI(TAG, "fake-08 port: draw-only milestone booting");
@@ -62,8 +75,8 @@ extern "C" void app_main(void) {
     host->setTargetFps(30);
     vm->SetCartList(host->listcarts());
 
-    ESP_LOGI(TAG, "loading test cart (%u bytes)", (unsigned)(sizeof(TEST_CART) - 1));
-    if (!vm->LoadCart((const unsigned char *)TEST_CART, sizeof(TEST_CART) - 1, false)) {
+    ESP_LOGI(TAG, "loading %s (%u bytes)", CART_NAME, (unsigned)CART_LEN);
+    if (!vm->LoadCart(CART_BYTES, CART_LEN, false)) {
         ESP_LOGE(TAG, "LoadCart failed");
         return;
     }
