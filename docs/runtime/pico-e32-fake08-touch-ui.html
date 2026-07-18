@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IN-2 touch input &mdash; control layout</title>
+<style>
+  :root{
+    --bg:#eef1f6; --ink:#1a1f28; --muted:#616b7a; --line:#dde2ea; --accent:#3b6fe0; --card:#ffffff;
+    --sans:"Segoe UI",system-ui,-apple-system,Roboto,Helvetica,sans-serif; --mono:ui-monospace,Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){:root{--bg:#0b0d11;--ink:#e7ecf3;--muted:#98a2b0;--line:#232a34;--accent:#7aa7ff;--card:#12151b;}}
+  :root[data-theme="light"]{--bg:#eef1f6;--ink:#1a1f28;--muted:#616b7a;--line:#dde2ea;--accent:#3b6fe0;--card:#fff;}
+  :root[data-theme="dark"]{--bg:#0b0d11;--ink:#e7ecf3;--muted:#98a2b0;--line:#232a34;--accent:#7aa7ff;--card:#12151b;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:900px;margin:0 auto;padding:3rem 1.3rem 4.5rem}
+  .ey{font-size:.7rem;letter-spacing:.22em;text-transform:uppercase;color:var(--accent);font-weight:700;margin:0 0 .5rem}
+  h1{font-size:1.55rem;letter-spacing:-.02em;margin:0 0 .4rem;font-weight:650}
+  .sub{color:var(--muted);margin:0 0 2.4rem;font-size:1rem;max-width:46ch}
+  .cols{display:flex;gap:2.6rem;flex-wrap:wrap;align-items:center;justify-content:center}
+  .stage{flex:0 0 auto}
+  .stage svg{display:block;width:264px;height:auto;filter:drop-shadow(0 24px 48px rgba(0,0,0,.32))}
+  .cap{color:var(--muted);font-size:.76rem;text-align:center;margin:1rem 0 0;letter-spacing:.04em}
+  .notes{flex:1 1 300px;min-width:264px;max-width:400px}
+  .row{display:flex;gap:.75rem;padding:.55rem 0;border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:none}
+  .chip{flex:0 0 auto;width:1.5rem;height:1.5rem;border-radius:7px;margin-top:.1rem}
+  .row h3{margin:0;font-size:.9rem;font-weight:650}
+  .row p{margin:.1rem 0 0;font-size:.85rem;color:var(--muted)}
+  code{font-family:var(--mono);font-size:.84em;background:color-mix(in srgb,var(--accent) 12%,transparent);
+    padding:.05em .38em;border-radius:5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="ey">pico-e32 &middot; IN-2</p>
+  <h1>On-screen touch controls</h1>
+  <p class="sub">FT6236 capacitive touch behind the merged <code>input_poll()</code> seam &mdash; a portrait
+    handheld: the PICO-8 screen up top, a soft control deck below.</p>
+
+  <div class="cols">
+    <div class="stage">
+      <svg viewBox="-16 -16 352 512" role="img" aria-label="Dark handheld: PICO-8 game 256x256 at top, a control deck below with a unified d-pad bottom-left, O and X buttons bottom-right, and a menu button.">
+        <defs>
+          <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#232935"/><stop offset="1" stop-color="#12151c"/>
+          </linearGradient>
+          <linearGradient id="deck" x1="0" y1="256" x2="0" y2="480" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#0f141d"/><stop offset="1" stop-color="#0a0d14"/>
+          </linearGradient>
+          <linearGradient id="scr" x1="0" y1="0" x2="0" y2="256" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#122645"/><stop offset="1" stop-color="#0a1526"/>
+          </linearGradient>
+          <radialGradient id="scrv" cx="0.5" cy="0.42" r="0.75">
+            <stop offset="0.55" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.35"/>
+          </radialGradient>
+          <linearGradient id="pad" x1="0" y1="306" x2="0" y2="446" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#333c4b"/><stop offset="1" stop-color="#1a2029"/>
+          </linearGradient>
+          <radialGradient id="btn" cx="0.5" cy="0.35" r="0.75">
+            <stop offset="0" stop-color="#2f3743"/><stop offset="1" stop-color="#161b23"/>
+          </radialGradient>
+          <filter id="lift" x="-40%" y="-40%" width="180%" height="180%">
+            <feDropShadow dx="0" dy="2.5" stdDeviation="3" flood-color="#000" flood-opacity="0.5"/>
+          </filter>
+        </defs>
+
+        <!-- device body + screen -->
+        <rect x="-16" y="-16" width="352" height="512" rx="34" fill="url(#body)" stroke="#39424f" stroke-opacity="0.5"/>
+        <rect x="0" y="0" width="320" height="480" rx="6" fill="url(#deck)"/>
+        <rect x="32" y="0" width="256" height="256" fill="url(#scr)"/>
+        <rect x="32" y="0" width="256" height="256" fill="url(#scrv)"/>
+        <rect x="32" y="0" width="256" height="256" fill="none" stroke="#2a3d5c" stroke-opacity="0.6"/>
+        <text x="160" y="126" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="12"
+              fill="#8bb0e6" letter-spacing="1">PICO-8 &middot; 256&times;256</text>
+        <line x1="24" y1="256" x2="296" y2="256" stroke="#232c3a" stroke-dasharray="2 5"/>
+
+        <!-- MENU -->
+        <rect x="131" y="272" width="58" height="22" rx="11" fill="none" stroke="#4a5566" stroke-width="1.2" filter="url(#lift)"/>
+        <text x="160" y="287" text-anchor="middle" font-family="'Segoe UI',system-ui,sans-serif" font-size="9.5" fill="#9aa6b6"
+              letter-spacing="2">MENU</text>
+
+        <!-- D-PAD: two rounded bars, one vertical gradient -> reads as a single unified control -->
+        <g filter="url(#lift)">
+          <rect x="22"  y="351" width="140" height="50" rx="21" fill="url(#pad)" stroke="#3e4a5b" stroke-opacity="0.7"/>
+          <rect x="67"  y="306" width="50"  height="140" rx="21" fill="url(#pad)" stroke="#3e4a5b" stroke-opacity="0.7"/>
+          <circle cx="92" cy="376" r="14" fill="#0e131b" fill-opacity="0.55"/>
+        </g>
+        <g fill="#7fa8e6">
+          <path d="M92 322 l8 10 h-16 z"/>              <!-- up -->
+          <path d="M92 430 l8 -10 h-16 z"/>            <!-- down -->
+          <path d="M36 376 l10 -8 v16 z"/>             <!-- left -->
+          <path d="M148 376 l-10 -8 v16 z"/>           <!-- right -->
+        </g>
+
+        <!-- O / X : spherical, thin coloured ring -->
+        <g filter="url(#lift)">
+          <circle cx="272" cy="352" r="31" fill="url(#btn)" stroke="#5fc4bb" stroke-width="1.6"/>
+          <circle cx="212" cy="414" r="31" fill="url(#btn)" stroke="#e79aa0" stroke-width="1.6"/>
+        </g>
+        <text x="272" y="360" text-anchor="middle" font-family="'Segoe UI',system-ui,sans-serif" font-size="22" font-weight="600" fill="#cfeeea">X</text>
+        <text x="212" y="422" text-anchor="middle" font-family="'Segoe UI',system-ui,sans-serif" font-size="22" font-weight="600" fill="#f3d6d8">O</text>
+
+        <!-- soft screen glare -->
+        <path d="M40 8 q120 26 240 4 v10 q-120 20 -240 -2 z" fill="#ffffff" fill-opacity="0.04"/>
+      </svg>
+      <p class="cap">TO SCALE &middot; 320 &times; 480 PORTRAIT</p>
+    </div>
+
+    <div class="notes">
+      <div class="row"><span class="chip" style="background:linear-gradient(#122645,#0a1526)"></span>
+        <div><h3>Screen up top</h3><p>256&times;256, flush to the top (<code>drawFrame</code> OY 112&rarr;0) so the deck is one clean band, not split margins.</p></div></div>
+      <div class="row"><span class="chip" style="background:linear-gradient(#333c4b,#1a2029)"></span>
+        <div><h3>Unified d-pad</h3><p>One cross, four directional zones + a dead hub &mdash; bottom-left, thumb-reachable.</p></div></div>
+      <div class="row"><span class="chip" style="background:radial-gradient(circle at 40% 35%,#2f3743,#161b23);box-shadow:inset 0 0 0 1.5px #e79aa0"></span>
+        <div><h3>O / X buttons</h3><p>Spherical, thin-ringed, on a gamepad diagonal, bottom-right.</p></div></div>
+      <div class="row"><span class="chip" style="background:transparent;border:1.4px solid var(--muted)"></span>
+        <div><h3>2-finger play</h3><p>The FT6236 reports <b>two</b> points, so a direction + O/X register together (move&nbsp;+&nbsp;jump). Each point &rarr; zone &rarr; a bit in <code>input_poll()</code>.</p></div></div>
+      <div class="row"><span class="chip" style="background:transparent;border:1.4px dashed var(--accent)"></span>
+        <div><h3>Y-flip</h3><p>Glass is mounted upside-down &mdash; raw touch-Y is flipped to match the frame; first bring-up step is a tap-a-known-spot calibration.</p></div></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

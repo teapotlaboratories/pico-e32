@@ -419,6 +419,8 @@ static esp_err_t capture_get(httpd_req_t *req)
         int sat = query_int(q, "sat", -99);  if (sat != -99) s->set_saturation(s, sat);  /* -2..2 */
         int con = query_int(q, "con", -99);  if (con != -99) s->set_contrast(s, con);    /* -2..2 */
         int sharp = query_int(q, "sharp", -99); if (sharp != -99) s->set_sharpness(s, sharp);
+        int hmir  = query_int(q, "hmir",  -1);  if (hmir  >= 0)   s->set_hmirror(s, hmir);    /* 0/1 */
+        int vfl   = query_int(q, "vflip", -1);  if (vfl   >= 0)   s->set_vflip(s, vfl);       /* 0/1 */
         if (exp >= 0 || gain >= 0) ESP_LOGI(TAG, "capture: exp=%d gain=%d awb=%d", exp, gain, awb);
     }
 
@@ -472,6 +474,12 @@ void app_main(void)
         return;
     }
     ESP_LOGI(TAG, "camera up (SVGA JPEG)");
+    /* The OV3660 h-mirrors by default on this rig, which had been silently cancelling the panel's own
+     * display mirror — so a real display bug read as "fine" in captures (caught 2026-07-18). The
+     * orientation verified against the real panel is hmirror OFF, vflip ON; combined with the capture
+     * tool's `convert -rotate 90` (the 90° mount) a capture then reads the same way round as the panel.
+     * Overridable per-request via /capture?hmir=0|1 & ?vflip=0|1. */
+    { sensor_t *s = esp_camera_sensor_get(); if (s) { s->set_hmirror(s, 0); s->set_vflip(s, 1); } }
     wifi_start();
     xEventGroupWaitBits(s_wifi_events, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
     http_start();
