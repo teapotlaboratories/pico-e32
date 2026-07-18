@@ -27,7 +27,9 @@ Most important rules:
   [AGENTS.md → Attribution](AGENTS.md#attribution--no-ai-self-reference-anywhere).
 - **Code/feature changes → branch + PR; doc-only changes → may push to `main`.**
   See [AGENTS.md → Branching & pull requests](AGENTS.md#branching--pull-requests).
-- **Merge PRs with rebase + merge by default** (`gh pr merge --rebase`); keep
+- **Run `/code-review` at least once before any merge** — it's user-triggered +
+  billed (the agent can't launch it), so the agent must not merge until it's been
+  run. Then **merge with rebase + merge by default** (`gh pr merge --rebase`); keep
   `main` linear. See
   [AGENTS.md → Merging pull requests](AGENTS.md#merging-pull-requests).
 - **No mis-linking `#N` in PR/commit text** — a bare `#N` auto-links to a

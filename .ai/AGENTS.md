@@ -75,6 +75,12 @@ When unsure whether a change counts as "doc-only," treat it as code and branch.
 
 ### Merging pull requests
 
+**Run a code review before every merge.** Run `/code-review` at least once on the branch or PR being
+merged — `/code-review ultra <PR#>` for a GitHub PR, or `/code-review ultra` for the local branch — and
+resolve what it surfaces before merging. It is **user-triggered and billed, so the agent cannot launch it**:
+the agent must **not merge — and should remind the owner to run the review first** — until a code review has
+been run on the branch/PR being merged.
+
 **Default merge strategy: rebase + merge** (`gh pr merge --rebase`). Replay the
 branch's commits onto the base so `main` stays linear — no merge bubbles. Prefer
 this over a merge commit or squash unless there is a concrete reason not to.
