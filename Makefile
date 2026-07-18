@@ -23,8 +23,8 @@ BOARD    ?= makerfabs-ili9488-r1
 APP_DIR  := $(CURDIR)/firmware/$(APP)
 BOARD_DIR := $(CURDIR)/boards/$(BOARD)
 
-# BOARD_DIR is passed to CMake as well: boards/<BOARD>/board_pins.h holds the wiring, so
-# switching BOARD switches the pin map with it. Apps add ${BOARD_DIR} to INCLUDE_DIRS.
+# BOARD_DIR is passed to CMake as well: boards/<BOARD>/board.{h,cpp} hold the wiring (LCD + SD
+# pins), so switching BOARD switches the pin map with it. Apps add ${BOARD_DIR} to INCLUDE_DIRS.
 # Board overlay first (owns CONFIG_IDF_TARGET + PSRAM), then the app's own config.
 SDKCONFIG_DEFAULTS := $(BOARD_DIR)/sdkconfig.defaults$(if $(wildcard $(APP_DIR)/sdkconfig.defaults),;$(APP_DIR)/sdkconfig.defaults)
 

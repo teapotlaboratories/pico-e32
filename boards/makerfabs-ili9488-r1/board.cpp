@@ -55,6 +55,17 @@ static const int8_t DATA_PINS[16] = { 47, 21, 14, 13, 12, 11, 10, 9,
                                        3,  8, 16, 15,  7,  6,  5, 4 };   /* D0..D15 — identical on both revisions */
 /* PCLK is BOARD_LCD_PCLK_HZ (board.h) — one definition, shared with any benchmark that needs it. */
 
+/* ---- THIS BOARD'S microSD WIRING (rev 1) — a PRIVATE SPI2 bus, disjoint from the i80 LCD ----
+ * The LCD is 16-bit i80 parallel (PIN_WR/DC/CS + DATA_PINS above) and uses NO SPI host, so SPI2 is
+ * free with zero pin overlap: the SD owns SPI2 exclusively (owns_bus=true). The old "microSD shared
+ * with the LCD" note was a 4"-board carry-over (DP-7); wrong for this board. SPI2_HOST and GPIO_NUM_*
+ * come in via board.h -> sdcard_spi.h. The mount MECHANISM + policy live in components/sdcard_spi and
+ * the app; here we own only the wiring, next to the LCD's. */
+#define SD_PIN_CS   GPIO_NUM_1
+#define SD_PIN_MOSI GPIO_NUM_2
+#define SD_PIN_MISO GPIO_NUM_41
+#define SD_PIN_CLK  GPIO_NUM_42
+
 /* ORIENTATION: the glass is mounted upside-down on this board — at the controller's native scan
  * direction GRAM row 0 lands at the BOTTOM, so everything renders vertically mirrored. A board fact
  * (measured via the L-pattern, docs/worklog/2026-07-16-yflip-and-gate1-fps.md), not a driver fact.
@@ -163,4 +174,17 @@ extern "C" void board_lcd_selftest(void) {
         ESP_LOGW(TAG, "selftest: fillScreen(%s)", names[i]);
         vTaskDelay(pdMS_TO_TICKS(3000));
     }
+}
+
+/* This board's microSD wiring — a private SPI2 bus (see the SD_PIN_* block above). Writes only the
+ * hardware fields; the app keeps its mount policy. Symmetric with board_lcd_init: the board owns its
+ * SD wiring the same way it owns its display. */
+extern "C" bool board_sd_config(sdcard_spi_config_t *out) {
+    out->host     = SPI2_HOST;
+    out->pin_cs   = SD_PIN_CS;
+    out->pin_mosi = SD_PIN_MOSI;
+    out->pin_miso = SD_PIN_MISO;
+    out->pin_sclk = SD_PIN_CLK;
+    out->owns_bus = true;   /* SD owns SPI2 exclusively on this board */
+    return true;
 }

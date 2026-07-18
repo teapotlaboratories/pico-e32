@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SD driver &rarr; a configurable component &mdash; pico-e32</title>
+<style>
+  :root {
+    --ground:#f6f8fb; --surface:#ffffff; --surface-2:#eef1f6; --line:#dce2ea;
+    --ink:#1b2430; --muted:#5c6775; --faint:#8a94a2;
+    --app:#2563eb;  --app-bg:#e8effe;
+    --board:#7c3aed; --board-bg:#efe9fe;
+    --comp:#0d9488; --comp-bg:#d7f1ee;
+    --add:#0a7b33;  --add-bg:#e5f4ea;
+    --del:#c5303a;  --del-bg:#fdeceb;
+    --warn:#9a6700;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){ :root{
+    --ground:#0e131a; --surface:#151b24; --surface-2:#1b222d; --line:#28313d;
+    --ink:#dde4ec; --muted:#93a0b0; --faint:#68758a;
+    --app:#6ea8fe;  --app-bg:#17233b;
+    --board:#a78bfa; --board-bg:#241a3a;
+    --comp:#2dd4bf; --comp-bg:#0f302c;
+    --add:#4cc466;  --add-bg:#123021;
+    --del:#f07178;  --del-bg:#3a1a1e;
+    --warn:#d0a215;
+  }}
+  :root[data-theme="light"]{
+    --ground:#f6f8fb; --surface:#ffffff; --surface-2:#eef1f6; --line:#dce2ea;
+    --ink:#1b2430; --muted:#5c6775; --faint:#8a94a2;
+    --app:#2563eb;  --app-bg:#e8effe; --board:#7c3aed; --board-bg:#efe9fe;
+    --comp:#0d9488; --comp-bg:#d7f1ee; --add:#0a7b33; --add-bg:#e5f4ea;
+    --del:#c5303a;  --del-bg:#fdeceb; --warn:#9a6700;
+  }
+  :root[data-theme="dark"]{
+    --ground:#0e131a; --surface:#151b24; --surface-2:#1b222d; --line:#28313d;
+    --ink:#dde4ec; --muted:#93a0b0; --faint:#68758a;
+    --app:#6ea8fe;  --app-bg:#17233b; --board:#a78bfa; --board-bg:#241a3a;
+    --comp:#2dd4bf; --comp-bg:#0f302c; --add:#4cc466; --add-bg:#123021;
+    --del:#f07178;  --del-bg:#3a1a1e; --warn:#d0a215;
+  }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--ground); color:var(--ink); font-family:var(--sans);
+    line-height:1.55; -webkit-font-smoothing:antialiased; }
+  .wrap{ max-width:940px; margin:0 auto; padding:2.6rem 1.3rem 5rem; }
+  code{ font-family:var(--mono); font-size:.88em; background:var(--surface-2); padding:.08em .35em;
+    border-radius:4px; }
+  b{ color:var(--ink); }
+
+  header.top{ border-bottom:1px solid var(--line); padding-bottom:1.7rem; margin-bottom:1.6rem; }
+  .eyebrow{ font-size:.72rem; letter-spacing:.15em; text-transform:uppercase; color:var(--comp);
+    font-weight:700; margin:0 0 .55rem; }
+  h1{ font-size:1.95rem; line-height:1.15; margin:0 0 .7rem; letter-spacing:-.015em; text-wrap:balance; }
+  .lede{ color:var(--muted); font-size:1.02rem; margin:0; max-width:66ch; }
+  .meta{ display:flex; flex-wrap:wrap; gap:.5rem; margin-top:1.15rem; }
+  .chip{ font-family:var(--mono); font-size:.75rem; background:var(--surface-2); border:1px solid var(--line);
+    color:var(--muted); padding:.28rem .6rem; border-radius:999px; }
+  .chip b{ color:var(--ink); }
+
+  .stats{ display:grid; grid-template-columns:repeat(4,1fr); gap:.8rem; margin:1.7rem 0 .4rem; }
+  .stat{ background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:.9rem 1rem; }
+  .stat .k{ font-size:1.5rem; font-weight:700; letter-spacing:-.02em; line-height:1.1; }
+  .stat .k.ok{ color:var(--add); }
+  .stat .k.tl{ color:var(--comp); }
+  .stat .l{ font-size:.78rem; color:var(--muted); margin-top:.15rem; }
+
+  h2{ font-size:1.18rem; margin:2.6rem 0 .7rem; letter-spacing:-.01em; display:flex; align-items:baseline; gap:.6rem; }
+  h2 .num{ font-family:var(--mono); font-size:.85rem; color:var(--comp); font-weight:700; }
+  p{ margin:.6rem 0; }
+  p.note{ color:var(--muted); }
+
+  .diagram{ background:var(--surface); border:1px solid var(--line); border-radius:14px;
+    padding:1.1rem; margin:1.3rem 0; overflow-x:auto; }
+  .diagram svg{ width:100%; height:auto; min-width:640px; display:block; }
+  .cap{ font-size:.84rem; color:var(--muted); margin:.7rem .2rem 0; }
+
+  /* SVG theming - classes only, never var() in presentation attributes */
+  svg .divln{ stroke:var(--line); }
+  svg .b-app{ fill:var(--app-bg); stroke:var(--app); }
+  svg .b-board{ fill:var(--board-bg); stroke:var(--board); }
+  svg .b-comp{ fill:var(--comp-bg); stroke:var(--comp); }
+  svg .b-neu{ fill:var(--surface-2); stroke:var(--line); }
+  svg .b-del{ fill:var(--del-bg); stroke:var(--del); }
+  svg .stroke2{ stroke-width:2; }
+  svg text{ font-family:var(--sans); }
+  svg .tt{ fill:var(--ink); font-weight:700; }
+  svg .tm{ fill:var(--muted); }
+  svg .code{ font-family:var(--mono); }
+  svg .lab{ font-weight:700; letter-spacing:.09em; text-transform:uppercase; }
+  svg .lab-app{ fill:var(--app); } svg .lab-board{ fill:var(--board); } svg .lab-comp{ fill:var(--comp); }
+  svg .flow{ stroke:var(--faint); fill:none; stroke-width:1.7; }
+  svg .flow-d{ stroke-dasharray:4 4; }
+  svg .ah{ fill:var(--faint); }
+  svg .ok{ fill:var(--add); }
+  svg .warn{ fill:var(--warn); }
+
+  .split{ display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin:1.2rem 0; }
+  .col{ border:1px solid var(--line); border-radius:12px; overflow:hidden; background:var(--surface); }
+  .col h3{ margin:0; font-size:.82rem; letter-spacing:.05em; text-transform:uppercase; padding:.7rem .95rem;
+    border-bottom:1px solid var(--line); }
+  .col.board h3{ color:var(--board); background:var(--board-bg); }
+  .col.app h3{ color:var(--app); background:var(--app-bg); }
+  .col ul{ margin:0; padding:.7rem .95rem .8rem 1.7rem; }
+  .col li{ font-family:var(--mono); font-size:.79rem; margin:.32rem 0; color:var(--ink); }
+  .col li span{ color:var(--muted); font-family:var(--sans); }
+
+  .fix{ margin:1.1rem 0; }
+  .fix .fh{ font-size:.9rem; font-weight:600; margin-bottom:.5rem; }
+  pre.code{ margin:0; background:var(--surface); border:1px solid var(--line); border-radius:10px;
+    overflow-x:auto; font-family:var(--mono); font-size:.79rem; line-height:1.5; }
+  pre.code .ln{ display:block; padding:0 .9rem; white-space:pre; border-left:3px solid transparent; }
+  pre.code .del{ background:var(--del-bg); color:var(--del); border-left-color:var(--del); }
+  pre.code .add{ background:var(--add-bg); color:var(--add); border-left-color:var(--add); }
+  pre.code .ctx{ color:var(--muted); }
+
+  .tblwrap{ overflow-x:auto; margin:1rem 0; }
+  table{ border-collapse:collapse; width:100%; font-size:.86rem; }
+  th,td{ text-align:left; padding:.55rem .7rem; border-bottom:1px solid var(--line); vertical-align:top; }
+  th{ font-size:.72rem; letter-spacing:.06em; text-transform:uppercase; color:var(--faint); }
+  td.path{ font-family:var(--mono); font-size:.8rem; white-space:nowrap; }
+  .tag{ font-size:.68rem; font-weight:700; padding:.1rem .45rem; border-radius:999px; letter-spacing:.03em; }
+  .t-new{ background:var(--comp-bg); color:var(--comp); }
+  .t-del{ background:var(--del-bg); color:var(--del); }
+  .t-kept{ background:var(--surface-2); color:var(--muted); }
+
+  pre.log{ background:#0c1119; color:#c8d2de; border:1px solid var(--line); border-radius:12px;
+    padding:1rem 1.1rem; overflow-x:auto; font-family:var(--mono); font-size:.78rem; line-height:1.55; margin:1rem 0; }
+  pre.log b{ color:#4cc466; }
+  pre.log .t{ color:#6ea8fe; }
+  pre.log .d{ color:#68758a; }
+
+  .foot{ margin-top:2.8rem; padding-top:1.2rem; border-top:1px solid var(--line); color:var(--faint);
+    font-size:.78rem; }
+  @media (max-width:620px){ .stats{ grid-template-columns:repeat(2,1fr);} .split{ grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <p class="eyebrow">pico-e32 &middot; fake-08 runtime &middot; refactor</p>
+    <h1>The SD driver becomes a configurable component</h1>
+    <p class="lede">The onboard-microSD mount moved out of the fake-08 app and into a reusable,
+      board-agnostic component. Each board now <b>owns its SD wiring</b> the way it already owns its display,
+      and an <code>owns_bus</code> flag lets a future board <b>share the SPI bus</b> with its screen. Same
+      behaviour on this board &mdash; verified on hardware &mdash; with two latent teardown bugs fixed on the way.</p>
+    <div class="meta">
+      <span class="chip"><b>component</b> components/sdcard_spi</span>
+      <span class="chip"><b>board dep</b> 0</span>
+      <span class="chip"><b>source/</b> byte-identical</span>
+      <span class="chip"><b>PR</b> #10</span>
+    </div>
+  </header>
+
+  <div class="stats">
+    <div class="stat"><div class="k tl">1</div><div class="l">reusable component, 0 board deps</div></div>
+    <div class="stat"><div class="k">2</div><div class="l">boards&rsquo; wiring it can serve</div></div>
+    <div class="stat"><div class="k ok">2</div><div class="l">latent teardown bugs fixed</div></div>
+    <div class="stat"><div class="k ok">&#10003;</div><div class="l">SD32G mount + cart load on panel</div></div>
+  </div>
+
+  <h2><span class="num">01</span> The ownership split</h2>
+  <p>One rule drives the design: the reusable component knows <b>only SPI + FATFS, never a board</b>. Three
+    actors, one contract &mdash; the <code>sdcard_spi_config_t</code> struct &mdash; split so each field has a
+    single owner. The board fills the <b>hardware</b> half; the app fills the <b>policy</b> half; the
+    component is the <b>mechanism</b> and depends on neither.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 900 430" role="img" aria-label="Ownership diagram: the app and the board both fill an sdcard_spi_config_t, which the board-agnostic component consumes.">
+      <defs>
+        <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path class="ah" d="M0,0 L7,3 L0,6 Z"/>
+        </marker>
+      </defs>
+
+      <!-- APP -->
+      <rect class="b-app stroke2" x="335" y="24" width="230" height="78" rx="12"/>
+      <text class="lab lab-app" x="450" y="48" text-anchor="middle" font-size="11">the app &middot; owns policy</text>
+      <text class="tt code" x="450" y="70" text-anchor="middle" font-size="14">main.cpp</text>
+      <text class="tm" x="450" y="89" text-anchor="middle" font-size="11.5">mount point &middot; no-format &middot; flash fallback</text>
+
+      <!-- CONTRACT -->
+      <rect class="b-neu stroke2" x="270" y="168" width="360" height="86" rx="12"/>
+      <text class="tt code" x="450" y="150" text-anchor="middle" font-size="13">sdcard_spi_config_t</text>
+      <line class="divln" x1="450" y1="176" x2="450" y2="246" stroke-width="1.5" stroke-dasharray="3 3"/>
+      <text class="lab lab-board" x="360" y="194" text-anchor="middle" font-size="10">hardware</text>
+      <text class="tm code" x="360" y="214" text-anchor="middle" font-size="10.5">host &middot; pins</text>
+      <text class="tm code" x="360" y="230" text-anchor="middle" font-size="10.5">owns_bus</text>
+      <text class="lab lab-app" x="540" y="194" text-anchor="middle" font-size="10">policy</text>
+      <text class="tm code" x="540" y="214" text-anchor="middle" font-size="10.5">mount_point</text>
+      <text class="tm code" x="540" y="230" text-anchor="middle" font-size="10.5">format &middot; max_files</text>
+
+      <!-- BOARD -->
+      <rect class="b-board stroke2" x="30" y="316" width="300" height="96" rx="12"/>
+      <text class="lab lab-board" x="180" y="340" text-anchor="middle" font-size="11">the board &middot; owns wiring</text>
+      <text class="tt code" x="180" y="362" text-anchor="middle" font-size="13">board.cpp &rarr; board_sd_config()</text>
+      <text class="tm code" x="180" y="382" text-anchor="middle" font-size="10.5">SPI2 &middot; CS1 MOSI2 MISO41 CLK42</text>
+      <text class="tm code" x="180" y="399" text-anchor="middle" font-size="10.5">owns_bus = true</text>
+
+      <!-- COMPONENT -->
+      <rect class="b-comp stroke2" x="570" y="316" width="300" height="96" rx="12"/>
+      <text class="lab lab-comp" x="720" y="340" text-anchor="middle" font-size="11">the mechanism</text>
+      <text class="tt code" x="720" y="362" text-anchor="middle" font-size="13">components/sdcard_spi</text>
+      <text class="tm" x="720" y="382" text-anchor="middle" font-size="10.5">mount &middot; unmount &middot; owns_bus logic</text>
+      <text class="tm" x="720" y="399" text-anchor="middle" font-size="10.5">knows SPI + FATFS &mdash; never a board</text>
+
+      <!-- flows -->
+      <!-- board fills hardware half -->
+      <path class="flow" d="M180,316 L180,232 L268,214" marker-end="url(#ah)"/>
+      <text class="tm" x="120" y="280" font-size="10.5">fills hardware</text>
+      <!-- app fills policy half -->
+      <path class="flow" d="M470,102 L520,150 L540,166" marker-end="url(#ah)"/>
+      <text class="tm" x="486" y="132" font-size="10.5">sets policy</text>
+      <!-- app calls mount on component -->
+      <path class="flow" d="M565,74 L720,74 L720,314" marker-end="url(#ah)"/>
+      <text class="tm code" x="600" y="66" font-size="10.5">sdcard_spi_mount(cfg)</text>
+      <!-- component defines the type (dashed) -->
+      <path class="flow flow-d" d="M632,206 L720,206 L720,314" marker-end="url(#ah)"/>
+      <text class="tm" x="640" y="196" font-size="10.5">defines the type</text>
+    </svg>
+    <p class="cap">Dependencies point one way: the app and board depend on the component&rsquo;s config type; the
+      component depends on <b>neither</b>. Swapping boards is a <code>boards/&lt;board&gt;/board.cpp</code> swap
+      &mdash; no app or component edit.</p>
+  </div>
+
+  <h2><span class="num">02</span> Why it needed to be configurable</h2>
+  <p>The pins were hardcoded in an app file &mdash; fine for one board. But there are <b>two boards with
+    different SD wiring</b>, and the difference isn&rsquo;t only pin numbers: it&rsquo;s <b>who owns the SPI
+    bus</b>. That&rsquo;s the flag the old code couldn&rsquo;t express, and the reason a plain pin swap
+    wasn&rsquo;t enough.</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 900 300" role="img" aria-label="owns_bus: Board 1 has a private SPI2 the component owns; Board 2 shares the display's SPI, so the component only attaches a device.">
+      <defs>
+        <marker id="ah2" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path class="ah" d="M0,0 L7,3 L0,6 Z"/>
+        </marker>
+      </defs>
+
+      <!-- Board 1 -->
+      <text class="lab lab-comp" x="40" y="34" font-size="11">board 1 &mdash; this unit</text>
+      <text class="tt" x="40" y="56" font-size="14">Private SPI2 &rarr; <tspan class="code">owns_bus = true</tspan></text>
+      <rect class="b-comp stroke2" x="40" y="80" width="150" height="52" rx="10"/>
+      <text class="tt code" x="115" y="103" text-anchor="middle" font-size="12">microSD</text>
+      <text class="tm code" x="115" y="120" text-anchor="middle" font-size="10">CS1&middot;2&middot;41&middot;42</text>
+      <line class="flow" x1="190" y1="106" x2="300" y2="106" marker-end="url(#ah2)"/>
+      <rect class="b-neu stroke2" x="300" y="80" width="120" height="52" rx="10"/>
+      <text class="tt code" x="360" y="110" text-anchor="middle" font-size="12">SPI2 host</text>
+      <text class="tm" x="40" y="162" font-size="11">The i80 LCD uses no SPI host &mdash; 0 shared pins. The component runs</text>
+      <text class="tm code" x="40" y="180" font-size="11"><tspan class="ok">spi_bus_initialize</tspan> at mount and <tspan class="ok">spi_bus_free</tspan> at unmount.</text>
+      <text class="ok" x="40" y="205" font-size="12" font-weight="700">&#10003; verified on hardware</text>
+
+      <!-- divider -->
+      <line class="divln" x1="470" y1="20" x2="470" y2="280" stroke-width="1.5"/>
+
+      <!-- Board 2 -->
+      <text class="lab lab-board" x="510" y="34" font-size="11">board 2 &mdash; later target</text>
+      <text class="tt" x="510" y="56" font-size="14">Shared SPI &rarr; <tspan class="code">owns_bus = false</tspan></text>
+      <rect class="b-board stroke2" x="510" y="80" width="140" height="40" rx="10"/>
+      <text class="tt code" x="580" y="105" text-anchor="middle" font-size="12">display (3-wire)</text>
+      <rect class="b-comp stroke2" x="510" y="130" width="140" height="40" rx="10"/>
+      <text class="tt code" x="580" y="155" text-anchor="middle" font-size="12">microSD (CS10)</text>
+      <line class="flow" x1="650" y1="100" x2="740" y2="118" marker-end="url(#ah2)"/>
+      <line class="flow" x1="650" y1="150" x2="740" y2="132" marker-end="url(#ah2)"/>
+      <rect class="b-neu stroke2" x="740" y="100" width="120" height="52" rx="10"/>
+      <text class="tt code" x="800" y="123" text-anchor="middle" font-size="11">one SPI</text>
+      <text class="tm code" x="800" y="140" text-anchor="middle" font-size="10">host</text>
+      <text class="tm" x="510" y="200" font-size="11">Display owns the bus. The component <tspan class="warn" font-weight="700">skips</tspan> init and</text>
+      <text class="tm" x="510" y="218" font-size="11">attaches the SD as a second device &mdash; and <tspan class="warn" font-weight="700">never frees</tspan> the bus.</text>
+      <text class="warn" x="510" y="243" font-size="12" font-weight="700">&#9679; wired &amp; ready, untested (no board config yet)</text>
+    </svg>
+    <p class="cap">The <code>owns_bus</code> flag is the whole generalization: the same mount path serves a
+      private bus and a shared one, and the teardown frees the bus <b>only</b> when the component brought it up.</p>
+  </div>
+
+  <h2><span class="num">03</span> The contract: hardware vs policy</h2>
+  <p>Every field of <code>sdcard_spi_config_t</code> has one owner. <code>sdcard_spi_config_default()</code>
+    seeds the policy; <code>board_sd_config()</code> overwrites only the hardware. Neither steps on the other.</p>
+  <div class="split">
+    <div class="col board">
+      <h3>Hardware &mdash; board fills</h3>
+      <ul>
+        <li>host <span>&mdash; SPI2_HOST</span></li>
+        <li>pin_cs / mosi / miso / sclk</li>
+        <li>owns_bus <span>&mdash; private vs shared</span></li>
+        <li>max_freq_khz <span>&mdash; drop if flaky</span></li>
+      </ul>
+    </div>
+    <div class="col app">
+      <h3>Policy &mdash; app fills</h3>
+      <ul>
+        <li>mount_point <span>&mdash; "/sdcard"</span></li>
+        <li>format_if_mount_failed <span>&mdash; false</span></li>
+        <li>max_files <span>&mdash; 5</span></li>
+        <li>allocation_unit_size <span>&mdash; 0</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <h2><span class="num">04</span> Two latent bugs, fixed in the move</h2>
+  <p>The old <code>sd_unmount()</code> freed the bus with a <b>hardcoded host</b> and <b>unconditionally</b>
+    &mdash; harmless on the one board that always owned <code>SPI2</code>, but wrong the moment a second board
+    shares a bus, or a mount fails before the bus comes up. The component records the host it used and whether
+    it owns the bus, and frees accordingly.</p>
+  <div class="fix">
+    <div class="fh">before &mdash; <code>sd_mount.cpp</code></div>
+    <pre class="code"><span class="ln ctx">void sd_unmount(void) {</span>
+<span class="ln ctx">    if (!s_card) return;</span>
+<span class="ln ctx">    esp_vfs_fat_sdcard_unmount(SD_MOUNT_POINT, s_card);</span>
+<span class="ln del">    spi_bus_free(SPI2_HOST);   // hardcoded host, always frees</span>
+<span class="ln ctx">    s_card = nullptr;</span>
+<span class="ln ctx">}</span></pre>
+  </div>
+  <div class="fix">
+    <div class="fh">after &mdash; <code>components/sdcard_spi/sdcard_spi.c</code></div>
+    <pre class="code"><span class="ln ctx">void sdcard_spi_unmount(void) {</span>
+<span class="ln ctx">    if (!s_card) return;</span>
+<span class="ln ctx">    esp_vfs_fat_sdcard_unmount(s_mount_point, s_card);</span>
+<span class="ln add">    if (s_bus_owned) spi_bus_free(s_host);   // the host we used, iff we own it</span>
+<span class="ln ctx">    s_card = NULL;  s_bus_owned = false;</span>
+<span class="ln ctx">}</span></pre>
+  </div>
+
+  <h2><span class="num">05</span> Where the code lives now</h2>
+  <div class="tblwrap"><table>
+    <thead><tr><th>Piece</th><th>Where</th><th>Kind</th></tr></thead>
+    <tbody>
+      <tr><td class="path">components/sdcard_spi/</td><td>reusable component &mdash; mount mechanism, config type, <code>owns_bus</code></td><td><span class="tag t-new">new</span></td></tr>
+      <tr><td class="path">board_sd_config()</td><td>board.cpp &mdash; this board&rsquo;s wiring, beside the LCD pins</td><td><span class="tag t-new">new</span></td></tr>
+      <tr><td class="path">BOARD_HAS_SD</td><td>board.h &mdash; capability macro; a no-SD board compiles out the path</td><td><span class="tag t-new">new</span></td></tr>
+      <tr><td class="path">main.cpp</td><td>app &mdash; config &rarr; board_sd_config &rarr; mount, then the cart ladder</td><td><span class="tag t-kept">edited</span></td></tr>
+      <tr><td class="path">sd_mount.{h,cpp}</td><td>app-local driver &mdash; superseded</td><td><span class="tag t-del">deleted</span></td></tr>
+      <tr><td class="path">source/ &middot; ESP32Host</td><td>fake-08 runtime &amp; its platform binding</td><td><span class="tag t-kept">untouched</span></td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">A board with no SD slot never defines <code>BOARD_HAS_SD</code>, never includes the header,
+    and writes zero SD code &mdash; the whole path in <code>main.cpp</code> is behind <code>#if BOARD_HAS_SD</code>.</p>
+
+  <h2><span class="num">06</span> Verified on hardware</h2>
+  <p>Flashed to the board (CP2104 bridge, <code>ttyUSB1</code>) and captured the boot log. The tell is the log
+    tag <code>sdcard_spi</code> &mdash; the old app-local driver logged as <code>sd</code>, so the code that ran
+    is the new component. Full round-trip: mount &rarr; scan &rarr; load a cart from SD &rarr; GameLoop.</p>
+  <pre class="log"><span class="t">I (631)</span> fake08:  fake-08 port: draw-only milestone booting
+<span class="t">I (911)</span> board-lcd: LCD up via LovyanGFX (320x480, 40000000 Hz, cs=37, mirror_y=1)
+<span class="t">I (981)</span> <b>sdcard_spi: SD mounted at /sdcard</b>   <span class="d">&lt;- new component's tag</span>
+         Name: SD32G   Type: SDHC   capacity=60579840  sector_size=512
+<span class="t">I (1071)</span> fake08: <b>loading SD cart: /sdcard/HELLO.P8</b>   <span class="d">&lt;- cart ladder, from SD</span>
+<span class="t">I (1091)</span> fake08: entering GameLoop                     <span class="d">&lt;- running, no errors</span></pre>
+  <p class="note">Behaviour on this board is identical by construction &mdash; same host, pins,
+    <code>owns_bus=true</code>, policy, and mount point as the loader that was already hardware-verified. The
+    draw path is untouched, so the panel shows <code>HELLO.P8</code> exactly as before.</p>
+
+  <div class="foot">
+    pico-e32 &middot; fake-08 port &middot; SD driver &rarr; components/sdcard_spi &middot; PR #10.
+    Design settled via a research + design workflow; extends the
+    <a href="pico-e32-fake08-sd-cart-report.html" style="color:var(--comp)">SD cart loader report</a>.
+    <code>source/</code> byte-identical to upstream fake-08.
+  </div>
+
+</div>
+</body>
+</html>

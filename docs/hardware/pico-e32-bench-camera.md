@@ -147,13 +147,20 @@ red=TL, green=TR, blue=BL, yellow=BR, stub pointing right.
 ### Measuring settings (tuned 2026-07-16)
 
 ```
-/capture?awb=0&exp=600&gain=0&sat=2      # UXGA, true-ish colour, 0% clipped
+/capture?awb=0&exp=600&gain=0&sat=2      # BRIGHT content (palette bars): UXGA, true-ish colour, 0% clipped
+/capture?awb=0&exp=1200&gain=0&sat=2     # DARK content (a mostly-dark cart): brightest CLEAN exposure
 ```
 
 - **UXGA (1600×1200)** — the panel is a small part of frame; resolution is what buys resolvable detail.
 - **`awb=0`** — auto white balance renormalises hue toward grey, destroying the *relative* colour
   judgement the rig exists for. It costs an absolute cast (see the rule above).
-- **`exp=600, gain=0`** — anything brighter clips 24–26% of the panel; clipped pixels carry no colour.
+- **Exposure is scene-dependent — pick by how bright the content is.** `exp=600, gain=0` is tuned for the
+  16-colour palette bars, where anything brighter clips 24–26% of the panel. A **mostly-dark cart** (e.g. a
+  `cls(1)` dark-blue screen) *under*-exposes at 600; use **`exp=1200, gain=0`** (verified 2026-07-18 on the
+  fake-08 input-demo cart — clearly brighter and more legible, still colour-true).
+- **`exp` caps at ~1200 on the OV3660** — `exp=1400`/`1900` clamp to the same frame. Past that, only **`gain`**
+  brightens, and it **adds sensor grain and clips bright sprites toward white** — so avoid gain when judging
+  colour or fine detail; `exp=1200 gain=0` is the ceiling of *clean* brightness.
 - **Re-sweep after any move.** These are right for one framing, not laws of nature.
 
 ### Focus is mechanical, and the sweet spot is narrow
