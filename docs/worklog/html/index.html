@@ -30,6 +30,16 @@
       linked from this index (see <a href="../../../.ai/AGENTS.md">.ai/AGENTS.md</a> → Worklogs).</p>
     <ul class="entries">
       <li>
+        <span class="d">2026-07-18</span>
+        <a class="t" href="2026-07-18-fake08-celeste-fps-resume.html">Celeste plays, but "fps is horrible" — the 60 Hz-resume fix</a>
+        <span class="s">First real cart end-to-end (Celeste through fake-08's own <code>GameLoop</code>), then "fps is horrible."
+          Measured the work at <strong>~6 ms/frame (162 fps capable)</strong>, so it was pacing, not the S3. Two bugs:
+          a 100 Hz FreeRTOS tick quantized the limiter (judder), and the host paced fake-08's <strong>60 Hz-resume
+          coroutine</strong> at 30 Hz — so 30 fps carts ran at <strong>half speed</strong>. Fixed with a 1 ms tick and
+          <code>setTargetFps(60)</code>; verified 60 Hz resume / correct 30 fps motion, serial-driven. Added an opt-in
+          on-screen FPS HUD.</span>
+      </li>
+      <li>
         <span class="d">2026-07-17</span>
         <a class="t" href="2026-07-17-fake08-input-seam.html">Input seam — a compile-time-switchable driver, serial backend, on-panel HITL</a>
         <span class="s">fake-08's <code>scanInput()</code> (a stub returning zero) gets a <strong>compile-time-selectable

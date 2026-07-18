@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Celeste plays, but "fps is horrible" — the 60 Hz-resume fix — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8;
+        --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  :root[data-theme="light"]{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;--ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  :root[data-theme="dark"]{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;--border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)} .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;font-family:var(--mono)}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:9px;padding:.9rem 1.05rem;overflow-x:auto;font-size:.82rem;line-height:1.5;font-family:var(--mono)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left}
+  th{background:var(--codebg);font-family:var(--mono);font-size:.82rem}
+  td.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .bad{color:var(--bad);font-weight:600} .ok{color:var(--ok);font-weight:600} .warn{color:var(--warn);font-weight:600}
+  .bars{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.2rem 1.3rem;margin:1.3rem 0}
+  .bars h3{margin:.1rem 0 1rem;font-size:.95rem}
+  .bar{display:grid;grid-template-columns:150px 1fr;align-items:center;gap:.8rem;margin:.55rem 0}
+  .bar .lab{font:600 .8rem/1.2 var(--mono);color:var(--muted)}
+  .bar .track{position:relative;background:var(--codebg);border-radius:7px;height:30px;overflow:hidden}
+  .bar .fill{position:absolute;inset:0 auto 0 0;border-radius:7px;display:flex;align-items:center;justify-content:flex-end;padding-right:.55rem;font:700 .8rem/1 var(--mono);color:#fff;white-space:nowrap}
+  .fill.b{background:linear-gradient(90deg,#c0392b,#e0563f)}
+  .fill.a{background:linear-gradient(90deg,#1a7f4b,#2faa68)}
+  /* resume diagram */
+  .diag{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.3rem;margin:1.3rem 0}
+  .diag h3{margin:.1rem 0 .4rem;font-size:.95rem}
+  .diag .sub{color:var(--muted);font-size:.82rem;margin:0 0 1rem}
+  .row{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:.7rem 0}
+  .row .who{width:150px;flex:none;font:600 .8rem/1.2 var(--mono)}
+  .tick{display:flex;align-items:center;justify-content:center;width:44px;height:34px;border-radius:6px;font:700 .72rem/1 var(--mono);border:1px solid var(--border)}
+  .tick.draw{background:linear-gradient(180deg,#2faa68,#1a7f4b);color:#fff;border-color:transparent}
+  .tick.yield{background:var(--codebg);color:var(--muted)}
+  .arrow{color:var(--muted);font-family:var(--mono)}
+  .res{font:.74rem/1.3 var(--mono);color:var(--muted);margin:.15rem 0 0 150px}
+  .legend{font-size:.78rem;color:var(--muted);margin-top:.6rem}
+  .legend b.g{color:var(--ok)}
+  .foot{margin-top:2.6rem;padding-top:1rem;border-top:1px solid var(--border);color:var(--muted);font-size:.85rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <h1>Celeste plays, but "fps is horrible"</h1>
+  <p class="date">2026-07-18 · the 60 Hz-resume fix · fake-08 port</p>
+
+  <div class="tldr">
+    Real <b>Celeste</b> boots end-to-end through fake-08's own <code>GameLoop</code> — then the owner played it
+    and said the fps was horrible. Measuring showed the work at <b>~6 ms/frame (162 fps capable)</b>, so it was
+    never the S3. Two pacing bugs: a <b>100 Hz FreeRTOS tick</b> quantized the frame limiter (judder), and the
+    host paced fake-08's <b>60 Hz-resume coroutine at 30 Hz</b> — so 30 fps carts ran at <b class="bad">half
+    speed</b>. Fixed with a <b>1 ms tick</b> + <code>setTargetFps(60)</code>. Verified 60 Hz resume / correct
+    30 fps motion, driven over serial. Plus an opt-in on-screen FPS HUD.
+  </div>
+
+  <h2>Measure first — the hardware is not the bottleneck</h2>
+  <p>The app's <code>MEASURE_FPS</code> loop times <code>Step()</code> vs <code>drawFrame()</code> in isolation
+     (no pacing). On Celeste:</p>
+  <table>
+    <tr><th>stage</th><th>cost</th><th>note</th></tr>
+    <tr><td><code>Step()</code> — VM <code>_update</code>+<code>_draw</code></td><td class="n">2.56 ms</td><td>z8lua with jump tables</td></tr>
+    <tr><td><code>drawFrame()</code> — unpack → 2× → strip-blit</td><td class="n">3.61 ms</td><td>internal-SRAM strips</td></tr>
+    <tr><td><b>total work</b></td><td class="n"><b>~6.2 ms</b></td><td class="ok"><b>→ 162 fps capable</b></td></tr>
+  </table>
+  <p>So "slow" was <em>pacing</em>, in two independent bugs.</p>
+
+  <h2>Bug 1 — pacing quantization (the judder)</h2>
+  <p>The 30 fps limiter (<code>Host::waitForTargetFps</code>) sleeps with <code>vTaskDelay</code>, which rounds to
+     whole FreeRTOS ticks. The tick was the IDF default <b>100 Hz = 10 ms</b>, so a 33.3 ms target quantized to
+     ±10 ms — frames landed at 20/30/40 ms and juddered though the average was ~30 fps.</p>
+  <p><b class="ok">Fix:</b> <code>CONFIG_FREERTOS_HZ=1000</code> (1 ms pacing).</p>
+
+  <h2>Bug 2 — half-speed (the real "slow")</h2>
+  <p>After Bug 1 the delivered rate was a rock-steady 30.0 fps — yet still slow. fake-08's game loop is a
+     <b>coroutine designed to be resumed at 60 Hz</b> (<code>__z8_run_cart</code> glue). It <code>flip()</code>s
+     (yields) after each <code>_draw</code>, and for a 30 fps cart it burns an <em>extra</em> <code>yield()</code>:</p>
+  <pre>while true do
+  if _update60 then _update_buttons(); _update60()
+  else              <b>yield()</b>;  _update_buttons(); _update()   -- extra yield = 30 fps
+  end
+  if _draw then _draw(); <b>flip()</b>  -- flip() yields (presents the frame)
+  else               yield() end
+end</pre>
+
+  <div class="diag">
+    <h3>Resumes per drawn frame — why the host must run at 60 Hz</h3>
+    <p class="sub">Each box is one host resume (<code>Step()</code>). <b class="ok">green</b> = a frame is drawn &amp; presented.</p>
+    <div class="row">
+      <div class="who">_update60 cart</div>
+      <div class="tick draw">draw</div><span class="arrow">→</span>
+      <div class="tick draw">draw</div><span class="arrow">→</span>
+      <div class="tick draw">draw</div><span class="arrow">→</span>
+      <div class="tick draw">draw</div>
+    </div>
+    <div class="res">1 resume / frame · at 60 Hz host → <b class="ok">60 fps</b></div>
+    <div class="row">
+      <div class="who">_update cart<br>(Celeste)</div>
+      <div class="tick yield">yield</div><span class="arrow">→</span>
+      <div class="tick draw">draw</div><span class="arrow">→</span>
+      <div class="tick yield">yield</div><span class="arrow">→</span>
+      <div class="tick draw">draw</div>
+    </div>
+    <div class="res">2 resumes / frame · at 60 Hz host → <b class="ok">30 fps</b> · at 30 Hz host → <b class="bad">15 fps (half!)</b></div>
+    <p class="legend">The host clock (resume rate) and the cart's logical rate are different things. The host
+      always resumes at <b class="g">60</b>; the coroutine self-divides. Our <code>ESP32Host</code> paced at 30 Hz
+      (<code>setTargetFps(30)</code>) — upstream fake-08 uses <b>60</b> — so Celeste got 15 fps of motion.</p>
+  </div>
+  <p><b class="ok">Fix:</b> <code>host-&gt;setTargetFps(60)</code> in the app (+ the <code>ESP32Host</code> default).
+     This covers every PICO-8 cart — the platform defines only 30 (<code>_update</code>) and 60
+     (<code>_update60</code>); there is no other rate.</p>
+
+  <h2>Verified — serial-driven, no human at the glass</h2>
+  <div class="bars">
+    <h3>Loop resume rate — before vs after (Celeste, ESP32-S3)</h3>
+    <div class="bar"><div class="lab">before · 30 Hz pace</div><div class="track"><div class="fill b" style="width:50%">30.0 fps · 33.3 ms</div></div></div>
+    <div class="bar"><div class="lab">after · 60 Hz pace</div><div class="track"><div class="fill a" style="width:100%">60.0 fps · 16.67 ms</div></div></div>
+  </div>
+  <table>
+    <tr><th></th><th>before</th><th>after</th></tr>
+    <tr><td>loop resume rate</td><td class="n bad">30.0 fps</td><td class="n ok">60.0 fps</td></tr>
+    <tr><td>Celeste motion</td><td class="n bad">15 fps (half)</td><td class="n ok">30 fps (correct)</td></tr>
+    <tr><td><code>scanInput</code> cost</td><td class="n">—</td><td class="n">0.03 ms serial · 0.67 ms touch</td></tr>
+  </table>
+  <p>Drove the game over the IN-1 serial backend (inject button bytes on UART0); camera frames confirmed real
+     gameplay (the "100 M" room, Madeline responding to injected input).</p>
+
+  <h2>On-screen FPS HUD (<code>-D SHOW_FPS=1</code>)</h2>
+  <p>Opt-in: the loop rate painted in the panel's <b>right letterbox</b> (x ≥ 288). The centred 256 px game blit
+     never touches that strip, so the readout persists without a per-frame redraw and never covers gameplay.
+     Reads <b class="ok">60</b> when healthy; drops if a room exceeds the 16.6 ms budget — a live perf meter.
+     <code>board_lcd_draw_fps()</code> is the board's (LovyanGFX); <code>ESP32Host</code> calls it on change,
+     gated in <code>components/fake08/CMakeLists.txt</code>.</p>
+
+  <h2>Lesson</h2>
+  <p>A steady average fps can still be half-speed. fake-08's loop is a 60 Hz-resume coroutine that self-divides
+     30 fps carts internally — the host must resume at <b>60</b>, never at the cart's logical rate. Measure the
+     <em>loop resume rate</em> and the <em>game motion</em> separately; they are not the same number.</p>
+
+  <p class="foot">pico-e32 · source worklog: <code>docs/worklog/2026-07-18-fake08-celeste-fps-resume.md</code></p>
+</div>
+</body>
+</html>
