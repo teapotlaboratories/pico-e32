@@ -139,6 +139,13 @@ red=TL, green=TR, blue=BL, yellow=BR, stub pointing right.
 - **The camera is mounted at 90°: the LEFT of the frame is the TOP of the panel.** Captures must be
   rotated 90° CW before judging anything. Forgetting this made a correctly-rendering panel look like
   an orientation bug — and the correct fix (nothing) was nearly applied to working code.
+- **⚠ The camera also HORIZONTALLY-MIRRORED, and that masked a real display bug for two days.** The
+  OV3660 output was left-right mirrored, which silently *cancelled* the panel's own X-flip — so a mirrored
+  panel read as "fine" in every capture. A human reading the real panel caught it (2026-07-18). **A
+  capture cannot verify left-right / mirror correctness — judge text direction by EYE at the panel, never
+  from a capture.** Fixed in the camera fw (`set_hmirror(s,0); set_vflip(s,1)` at init, verified against
+  the real panel; runtime-overridable via `/capture?hmir=0|1&vflip=0|1`). The display was actually mounted
+  **180°** (not just Y) — see `boards/makerfabs-ili9488-r1/board.cpp` `ROTATE_180`.
 - **The panel's own "up" is not marked on the board.** Do not assume the device's orientation from
   its shape; establish it with the asymmetric pattern.
 - If the camera is moved, **everything above is invalidated** — re-check the rotation and re-sweep

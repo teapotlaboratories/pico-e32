@@ -20,6 +20,10 @@
  * define BOARD_HAS_SD, and the app's SD path compiles out. */
 #define BOARD_HAS_SD 1
 
+/* This board has an onboard FT6236 capacitive touch panel (I²C 0x38, SDA38/SCL39). Boards without touch
+ * never define BOARD_HAS_TOUCH, so the touch input backend's board hooks are simply absent. */
+#define BOARD_HAS_TOUCH 1
+
 /* Pixel-clock (WR strobe) of the parallel bus, in Hz. Exposed because a benchmark needs it to
  * derive the bus ceiling honestly rather than pasting a constant (a stale one is how a 20 MHz
  * ceiling once sat next to a 40 MHz measurement). */
@@ -54,6 +58,21 @@ void board_lcd_selftest(void);
  * SD wiring the same way it owns its display. The app guards its *call* with BOARD_HAS_SD (which this
  * board defines); a board without an SD slot omits both the macro and this declaration. */
 bool board_sd_config(sdcard_spi_config_t *out);
+
+/* Bring up the FT6236 capacitive touch controller (I²C). ESP_OK on success; on failure it logs and
+ * returns an error (touch reads then report no points). Call once. Symmetric with board_lcd_init — the
+ * board owns the touch hardware AND its orientation. */
+esp_err_t board_touch_init(void);
+
+/* Poll active touch points (up to `max`, at most 2) into xs/ys in DISPLAY coordinates
+ * (0..BOARD_LCD_H_RES-1, 0..BOARD_LCD_V_RES-1) — this panel's orientation (ROTATE_180) already applied, so
+ * a point lands where it is drawn. Returns the point count (0..2). One I²C transaction; non-blocking-ish. */
+int board_touch_read(int *xs, int *ys, int max);
+
+/* Draw the on-screen touch control deck (d-pad + O/X + menu) once into the panel's bottom band, below the
+ * game. Static — drawFrame writes only the top 256 px, so the deck persists without a per-frame redraw.
+ * Layout matches docs/runtime/pico-e32-fake08-touch-ui.html. Only meaningful with BOARD_HAS_TOUCH. */
+void board_draw_touch_deck(void);
 
 #ifdef __cplusplus
 }
