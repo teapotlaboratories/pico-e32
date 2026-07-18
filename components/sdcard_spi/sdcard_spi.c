@@ -10,6 +10,7 @@
 #include "sdcard_spi.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
@@ -43,6 +44,13 @@ void sdcard_spi_config_default(sdcard_spi_config_t *out) {
 
 esp_err_t sdcard_spi_mount(const sdcard_spi_config_t *cfg) {
     if (s_card) return ESP_OK;                /* already mounted */
+
+    /* We stash mount_point in a fixed buffer for unmount; reject one that wouldn't fit rather than
+     * silently truncate (a truncated path would later break sdcard_spi_unmount's match). */
+    if (strlen(cfg->mount_point) >= sizeof(s_mount_point)) {
+        ESP_LOGE(TAG, "mount point too long (max %d): %s", (int)sizeof(s_mount_point) - 1, cfg->mount_point);
+        return ESP_ERR_INVALID_ARG;
+    }
 
     s_host      = cfg->host;
     s_bus_owned = false;                       /* set true only after we bring the bus up */

@@ -1,6 +1,7 @@
 /* input_stub.c — the default backend: no input. KDown=KHeld=0, so the pause menu never opens and a
- * cart runs untouched. Keeps a plain `make build` (no INPUT_BACKEND) behaving exactly as before the
- * input seam existed. See docs/runtime/pico-e32-fake08-input.md. */
+ * cart runs untouched. Keeps a fresh `make build` (no `INPUT_BACKEND` cached) behaving as before the
+ * input seam existed. (The value persists in CMakeCache once set — see the component CMakeLists.)
+ * See docs/runtime/pico-e32-fake08-input.md. */
 #include "input.h"
 
 esp_err_t   input_init(void)         { return ESP_OK; }
