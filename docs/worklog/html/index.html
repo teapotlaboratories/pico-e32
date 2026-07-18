@@ -31,6 +31,23 @@
     <ul class="entries">
       <li>
         <span class="d">2026-07-17</span>
+        <a class="t" href="2026-07-17-fake08-input-seam.html">Input seam — a compile-time-switchable driver, serial backend, on-panel HITL</a>
+        <span class="s">fake-08's <code>scanInput()</code> (a stub returning zero) gets a <strong>compile-time-selectable
+          input seam</strong> (<code>components/input</code>, <code>INPUT_BACKEND</code> = stub|serial|touch|i2c).
+          Serial first because it's the only backend an automated bench can drive — <strong>verified on hardware</strong>:
+          keys sent over the console UART registered on-device while logs kept flowing, and a bench-camera frame
+          confirmed the test cart's square moved under serial input. Touch (FT6236) and i2c are skeletons behind the seam.</span>
+      </li>
+      <li>
+        <span class="d">2026-07-17</span>
+        <a class="t" href="2026-07-17-fake08-sd-component.html">SD driver → a configurable, board-agnostic component</a>
+        <span class="s">Extract the SD mount from the app into a reusable <code>components/sdcard_spi</code>: the board supplies
+          its wiring via <code>board_sd_config()</code> (symmetric with <code>board_lcd_init</code>), an <code>owns_bus</code>
+          flag supports a future shared display SPI bus, and two latent teardown bugs are fixed. Same behaviour on this
+          board — verified on hardware; <code>source/</code> stays byte-identical.</span>
+      </li>
+      <li>
+        <span class="d">2026-07-17</span>
         <a class="t" href="2026-07-17-fake08-sd-cart-loader.html">SD cart loader — fake-08 loads carts from microSD</a>
         <span class="s">From a one-cart flash demo to a <strong>self-loading runtime</strong>: mount the board's onboard
           microSD (private SPI2, disjoint from the i80 LCD — the "shared bus" note was a 4"-board carry-over),

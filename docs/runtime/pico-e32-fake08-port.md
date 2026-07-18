@@ -33,7 +33,7 @@ We write one **`ESP32Host`**. Everything else is fake-08's, ported as-is.
 | **Timing** | `setTargetFps`, `waitForTargetFps`, `deltaTMs` | `esp_timer` + `vTaskDelay` (already used in Gate #1/#3) | 🟢 **ready** |
 | **Lua VM heap** | `luaL_newstate()` at `source/vm.cpp:300` | swap to `lua_newstate(psram_alloc,…)` with `MALLOC_CAP_SPIRAM`; keep `picoFb`, DMA buffers, GC nursery in **internal SRAM** | 🟢 **ready** — z8lua already vendored (`components/z8lua`), the VM fake-08 uses |
 | **Cart source** | `getFileContents`, `listcarts`, `saveCartData`, … | flash-embedded cart **and** the onboard microSD (SPI2, FatFs/VFS) | ✅ **done** — SD loader mounts the onboard microSD, scans for `.p8`/`.p8.png`, loads one, falls back to the flash cart. Verified on a 32 GB SDHC card. Was mislabelled parts-blocked — the slot is on-board. See the [SD worklog](../worklog/2026-07-17-fake08-sd-cart-loader.md) |
-| **Input** | `InputState_t scanInput()` → 8-bit mask (L/R/U/D/O/X/PAUSE) | read I²C GPIO expander → OR the bits. **now:** BOOT button / stub | 🔴 **parts-blocked** (no I²C expander/buttons yet) |
+| **Input** | `InputState_t scanInput()` → 8-bit mask (L/R/U/D/O/X/PAUSE) | a **compile-time-selectable seam** (`components/input`, `INPUT_BACKEND` = stub\|serial\|touch\|i2c) behind `scanInput` | 🟢 **seam done — the serial (UART) backend is HITL-verified on hardware**; touch (on-board FT6236) is next, **no parts**; the I²C-expander backend is parts-blocked. See the [input spec](pico-e32-fake08-input.md) |
 | **Audio** | `Audio::FillAudioBuffer(...)` @ **22050 Hz S16**, the **pull/poll** path | ESP-IDF **I²S** feeder task → MAX98357A. **now:** stub | 🔴 **parts-blocked** (no MAX98357A/speaker yet) |
 
 **Key point:** *draw + timing + VM + a flash cart are all* 🟢 *ready — none are parts-blocked.* So the
@@ -96,8 +96,10 @@ stubbed) running a flash-embedded cart on the panel.** This:
 - Needs **no parts** — it's the same draw+timing+VM+flash-cart we already have, just fake-08's runtime
   instead of the hand-written one.
 
-Then Phase 1 fills in the parts-blocked seams (input, audio) → **Gate #4** (a real cart playable ≥30 fps
-with sound + input). SD carts are **done** (the slot is on-board, no parts).
+Then Phase 1 fills the remaining seams → **Gate #4** (a real cart playable ≥30 fps with sound + input).
+**Input** now has a switchable driver (`components/input`): the serial backend is HITL-verified, and touch
+(the on-board FT6236) is the next backend — **no parts**; only the I²C-expander backend and **audio**
+(MAX98357A) are still parts-blocked. SD carts are **done** (the slot is on-board, no parts).
 
 ## Open questions / risk
 

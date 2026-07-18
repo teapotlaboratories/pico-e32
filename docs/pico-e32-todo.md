@@ -28,12 +28,15 @@ docs (per [`.ai/AGENTS.md`](../.ai/AGENTS.md) → *Plan first*).
   `spr`/`map`/`print` are still **no-op stubs**, so Celeste's logic runs at frame rate but has never drawn
   a pixel. **Not parts-blocked, and verifiable without the camera** (host frame dump → PNG) — the one
   Phase-1 item that can move right now. `HG-1` ✅ (sprite sheet extracted), `HG-5` ✅ unblocked (font is CC-0 from Lexaloffle). See [worklog](worklog/2026-07-15-host-graphics.md).
-- **Port fake-08** → `ESP32Host` — the primary runtime goal. **Draw-only port (drawFrame + timing, flash
-  cart) is unblocked and next**; input (I²C expander), audio (MAX98357A), SD carts are **parts-blocked**.
-  The hand-written `HG-*` draw API is a de-risking harness, **superseded** by fake-08's own graphics. Plan
-  in [`runtime/pico-e32-fake08-port.md`](runtime/pico-e32-fake08-port.md).
+- **Port fake-08** → `ESP32Host` — the primary runtime goal. **Draw-only port ✅, SD cart loader ✅, and a
+  compile-time-switchable input seam ✅** (serial backend HITL-verified; touch via the on-board FT6236 is
+  next, **no parts**) — see the [input backlog](runtime/pico-e32-fake08-input.md). Only **audio** (MAX98357A)
+  and the physical-button **I²C expander** remain parts-blocked. The hand-written `HG-*` draw API is a
+  de-risking harness, **superseded** by fake-08's own graphics. Plan in
+  [`runtime/pico-e32-fake08-port.md`](runtime/pico-e32-fake08-port.md).
 - **Gate #4:** a real cart playable ≥ 30 fps with sound + input; set the 30-vs-60 fps policy.
-- Parts to buy: I²C GPIO expander + buttons + MAX98357A + speaker + microSD (see plan §7).
+- Parts to buy: MAX98357A + speaker (audio); optionally an I²C GPIO expander + buttons for physical input
+  (touch via the on-board FT6236 needs none). microSD + slot are on-board. (See plan §7.)
 
 ## Later — Phase 2+ (the 4.0" ST7701 board)
 
