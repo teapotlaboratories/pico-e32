@@ -11,6 +11,9 @@
 set(F08 "${CMAKE_CURRENT_LIST_DIR}/fake08")
 
 # fake-08's PICO-8 runtime (C++), minus the desktop entry point — the app provides app_main.
+# NOTE: this GLOB is resolved at configure time (IDF processes component CMakeLists in script mode, where
+# CONFIGURE_DEPENDS is unavailable). If a submodule bump adds/removes a source/*.cpp, force a reconfigure —
+# `make fullclean` (or touch this file) — or the stale source list silently drops it.
 file(GLOB FAKE08_SRCS "${F08}/source/*.cpp")
 list(FILTER FAKE08_SRCS EXCLUDE REGEX "/main\\.cpp$")
 

@@ -47,8 +47,8 @@ esp_err_t input_init(void) {
         return r;
     }
     s_ok = true;
-    ESP_LOGI(TAG, "serial input on UART0 @115200: l/r/u/d dir, z=O x=X p=pause (tap holds %d frames)",
-             HOLD_FRAMES);
+    ESP_LOGI(TAG, "serial input on UART0 (inherits the console baud): l/r/u/d dir, z=O x=X p=pause "
+             "(tap holds %d frames)", HOLD_FRAMES);
     return ESP_OK;
 }
 

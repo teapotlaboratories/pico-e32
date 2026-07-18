@@ -1,5 +1,6 @@
 # Compile-time-selectable input source for the fake-08 Host (ESP32Host::scanInput). Exactly ONE backend
-# is compiled, chosen by INPUT_BACKEND (default: stub, so a plain build is unchanged). Switch it with:
+# is compiled, chosen by INPUT_BACKEND (default: stub, so a FRESH build is unchanged — note the value
+# persists in CMakeCache once set via -D, so re-pass it or `make fullclean` to switch). Switch it with:
 #   make build APP=pico-e32-fake08 ... DEFS='-D INPUT_BACKEND=serial'   # stub | serial | touch | i2c
 # See docs/runtime/pico-e32-fake08-input.md. Auto-discovered via the app's EXTRA_COMPONENT_DIRS.
 if(NOT DEFINED INPUT_BACKEND OR "${INPUT_BACKEND}" STREQUAL "")

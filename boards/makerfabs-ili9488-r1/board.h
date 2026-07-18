@@ -51,7 +51,8 @@ void board_lcd_selftest(void);
 /* Fill *out with THIS board's microSD wiring (SPI host, pins, owns_bus) and return true; false if
  * the board has no usable card slot this boot. Writes ONLY the hardware fields — mount policy
  * (mount point, FAT options) stays the caller's. Symmetric with board_lcd_init: the board owns its
- * SD wiring the same way it owns its display. Only declared when BOARD_HAS_SD. */
+ * SD wiring the same way it owns its display. The app guards its *call* with BOARD_HAS_SD (which this
+ * board defines); a board without an SD slot omits both the macro and this declaration. */
 bool board_sd_config(sdcard_spi_config_t *out);
 
 #ifdef __cplusplus

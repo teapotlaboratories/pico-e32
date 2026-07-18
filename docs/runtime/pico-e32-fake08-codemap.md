@@ -36,7 +36,7 @@ framebuffer device that outputs `uint16` RGB565 with stubbed audio — the close
 | `setTargetFps` / `waitForTargetFps` | `host.h:107,117` | `BittBoyHost.cpp:252,364` | `esp_timer` + `vTaskDelay` instead of `SDL_GetTicks`/`SDL_Delay` — divergence D2. |
 | `shouldFillAudioBuff`/`getAudioBufferPointer`/`getAudioBufferSize`/`playFilledAudioBuffer` | `host.h:121-124` | `BittBoyHost.cpp:573-585` | **Stub** — identical to bittboy's already-stubbed audio. Divergence D3. |
 | `shouldRunMainLoop`/`shouldQuit`/`changeStretch`/`forceStretch` | `host.h:109,112,114,115` | `BittBoyHost.cpp:588,360,256,283` | Loop always runs; no quit; stretch is a no-op (we own the 128→panel scale). |
-| `listcarts`/`getCartDirectory` (impl); `listdirs`/`logFilePrefix`/`customBiosLua` (stub) | `host.h:130,144;146,133,135` | `platform/gcw0/ODHost.cpp:642` (listcarts) | `listcarts` scans `_cartDirectory` (the SD mount) for `.p8`/`.p8.png`, lower-casing names (FATFS 8.3 is uppercase); `getCartDirectory` returns `_cartDirectory`. The other three still return empty/`""`. |
+| `listcarts`/`getCartDirectory` (impl); `listdirs`/`logFilePrefix`/`customBiosLua` (stub) | `host.h:130,144;146,133,135` | `platform/gcw0/source/ODHost.cpp:642` (listcarts) | `listcarts` scans `_cartDirectory` (the SD mount) for `.p8`/`.p8.png`, lower-casing names (defensive: matches any case, incl. an 8.3 fallback); `getCartDirectory` returns `_cartDirectory`. The other three still return empty/`""`. |
 | `oneTimeCleanup`/`deltaTMs`/`overrideLogFilePrefix`/`setPlatformParams` | `host.h:126,128,132,154` | (bittboy `:237`; others desktop-only) | Cleanup frees the fb; the rest are inert no-ops. |
 
 ## `main.cpp` (`app_main`) ↔ `source/main.cpp`
