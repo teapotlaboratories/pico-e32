@@ -10,10 +10,15 @@
 
 #include <stdint.h>
 #include "esp_err.h"
+#include "sdcard_spi.h"   /* sdcard_spi_config_t — board_sd_config() fills this board's SD wiring */
 
 /* Panel geometry, native portrait. */
 #define BOARD_LCD_H_RES 320
 #define BOARD_LCD_V_RES 480
+
+/* This board has an onboard microSD slot (a private SPI2 bus). Boards without a slot simply never
+ * define BOARD_HAS_SD, and the app's SD path compiles out. */
+#define BOARD_HAS_SD 1
 
 /* Pixel-clock (WR strobe) of the parallel bus, in Hz. Exposed because a benchmark needs it to
  * derive the bus ceiling honestly rather than pasting a constant (a stale one is how a 20 MHz
@@ -42,6 +47,12 @@ uint16_t board_lcd_rgb565(uint8_t r, uint8_t g, uint8_t b);
 /* Cycle the panel red/green/blue via the library's own API, bypassing the framebuffer/blit path.
  * Diagnostic only; blocks ~9s. */
 void board_lcd_selftest(void);
+
+/* Fill *out with THIS board's microSD wiring (SPI host, pins, owns_bus) and return true; false if
+ * the board has no usable card slot this boot. Writes ONLY the hardware fields — mount policy
+ * (mount point, FAT options) stays the caller's. Symmetric with board_lcd_init: the board owns its
+ * SD wiring the same way it owns its display. Only declared when BOARD_HAS_SD. */
+bool board_sd_config(sdcard_spi_config_t *out);
 
 #ifdef __cplusplus
 }

@@ -23,12 +23,21 @@
 #include "Audio.h"
 #include "logger.h"
 
-#include "sd_mount.h"
+#include "sdcard_spi.h"   /* the board-agnostic SD component (components/sdcard_spi) */
 
 #include <vector>
 #include <string>
 
 static const char *TAG = "fake08";
+
+/* App-owned cart-storage policy. SD_MOUNT_POINT is both where the SD mounts AND where ESP32Host
+ * scans for carts (host->setCartDirectory). The board owns the SD *wiring* (board_sd_config); the
+ * app owns the *policy* (mount point, no-format, flash fallback). A board with no SD slot never
+ * defines BOARD_HAS_SD, so the whole mount path below compiles out. */
+#define SD_MOUNT_POINT "/sdcard"
+#ifndef BOARD_HAS_SD
+#define BOARD_HAS_SD 0
+#endif
 
 /* Cart source. Default build = the tiny test cart below (ours). An opt-in CELESTE build
  * (`make build … DEFS='-D CELESTE=1'`) instead embeds the real Celeste .p8 from the gitignored
@@ -42,23 +51,32 @@ static const char *TAG = "fake08";
 #define CART_BYTES ((const unsigned char *)TEST_CART)
 #define CART_LEN   (sizeof(TEST_CART) - 1)
 #define CART_NAME  "test cart"
-/* A minimal PICO-8 cart (ours): 16 colour bars + text + a frame counter. The Cart ctor detects the
- * "pico" magic and parses this as .p8 text (loadCartFromString). Exercises cls / rectfill / print and
- * both _update (the counter) and _draw. No __gfx__ needed — print() uses fake-08's built-in font. */
+/* A minimal PICO-8 cart (ours): a square you move with the d-pad that recolours on O/X, plus a corner
+ * marker and a frame counter. The Cart ctor detects the "pico" magic and parses this as .p8 text
+ * (loadCartFromString). Exercises cls / rectfill / print / btn and both _update and _draw — and makes
+ * the input backend visible on the panel. No __gfx__ needed — print() uses fake-08's built-in font. */
 static const char TEST_CART[] =
     "pico-8 cartridge version 41\n"
     "__lua__\n"
-    "t=0\n"
+    "x=60 y=60 t=0\n"
     "function _update()\n"
     " t+=1\n"
+    " if btn(0) then x-=2 end\n"
+    " if btn(1) then x+=2 end\n"
+    " if btn(2) then y-=2 end\n"
+    " if btn(3) then y+=2 end\n"
+    " x=mid(0,x,120)\n"
+    " y=mid(0,y,120)\n"
     "end\n"
     "function _draw()\n"
     " cls(1)\n"
-    " for i=0,15 do\n"
-    "  rectfill(i*8,0,i*8+7,127,i)\n"
-    " end\n"
-    " print(\"fake-08 on esp32-s3\",4,58,7)\n"
-    " print(\"frame \"..t,4,68,7)\n"
+    " rectfill(0,0,7,7,8)\n"
+    " local c=12\n"
+    " if btn(4) then c=11 end\n"
+    " if btn(5) then c=14 end\n"
+    " rectfill(x,y,x+7,y+7,c)\n"
+    " print(\"input test\",4,2,7)\n"
+    " print(\"frame \"..t,4,120,7)\n"
     "end\n";
 #endif
 
@@ -70,8 +88,17 @@ extern "C" void app_main(void) {
         return;
     }
 
-    /* Mount the SD (SPI2) for carts. Non-fatal: with no card / no line pull-ups we fall back to flash. */
-    esp_err_t sd_ret = sd_mount();
+    /* Mount the SD for carts. The board owns the wiring (board_sd_config); the app owns the policy
+     * (mount point, no-format). Non-fatal: no card / no SD slot / mount failure -> the flash cart. */
+    esp_err_t sd_ret = ESP_ERR_NOT_FOUND;      /* "no SD this boot" until a mount proves otherwise */
+#if BOARD_HAS_SD
+    sdcard_spi_config_t sdcfg;
+    sdcard_spi_config_default(&sdcfg);          /* policy defaults: no-format, 20 MHz, max_files */
+    sdcfg.mount_point = SD_MOUNT_POINT;          /* app policy; board_sd_config leaves it untouched */
+    if (board_sd_config(&sdcfg)) {               /* board fills host / pins / owns_bus */
+        sd_ret = sdcard_spi_mount(&sdcfg);
+    }
+#endif
 
     /* fake-08 boot sequence (mirrors source/main.cpp:39-51). */
     Host    *host   = new Host(0, 0);
@@ -91,11 +118,16 @@ extern "C" void app_main(void) {
     vm->SetCartList(carts);
 
     bool loaded = false;
+#ifndef FORCE_FLASH_CART
     if (sd_ret == ESP_OK && !carts.empty()) {
         ESP_LOGI(TAG, "loading SD cart: %s", carts[0].c_str());
         loaded = vm->LoadCart(carts[0], false); /* std::string overload -> reads the file over VFS */
         if (!loaded) ESP_LOGW(TAG, "SD cart failed to load; falling back to the flash cart");
     }
+#else
+    ESP_LOGW(TAG, "FORCE_FLASH_CART: ignoring any SD cart, running the flash cart"); /* dev/demo only */
+    (void)sd_ret;
+#endif
     if (!loaded) {
         ESP_LOGI(TAG, "loading %s (%u bytes)", CART_NAME, (unsigned)CART_LEN);
         loaded = vm->LoadCart(CART_BYTES, CART_LEN, false);

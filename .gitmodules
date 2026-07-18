@@ -15,6 +15,6 @@
 	url = https://github.com/radiosound-com/makerfabs-parallel-tft-lvgl-lgfx.git
 	shallow = true
 [submodule "components/fake08"]
-	path = components/fake08
+	path = components/fake08/fake08
 	url = https://github.com/teapotlaboratories/fake-08.git
 	branch = pico-e32

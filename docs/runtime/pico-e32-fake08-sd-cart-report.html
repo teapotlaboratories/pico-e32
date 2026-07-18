@@ -159,9 +159,10 @@
       <rect class="node-t" x="360" y="500" width="180" height="42" rx="10"/>
       <text class="tb" x="450" y="526" text-anchor="middle">vm.GameLoop()</text>
     </svg>
-    <p class="cap">Every pin number is quoted from <code>board.cpp</code> (LCD) and <code>sd_mount.cpp</code>
-      (SD); the two buses share <b>zero</b> GPIOs. The disjoint hardware rhymes with the disjoint software
-      seam &mdash; the new code is as separable from the shared engine as the SD pins are from the LCD&rsquo;s.</p>
+    <p class="cap">Every pin number is quoted from <code>board.cpp</code> &mdash; the board owns both its LCD
+      and (now) its SD wiring; the two buses share <b>zero</b> GPIOs. The disjoint hardware rhymes with the
+      disjoint software seam &mdash; the mount is a reusable component as separable from the shared engine as
+      the SD pins are from the LCD&rsquo;s.</p>
   </div>
 
   <div class="stats">
@@ -193,15 +194,18 @@
   <div class="tblwrap"><table>
     <thead><tr><th>Piece</th><th>Where</th><th>Kind</th></tr></thead>
     <tbody>
-      <tr><td class="path">sd_mount.{h,cpp}</td><td>app (new) &mdash; SPI2 mount, graceful</td><td><span class="tag t-new">new</span></td></tr>
-      <tr><td class="path">main.cpp</td><td>app &mdash; setCartDirectory + the cart ladder</td><td><span class="tag t-new">new</span></td></tr>
+      <tr><td class="path">components/sdcard_spi/</td><td>reusable component &mdash; SPI2 mount, graceful, <code>owns_bus</code></td><td><span class="tag t-new">new</span></td></tr>
+      <tr><td class="path">board_sd_config()</td><td>board.cpp &mdash; this board&rsquo;s SD wiring (host, pins, owns_bus)</td><td><span class="tag t-new">new</span></td></tr>
+      <tr><td class="path">main.cpp</td><td>app &mdash; config + mount, setCartDirectory + the cart ladder</td><td><span class="tag t-new">new</span></td></tr>
       <tr><td class="path">listcarts() / getCartDirectory()</td><td>fork ESP32Host.cpp (@77091e1, +28/&minus;3)</td><td><span class="tag t-new">new</span></td></tr>
       <tr><td class="path">setCartDirectory &middot; get_file_contents &middot; LoadCart(string)</td><td>shared source/ &mdash; already existed</td><td><span class="tag t-kept">unchanged</span></td></tr>
     </tbody>
   </table></div>
-  <p>The mount is app-side, the scan methods are in the fork&rsquo;s platform binding, and the file read +
-  cart-load path were already in shared <code>source/</code> &mdash; so <b><code>source/</code> stays
-  byte-identical</b> to upstream fake-08.</p>
+  <p>The mount is a <b>board-agnostic component</b> (<code>components/sdcard_spi</code>) that never names a
+  board; the board supplies its wiring through <code>board_sd_config()</code>, and an <code>owns_bus</code>
+  flag lets a future board share the SPI bus with its display. The scan methods are in the fork&rsquo;s platform
+  binding, and the file read + cart-load path were already in shared <code>source/</code> &mdash; so
+  <b><code>source/</code> stays byte-identical</b> to upstream fake-08.</p>
 
   <h2><span class="num">04</span> Two gotchas between &ldquo;mounts&rdquo; and &ldquo;loads&rdquo;</h2>
   <div class="callout warn"><b>Case.</b> FATFS <code>readdir</code> returns 8.3 short names <b>UPPERCASE</b>
@@ -225,7 +229,7 @@
   <h2><span class="num">06</span> Follow-ups</h2>
   <ul>
     <li><b>Cart selection</b> (a chooser, not just the first cart) needs input &mdash; parts-blocked. Today: first cart by readdir order, deterministic, logged.</li>
-    <li>Line <b>pull-ups</b> are the #1 SD-SPI failure mode; a flaky socket may need them, or dropping <code>host.max_freq_khz</code> from 20&nbsp;MHz (a commented one-liner in <code>sd_mount.cpp</code>).</li>
+    <li>Line <b>pull-ups</b> are the #1 SD-SPI failure mode; a flaky socket may need them, or dropping <code>max_freq_khz</code> from 20&nbsp;MHz (a config field the board sets in <code>board_sd_config</code>).</li>
   </ul>
 
   <div class="foot">
