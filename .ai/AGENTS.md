@@ -368,6 +368,28 @@ sources** so the claim can be checked — don't report a bare conclusion.
   each other.
 - **Capture the flash/monitor command you actually ran** as evidence in the worklog (the
   build target, the port, the flags), so a result can be reproduced.
+- **Use the vendored ESP-IDF, and never install or write tooling under `~/`.** The SDK lives at
+  `vendor/esp-idf` and its tools (xtensa toolchain + Python venv) at `vendor/.espressif`. IDF's
+  own `export.sh`/`install.sh` default `IDF_TOOLS_PATH` to `~/.espressif`, so running them
+  *without* the override silently re-downloads ~1.5 G into the home directory. Always point IDF
+  at the vendored tools before building:
+  ```sh
+  export IDF_PATH="$PWD/vendor/esp-idf"
+  export IDF_TOOLS_PATH="$PWD/vendor/.espressif"
+  source "$IDF_PATH/export.sh"
+  ```
+  **More generally: never use `~/` (the home directory) to store temp files, caches, or tool
+  setup unless the owner explicitly approves.** Scratch/throwaway goes in `/tmp`; project
+  tooling stays inside the repo (`vendor/`). If a tool insists on a home-dir path, ask first.
+- **Build/flash through the top-level `make` wrapper, not raw `idf.py`.** `make <target> APP=…
+  BOARD=… PORT=…` layers `boards/<BOARD>/sdkconfig.defaults` (which **owns `CONFIG_IDF_TARGET`,
+  PSRAM, and flash size**) under the app config, pins the board's flash `BAUD` from its
+  `board.mk`, and builds out-of-source into `build/<APP>/<BOARD>/`. Running `idf.py` directly
+  regenerates an sdkconfig **without** the board overlay — e.g. for `m5stack-timer-cam` that
+  silently drops `CONFIG_SPIRAM=y`, so `esp_camera_init` fails with `0xffffffff` (no PSRAM for
+  the frame buffer) even though the sensor is detected, and defaults the bridge to 460800 baud
+  which its FTDI can't sustain. Secrets still go on the command line (`WIFI_SSID=… WIFI_PASS=…`),
+  never in the tree.
 - **Captured frames go under `/tmp`, never in the repo** — unless the owner explicitly asks for
   one to be kept. Camera captures are throwaway diagnostics produced by the dozen: they are
   binaries, they churn, and they are worthless a day later. `tools/capture_frame.sh` writes to

@@ -68,3 +68,8 @@ Most important rules:
 - **Identify a board by a stable label, not a volatile `/dev/tty*` port**, and keep the
   wiring/pin map in the docs. See
   [AGENTS.md → Hardware & flashing notes](AGENTS.md#hardware--flashing-notes).
+- **Use the vendored ESP-IDF (`vendor/esp-idf` + `vendor/.espressif`); never install or
+  write tooling under `~/`.** Set `IDF_TOOLS_PATH="$PWD/vendor/.espressif"` before sourcing
+  `export.sh` (it defaults to `~/.espressif` otherwise). No `~/` for temp files or setup
+  without approval — scratch to `/tmp`, tooling stays in the repo. See
+  [AGENTS.md → Hardware & flashing notes](AGENTS.md#hardware--flashing-notes).
