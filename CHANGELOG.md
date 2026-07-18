@@ -5,7 +5,7 @@ Notable changes to pico-e32. Newest first.
 ## Unreleased
 
 - Repo restructured to the teapotlaboratories monorepo layout (rimba-style): `boards/`,
-  root `components/`, `docs/{design-specification,reference,worklog}`, `firmware/<app>/`,
+  root `components/`, `docs/{reference,worklog}`, `firmware/<app>/`,
   and a top-level `Makefile` (`make build APP=<app> BOARD=<board>`).
 - **ESP-IDF v5.4.2 vendored** as a shallow git submodule at `vendor/esp-idf` (pinned to the
   v5.4.2 commit); toolchain installs to `vendor/.espressif` (`make install`) so the whole SDK
@@ -19,6 +19,6 @@ Notable changes to pico-e32. Newest first.
   - `pico-e32-display-test` — ILI9488 i80 scaled blit + FPS (Gate #1). Authored, unverified.
   - Vendored z8lua at `components/z8lua` (`jtothebell/z8lua`, compiled as C++).
 - **Docs:** decision-locked development plan (`docs/pico-e32-development-plan.md`) + HTML
-  render; runtime-feasibility and silicon-decision studies under `design-specification/`;
-  Makerfabs board pinouts under `reference/`.
+  render; runtime-feasibility and silicon-decision studies + Makerfabs board pinouts under
+  `reference/`.
 - Initial `.ai/` agent guidance adapted for this embedded project.

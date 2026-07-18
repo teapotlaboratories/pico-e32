@@ -8,7 +8,7 @@ LX7 @ 240 MHz), from our measured **~1.6 M VM inst/s** toward PICO-8's **~4 M in
 verified — 22 confirmed, 3 killed), 2026-07-14. Findings below are tagged with confidence; the
 speedups are *evidence-based estimates*, **not yet measured on our codebase** — see caveats.
 
-Related: [`../design-specification/pico-e32-runtime-feasibility.md`](../design-specification/pico-e32-runtime-feasibility.md),
+Related: [`pico-e32-runtime-feasibility.md`](pico-e32-runtime-feasibility.md),
 [`../worklog/2026-07-14-phase0-gate2-luabench.md`](../worklog/2026-07-14-phase0-gate2-luabench.md).
 
 ---

@@ -31,7 +31,7 @@
 > - **Still open:** internal-SRAM heap (~369 KB) can't hold an alloc-heavy workload (table-churn OOM'd) —
 >   the Lua heap must live in PSRAM, reinforcing the **N16R8 / 8 MB** production-module call.
 > - **Further speedup (if a cart needs it):** ranked levers in
->   [`../reference/z8lua-speedup-research.md`](../reference/z8lua-speedup-research.md) — but **profile a
+>   [`z8lua-speedup-research.md`](z8lua-speedup-research.md) — but **profile a
 >   real cart first**; classic dispatch tuning / IRAM / Lua→C AOT are low-yield here, and the candidates
 >   (globals→locals, fix32-divide LUT, type-check elimination) should be ranked by *measured* hot-path share.
 
