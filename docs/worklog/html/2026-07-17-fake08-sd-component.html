@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SD driver &rarr; a board-agnostic component (components/sdcard_spi) — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;
+        --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230}}
+  :root[data-theme="light"]{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;--ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6}
+  :root[data-theme="dark"]{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;--border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:860px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)} .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;font-family:var(--mono)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.35rem 0}
+  .fig{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem;margin:1.3rem 0;overflow-x:auto}
+  .fig svg{display:block;width:100%;height:auto;min-width:640px}
+  .cap{color:var(--muted);font-size:.85rem;margin:.6rem .2rem 0}
+  .g{background:color-mix(in srgb,var(--warn) 12%,var(--surface));border:1px solid color-mix(in srgb,var(--warn) 40%,transparent);border-radius:10px;padding:.8rem 1rem;margin:.9rem 0}
+  .g b{color:var(--fg)}
+  .note{background:color-mix(in srgb,var(--accent) 9%,var(--surface));border:1px solid color-mix(in srgb,var(--accent) 34%,transparent);border-radius:10px;padding:.8rem 1rem;margin:.9rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.9rem}
+  th,td{border:1px solid var(--border);padding:.45rem .6rem;text-align:left;vertical-align:top}
+  th{background:var(--codebg);font-weight:700}
+  td code,th code{background:transparent;padding:0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">&larr; worklog index</a></p>
+  <h1>SD driver &rarr; a board-agnostic component</h1>
+  <p class="date">2026-07-17 &middot; extracting <code>sdcard_spi</code>, so the board owns its SD wiring</p>
+
+  <div class="tldr">
+    The app's hardcoded SD mount becomes a <b>reusable component</b>, <code>components/sdcard_spi</code>, that
+    knows the <em>mechanism</em> but no board. The board now <b>owns its SD wiring</b> via
+    <code>board_sd_config()</code> &mdash; symmetric with how it already owns the display &mdash; and the app
+    keeps only <b>policy</b> (mount point, no-format, max&nbsp;files). One <code>owns_bus</code> flag
+    generalizes the two real cases: a <b>private</b> SPI2 bus (this board) vs a bus <b>shared</b> with the
+    display's 3-wire SPI (the 4" board, later). Folds into the SD cart loader (PR&nbsp;#10) so the loader
+    lands as a proper component. <b>Clean build, no new warnings;</b> Board&nbsp;1 behavior identical by
+    construction.
+  </div>
+
+  <h2>Why</h2>
+  <p>The pins were hardcoded in an app file. But there are <b>two boards with different SD wiring</b>, and the
+  difference isn't just pin numbers:</p>
+  <ul>
+    <li><b>Board 1</b> (ILI9488 3.5", this unit) &mdash; SD on a <b>private SPI2</b> bus
+      (CS=1/MOSI=2/MISO=41/CLK=42), disjoint from the i80 LCD. The mount <b>owns</b> the bus.</li>
+    <li><b>Board 2</b> (ST7701 4.0", later) &mdash; SD SPI is <b>shared</b> with the display's 3-wire SPI. The
+      display driver brings the bus up; the SD must attach a device to the <b>already-initialized</b> bus and
+      must <b>not</b> free it.</li>
+  </ul>
+  <p>An app-local, owns-the-bus-always driver can't express that second case.</p>
+
+  <h2>Design &mdash; a three-way ownership split</h2>
+  <p>Settled via a research + design workflow. Each layer owns exactly one concern, and they meet at a single
+  config struct that splits <b>policy</b> (app) from <b>hardware</b> (board):</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 470" role="img" aria-label="Three-way ownership: the app fills policy fields and the board fills hardware fields of one sdcard_spi_config_t struct; the components/sdcard_spi component consumes it in mount() and branches on the owns_bus flag into a private-bus path (initialize and free the bus) and a shared-bus path (attach a device only, never free).">
+      <defs><style>
+        text{font-family:ui-monospace,Menlo,Consolas,monospace}
+        .box{fill:var(--surface);stroke:var(--border)} .chip{fill:var(--codebg);stroke:var(--border)}
+        .ok{fill:color-mix(in srgb,var(--ok) 14%,var(--surface));stroke:var(--ok)}
+        .warnb{fill:color-mix(in srgb,var(--warn) 14%,var(--surface));stroke:var(--warn)}
+        .t{fill:var(--fg);font-size:12.5px} .tb{fill:var(--fg);font-size:13px;font-weight:700}
+        .mut{fill:var(--muted);font-size:11.5px} .acc{fill:var(--accent);font-size:12px;font-weight:700}
+        .okt{fill:var(--ok);font-size:12px;font-weight:700} .warnt{fill:var(--warn);font-size:12px;font-weight:700}
+        .arr{stroke:var(--accent);stroke-width:1.6;fill:none} .arrm{stroke:var(--muted);stroke-width:1.4;fill:none}
+        .div{stroke:var(--border);stroke-width:1} .ma{fill:var(--accent)} .mm{fill:var(--muted)}
+      </style>
+        <marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" class="ma"/></marker>
+        <marker id="m" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" class="mm"/></marker>
+      </defs>
+
+      <!-- App owner -->
+      <rect class="box" x="20" y="34" width="230" height="96" rx="10"/>
+      <text class="acc" x="36" y="56">app &mdash; owns policy</text>
+      <text class="mut" x="36" y="74">main.cpp &middot; #if BOARD_HAS_SD</text>
+      <text class="t" x="36" y="94">mount_point (/sdcard)</text>
+      <text class="t" x="36" y="112">no-format &middot; max_files</text>
+
+      <!-- Board owner -->
+      <rect class="box" x="610" y="34" width="230" height="96" rx="10"/>
+      <text class="acc" x="626" y="56">board &mdash; owns wiring</text>
+      <text class="mut" x="626" y="74">board.cpp / board.h</text>
+      <text class="t" x="626" y="94">board_sd_config():</text>
+      <text class="t" x="626" y="112">host &middot; pins &middot; owns_bus</text>
+
+      <!-- Config struct (center) -->
+      <rect class="chip" x="285" y="30" width="290" height="104" rx="10"/>
+      <text class="tb" x="430" y="52" text-anchor="middle">sdcard_spi_config_t</text>
+      <line class="div" x1="430" y1="62" x2="430" y2="126"/>
+      <text class="okt" x="300" y="80">policy</text>
+      <text class="t" x="300" y="98">mount_point</text>
+      <text class="t" x="300" y="114">no-format</text>
+      <text class="t" x="300" y="130">max_files</text>
+      <text class="warnt" x="446" y="80">hardware</text>
+      <text class="t" x="446" y="98">host / pins</text>
+      <text class="t" x="446" y="114">owns_bus</text>
+      <text class="mut" x="446" y="130">(board-owned)</text>
+
+      <!-- App -> policy half, Board -> hardware half -->
+      <path class="arr" d="M250,82 L360,82" marker-end="url(#a)"/>
+      <text class="acc" x="305" y="74" text-anchor="middle">fills</text>
+      <path class="arr" d="M610,82 L500,82" marker-end="url(#a)"/>
+      <text class="acc" x="555" y="74" text-anchor="middle">fills</text>
+
+      <!-- default() note -->
+      <text class="mut" x="430" y="158" text-anchor="middle">seeded by sdcard_spi_config_default() &mdash; defaults live once in the .c</text>
+
+      <!-- Component consumes -->
+      <path class="arrm" d="M430,168 L430,196" marker-end="url(#m)"/>
+      <rect class="box" x="235" y="200" width="390" height="66" rx="10"/>
+      <text class="tb" x="430" y="224" text-anchor="middle">components/sdcard_spi &mdash; owns mechanism</text>
+      <text class="mut" x="430" y="244" text-anchor="middle">board-agnostic &middot; never includes a board</text>
+      <text class="t" x="430" y="260" text-anchor="middle">mount(cfg) / unmount() &middot; records s_host + s_bus_owned</text>
+
+      <!-- owns_bus branch -->
+      <path class="arrm" d="M430,266 L430,296" marker-end="url(#m)"/>
+      <text class="acc" x="430" y="290" text-anchor="middle">branch on owns_bus</text>
+
+      <path class="arr" d="M410,300 L220,336" marker-end="url(#a)"/>
+      <path class="arr" d="M450,300 L640,336" marker-end="url(#a)"/>
+
+      <!-- private bus lane -->
+      <rect class="ok" x="20" y="342" width="380" height="106" rx="10"/>
+      <text class="okt" x="38" y="366">owns_bus = true &mdash; Board 1 (ILI9488 3.5")</text>
+      <text class="t" x="38" y="388">private SPI2, disjoint from the i80 LCD</text>
+      <text class="t" x="38" y="408">mount: spi_bus_initialize + attach device</text>
+      <text class="t" x="38" y="428">unmount: free the bus (iff s_bus_owned)</text>
+
+      <!-- shared bus lane -->
+      <rect class="warnb" x="460" y="342" width="380" height="106" rx="10"/>
+      <text class="warnt" x="478" y="366">owns_bus = false &mdash; Board 2 (ST7701 4.0")</text>
+      <text class="t" x="478" y="388">SD shares the display's live 3-wire SPI</text>
+      <text class="t" x="478" y="408">mount: attach device only (bus already up)</text>
+      <text class="t" x="478" y="428">unmount: must NOT free the shared bus</text>
+    </svg>
+    <p class="cap">The config struct is the seam. The app writes only the policy half; the board's
+      <code>board_sd_config()</code> writes only the hardware half; the component reads the whole thing and
+      does the mechanism &mdash; branching on <code>owns_bus</code> so one code path serves a private bus and a
+      shared one.</p>
+  </div>
+
+  <ul>
+    <li><b><code>components/sdcard_spi</code></b> &mdash; board-agnostic (<code>REQUIRES driver
+      esp_driver_spi</code>; FATFS/sdmmc/sdspi are <code>PRIV_REQUIRES</code>, private). Never includes a
+      board. The config struct splits <b>hardware</b> (board-owned: host/pins/<code>owns_bus</code>) from
+      <b>policy</b> (app-owned: mount point, no-format, max_files).</li>
+    <li><b>Board provides the wiring</b> &mdash; <code>bool board_sd_config(sdcard_spi_config_t*)</code> in
+      <code>board.cpp</code>, declared in <code>board.h</code>, filling only the hardware fields (Approach B:
+      pins stay private in <code>board.cpp</code>, beside the LCD pins). Grafted with a compile-time
+      <code>#define BOARD_HAS_SD 1</code> (Approach A) so a board <b>without</b> a slot writes zero SD code
+      &mdash; its <code>board.h</code> omits the macro and the app's <code>#if BOARD_HAS_SD</code> block
+      compiles out.</li>
+    <li><b><code>owns_bus</code> flag</b> is the generalization for Board&nbsp;2: mount runs
+      <code>spi_bus_initialize</code> + attaches the device; unmount frees the bus &mdash; <b>only when
+      <code>owns_bus</code></b>. Shared-bus mode skips both and attaches the SD as a second device on the live
+      host.</li>
+  </ul>
+
+  <h2>Two latent bugs fixed in the move</h2>
+  <div class="g"><b>Hardcoded host literal.</b> The original <code>sd_unmount()</code> always ran
+    <code>spi_bus_free(SPI2_HOST)</code> &mdash; the <b>wrong host</b> on any other board. The component now
+    records the host actually used (<code>s_host</code>) and frees <em>that</em>.</div>
+  <div class="g"><b>Unconditional free.</b> That same call was <b>unconditional</b> &mdash; it would tear a
+    shared bus out from under the display, and would run even if the mount failed before the bus came up. The
+    component tracks a runtime <code>s_bus_owned</code> and frees the bus <b>iff it initialized it</b>.</div>
+
+  <h2>Deviation from the plan</h2>
+  <div class="note">Used a <code>sdcard_spi_config_default()</code> <b>function</b> (defaults defined once in
+    the <code>.c</code>) instead of the proposed <code>SDCARD_SPI_CONFIG_DEFAULT()</code> compound-literal
+    macro &mdash; avoids the GNU compound-literal / designated-initializer edge in <code>main.cpp</code>
+    (C++), and keeps the defaults in one place.</div>
+
+  <h2>Files</h2>
+  <table>
+    <thead><tr><th>File</th><th>Change</th></tr></thead>
+    <tbody>
+      <tr><td><code>components/sdcard_spi/{sdcard_spi.h,.c,CMakeLists.txt}</code></td><td><b>new</b> &mdash; the component</td></tr>
+      <tr><td><code>boards/makerfabs-ili9488-r1/board.h</code></td><td><code>#include "sdcard_spi.h"</code>, <code>#define BOARD_HAS_SD 1</code>, <code>board_sd_config()</code> decl</td></tr>
+      <tr><td><code>boards/makerfabs-ili9488-r1/board.cpp</code></td><td>SD pins beside the LCD pins + <code>board_sd_config()</code> (SPI2, <code>owns_bus=true</code>)</td></tr>
+      <tr><td><code>firmware/pico-e32-fake08/main/main.cpp</code></td><td><code>config_default &rarr; board_sd_config &rarr; mount</code>, <code>#if BOARD_HAS_SD</code>; <code>SD_MOUNT_POINT</code> is app policy</td></tr>
+      <tr><td><code>firmware/pico-e32-fake08/main/CMakeLists.txt</code></td><td>drop <code>sd_mount.cpp</code> + 4 SD IDF comps; add <code>sdcard_spi</code></td></tr>
+      <tr><td><code>firmware/pico-e32-fake08/main/sd_mount.{h,cpp}</code></td><td><b>deleted</b></td></tr>
+      <tr><td><code>Makefile</code></td><td>fix a stale comment (<code>board_pins.h</code> &rarr; <code>board.{h,cpp}</code>)</td></tr>
+      <tr><td><code>docs/runtime/pico-e32-fake08-sd-cart-report.html</code></td><td>file-location references &rarr; the component</td></tr>
+    </tbody>
+  </table>
+  <p>The fork's <code>ESP32Host</code> (<code>listcarts</code>/<code>setCartDirectory</code>) is
+  <b>untouched</b> &mdash; it only ever consumed the <code>"/sdcard"</code> string, which is unchanged.
+  <code>source/</code> stays byte-identical.</p>
+
+  <h2>Verified</h2>
+  <ul>
+    <li><b>Clean build</b> (<code>make build APP=pico-e32-fake08 BOARD=makerfabs-ili9488-r1</code>, default
+      cart, no DEFS): binary 0xe3da0&nbsp;B, 11% partition free; the component compiles + links with <b>no new
+      warnings</b> (the only warnings are pre-existing LEDC field-initializer ones in
+      <code>board.cpp:backlight_on</code>).</li>
+    <li><b>Board 1 runtime behavior is identical by construction</b> &mdash; same host, pins,
+      <code>owns_bus=true</code>, mount policy, and mount point as the hardware-verified loader. Not re-flashed
+      (a behavior-preserving refactor); a bench re-verification (SD mount &rarr; cart load on the panel) is a
+      cheap confirmation if wanted.</li>
+  </ul>
+
+  <h2>Follow-up</h2>
+  <ul>
+    <li><b>Board 2</b> shared-bus path is written but untested (no board config exists yet). When that board
+      lands, <code>board_sd_config</code> sets <code>owns_bus=false</code>, host = the display's SPI host,
+      CS=10 &mdash; and the ordering (<code>board_lcd_init</code> before the mount) is already satisfied in
+      <code>main.cpp</code>. Validate that LovyanGFX's ST7701 path brings the host up via a plain
+      <code>spi_bus_initialize</code> the SD can attach to.</li>
+  </ul>
+
+  <p style="color:var(--muted);font-size:.9rem;margin-top:1.6rem">See also:
+    <a href="2026-07-17-fake08-sd-cart-loader.html">the SD cart loader worklog</a> &middot;
+    <a href="2026-07-17-fake08-port-vendor.html">the port worklog</a></p>
+</div>
+</body>
+</html>

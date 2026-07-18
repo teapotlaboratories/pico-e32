@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Input seam — a compile-time-switchable input driver with a serial HITL backend — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;
+        --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230}}
+  :root[data-theme="light"]{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;--ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6}
+  :root[data-theme="dark"]{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;--border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:860px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)} .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;font-family:var(--mono)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.35rem 0}
+  .fig{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem;margin:1.3rem 0;overflow-x:auto}
+  .fig svg{display:block;width:100%;height:auto;min-width:560px}
+  .cap{color:var(--muted);font-size:.85rem;margin:.6rem .2rem 0}
+  .g{background:color-mix(in srgb,var(--warn) 12%,var(--surface));border:1px solid color-mix(in srgb,var(--warn) 40%,transparent);border-radius:10px;padding:.8rem 1rem;margin:.9rem 0}
+  .g b{color:var(--fg)}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:9px;padding:.8rem 1rem;overflow-x:auto;font-size:.85rem;font-family:var(--mono);line-height:1.5}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.9rem}
+  th,td{border:1px solid var(--border);padding:.5rem .6rem;text-align:left;vertical-align:top}
+  th{background:var(--codebg);font-weight:700}
+  .pill{display:inline-block;font-size:.7rem;font-weight:700;padding:.08em .55em;border-radius:20px;border:1px solid;white-space:nowrap}
+  .pill.done{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 55%,transparent);background:color-mix(in srgb,var(--ok) 12%,transparent)}
+  .pill.next{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 55%,transparent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+  .pill.block{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 55%,transparent);background:color-mix(in srgb,var(--warn) 12%,transparent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">&larr; worklog index</a></p>
+  <h1>Input seam</h1>
+  <p class="date">2026-07-17 &middot; fake-08 gets a compile-time-switchable input driver &mdash; with a serial backend the bench can drive</p>
+
+  <div class="tldr">
+    fake-08's <code>Host::scanInput()</code> was a <b>stub returning zero</b> (pause menu never opened). It
+    now sits behind a <b>compile-time-selectable input seam</b>: one C interface, exactly one backend
+    compiled per build (<code>stub</code>&nbsp;|&nbsp;<code>serial</code>&nbsp;|&nbsp;<code>touch</code>&nbsp;|&nbsp;<code>i2c</code>),
+    chosen by <code>INPUT_BACKEND</code>. Serial lands first because it is the <b>only backend an automated
+    bench can drive</b> &mdash; a rig can't press a button, but it can write bytes to the console UART.
+    <b>Verified on hardware (2026-07-17):</b> keys driven over <code>/dev/ttyUSB1</code> registered on-device
+    while the console kept logging, and a bench-camera frame confirmed the square moved centre&nbsp;&rarr;&nbsp;bottom-right.
+  </div>
+
+  <h2>The seam &mdash; and why serial first</h2>
+  <p><code>scanInput()</code> is the one place every input source flows through. Touch and buttons can't be
+  actuated by an automated bench (the rig only <em>observes</em> the panel), so an input path the agent can
+  <b>drive over the wire</b> is the only way to exercise the whole <code>_update</code>/<code>btn</code>/<code>btnp</code>
+  chain end-to-end. Build the seam plus the <b>serial</b> backend first (fully verifiable), and touch / I&sup2;C
+  drop in behind the same interface later.</p>
+
+  <p>The interface (<code>components/input/input.h</code>) is deliberately tiny &mdash; a backend only ever
+  reports <b>held</b>; the pressed-this-frame edge is computed once, above the seam:</p>
+  <pre>enum { INPUT_LEFT=1&lt;&lt;0, INPUT_RIGHT=1&lt;&lt;1, INPUT_UP=1&lt;&lt;2, INPUT_DOWN=1&lt;&lt;3,
+       INPUT_O=1&lt;&lt;4, INPUT_X=1&lt;&lt;5, INPUT_PAUSE=1&lt;&lt;6 };   /* == fake-08 P8_KEY_* order */
+esp_err_t   input_init(void);          /* once, at first scanInput */
+uint8_t     input_poll(void);          /* the currently-HELD mask, once per frame */
+const char *input_backend_name(void);  /* for the boot log */</pre>
+  <p><code>ESP32Host::scanInput()</code> calls <code>input_poll()</code> for the held mask and derives the
+  <code>KDown</code> edge itself (<code>held &amp; ~prevHeld</code>) &mdash; shared across every backend. The
+  <code>fake08</code> wrapper <code>REQUIRES input</code>.</p>
+
+  <div class="fig">
+    <svg viewBox="0 0 860 360" role="img" aria-label="Top: INPUT_BACKEND compiles exactly one of stub, serial, touch, or i2c into input_poll, feeding ESP32Host::scanInput which derives the KDown edge and calls fake-08 btn. Bottom: the hardware-in-the-loop serial chain pyserial to UART0 to input_serial to scanInput to btn to panel to camera, with a feedback arrow closing the loop back to pyserial.">
+      <defs><style>
+        text{font-family:ui-monospace,Menlo,Consolas,monospace}
+        .box{fill:var(--surface);stroke:var(--border)} .chip{fill:var(--codebg);stroke:var(--border)}
+        .ok{fill:color-mix(in srgb,var(--ok) 14%,var(--surface));stroke:var(--ok)}
+        .sel{fill:color-mix(in srgb,var(--accent) 16%,var(--surface));stroke:var(--accent)}
+        .selnode{fill:var(--accent);stroke:var(--accent)}
+        .t{fill:var(--fg);font-size:12.5px} .tb{fill:var(--fg);font-size:13px;font-weight:700}
+        .mut{fill:var(--muted);font-size:11.5px} .acc{fill:var(--accent);font-size:12px;font-weight:700}
+        .arr{stroke:var(--accent);stroke-width:1.7;fill:none} .arrm{stroke:var(--muted);stroke-width:1.4;fill:none}
+        .divider{stroke:var(--border);stroke-width:1;stroke-dasharray:4 4}
+        .mk-a{fill:var(--accent)} .mk-m{fill:var(--muted)}
+      </style>
+        <marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path class="mk-a" d="M0,0 L7,3 L0,6 Z"/></marker>
+        <marker id="m" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path class="mk-m" d="M0,0 L7,3 L0,6 Z"/></marker>
+      </defs>
+
+      <!-- ===== top tier: the compile-time switch ===== -->
+      <text class="acc" x="30" y="24">INPUT_BACKEND &mdash; compiles exactly one</text>
+
+      <!-- backend option chips -->
+      <rect class="ok"   x="30" y="34" width="164" height="24" rx="7"/>
+      <text class="t"    x="42" y="50">stub &middot; default</text>
+      <rect class="sel"  x="30" y="64" width="164" height="24" rx="7"/>
+      <text class="tb"   x="42" y="80">serial &middot; HITL</text>
+      <rect class="chip" x="30" y="94" width="164" height="24" rx="7"/>
+      <text class="mut"  x="42" y="110">touch &middot; IN-2 (FT6236)</text>
+      <rect class="chip" x="30" y="124" width="164" height="24" rx="7"/>
+      <text class="mut"  x="42" y="140">i2c &middot; IN-3 (expander)</text>
+
+      <!-- converge to the switch node -->
+      <path class="arrm" d="M194,46 L246,90" marker-end="url(#m)"/>
+      <path class="arr"  d="M194,76 L246,90" marker-end="url(#a)"/>
+      <path class="arrm" d="M194,106 L246,92" marker-end="url(#m)"/>
+      <path class="arrm" d="M194,136 L246,94" marker-end="url(#m)"/>
+      <circle class="selnode" cx="252" cy="91" r="6"/>
+
+      <!-- input_poll -->
+      <path class="arr" d="M260,91 L296,91" marker-end="url(#a)"/>
+      <rect class="box" x="300" y="67" width="150" height="48" rx="9"/>
+      <text class="tb"  x="375" y="88" text-anchor="middle">input_poll()</text>
+      <text class="mut" x="375" y="105" text-anchor="middle">&rarr; held mask (u8)</text>
+
+      <!-- scanInput -->
+      <path class="arr" d="M450,91 L486,91" marker-end="url(#a)"/>
+      <rect class="box" x="490" y="59" width="212" height="66" rx="9"/>
+      <text class="tb"  x="596" y="80" text-anchor="middle">ESP32Host::scanInput()</text>
+      <text class="mut" x="596" y="98" text-anchor="middle">KDown = held &amp; ~prevHeld</text>
+      <text class="mut" x="596" y="114" text-anchor="middle">KHeld = held</text>
+
+      <!-- btn -->
+      <path class="arr" d="M702,91 L736,91" marker-end="url(#a)"/>
+      <rect class="chip" x="740" y="67" width="96" height="48" rx="9"/>
+      <text class="tb"  x="788" y="88" text-anchor="middle">fake-08</text>
+      <text class="mut" x="788" y="105" text-anchor="middle">btn() btnp()</text>
+
+      <!-- ===== divider ===== -->
+      <line class="divider" x1="20" y1="166" x2="840" y2="166"/>
+
+      <!-- ===== bottom tier: the HITL loop ===== -->
+      <text class="acc" x="30" y="192">HITL loop &mdash; serial backend, camera-verified end-to-end</text>
+
+      <rect class="box" x="24" y="212" width="118" height="54" rx="9"/>
+      <text class="tb"  x="83" y="235" text-anchor="middle">pyserial</text>
+      <text class="mut" x="83" y="252" text-anchor="middle">/dev/ttyUSB1</text>
+
+      <rect class="chip" x="166" y="212" width="118" height="54" rx="9"/>
+      <text class="tb"  x="225" y="235" text-anchor="middle">UART0 RX</text>
+      <text class="mut" x="225" y="252" text-anchor="middle">CP2104 console</text>
+
+      <rect class="sel" x="308" y="212" width="132" height="54" rx="9"/>
+      <text class="tb"  x="374" y="235" text-anchor="middle">input_serial</text>
+      <text class="mut" x="374" y="252" text-anchor="middle">l r u d z/o x p</text>
+
+      <rect class="box" x="464" y="212" width="140" height="54" rx="9"/>
+      <text class="tb"  x="534" y="235" text-anchor="middle">scanInput</text>
+      <text class="mut" x="534" y="252" text-anchor="middle">&rarr; btn()</text>
+
+      <rect class="chip" x="628" y="212" width="100" height="54" rx="9"/>
+      <text class="tb"  x="678" y="235" text-anchor="middle">panel</text>
+      <text class="mut" x="678" y="252" text-anchor="middle">ILI9488</text>
+
+      <rect class="chip" x="752" y="212" width="96" height="54" rx="9"/>
+      <text class="tb"  x="800" y="235" text-anchor="middle">camera</text>
+      <text class="mut" x="800" y="252" text-anchor="middle">OV3660</text>
+
+      <path class="arr" d="M142,239 L162,239" marker-end="url(#a)"/>
+      <path class="arr" d="M284,239 L304,239" marker-end="url(#a)"/>
+      <path class="arr" d="M440,239 L460,239" marker-end="url(#a)"/>
+      <path class="arr" d="M604,239 L624,239" marker-end="url(#a)"/>
+      <path class="arr" d="M728,239 L748,239" marker-end="url(#a)"/>
+
+      <!-- feedback loop -->
+      <path class="arr" d="M800,266 L800,336 L83,336 L83,270" marker-end="url(#a)"/>
+      <text class="mut" x="441" y="330" text-anchor="middle">observe frame &rarr; drive next key &mdash; close the loop</text>
+
+      <!-- coexist note -->
+      <text class="mut" x="225" y="292" text-anchor="middle">console TX logs coexist on UART0</text>
+    </svg>
+    <p class="cap"><b>Top:</b> <code>INPUT_BACKEND</code> compiles exactly one backend into <code>input_poll()</code>;
+      <code>scanInput()</code> derives the <code>KDown</code> edge and drives <code>btn()</code>. <b>Bottom:</b>
+      the serial backend makes that same path hardware-in-the-loop &mdash; bytes from pyserial ride UART0 to
+      <code>btn()</code> to the panel, and the bench camera closes the loop.</p>
+  </div>
+
+  <h2>Backends (exactly one compiled)</h2>
+  <table>
+    <thead><tr><th>backend</th><th><code>INPUT_BACKEND=</code></th><th>wiring</th><th>status</th></tr></thead>
+    <tbody>
+      <tr><td><b>stub</b></td><td><code>stub</code> <em>(default)</em></td><td>none</td>
+        <td>current behaviour &mdash; <code>KDown=KHeld=0</code>, pause menu never opens. Keeps a plain build unchanged. <span class="pill done">shipped</span></td></tr>
+      <tr><td><b>serial</b></td><td><code>serial</code></td><td>UART0 (CP2104 console)</td>
+        <td>bytes over the console UART &rarr; buttons. The HITL path. <span class="pill done">IN-1 done</span></td></tr>
+      <tr><td><b>touch</b></td><td><code>touch</code></td><td>FT6236, I&sup2;C 0x38 (SDA38/SCL39)</td>
+        <td>on-screen d-pad + O/X zones; on-board, no parts. Skeleton today. <span class="pill next">IN-2 next</span></td></tr>
+      <tr><td><b>i2c</b></td><td><code>i2c</code></td><td>I&sup2;C GPIO expander (addr &ne; 0x38)</td>
+        <td>physical buttons. Skeleton kept so the switch is complete. <span class="pill block">IN-3 parts-blocked</span></td></tr>
+    </tbody>
+  </table>
+
+  <p>Same lever as <code>CELESTE</code>/<code>MEASURE_FPS</code>: <code>components/input/CMakeLists.txt</code>
+  compiles <code>input_${INPUT_BACKEND}.c</code>, and the default (<code>stub</code>) installs no UART driver,
+  so a plain build behaves exactly as before.</p>
+  <pre>make build APP=pico-e32-fake08 BOARD=makerfabs-ili9488-r1 DEFS='-D INPUT_BACKEND=serial'</pre>
+  <p class="cap" style="margin-top:-.6rem"><code>-D</code> lands in <code>CMakeCache.txt</code> and persists &mdash; pass it each time, or <code>make fullclean</code> to change it.</p>
+
+  <h2>The serial protocol</h2>
+  <p>One byte per key over the console UART (115200, <code>/dev/ttyUSB1</code> = the board's CP2104). A key
+  is <b>held ~<code>HOLD_FRAMES</code> (&asymp;6) frames</b> then auto-released, so a single byte taps and
+  repeated bytes hold. Upper/lower case both accepted; unknown bytes ignored. Each received key is logged
+  (<code>input.serial: r</code>), so the receive&rarr;map step is verifiable from the serial log alone,
+  independent of the camera.</p>
+  <table>
+    <thead><tr><th>byte</th><th>button</th><th>byte</th><th>button</th></tr></thead>
+    <tbody>
+      <tr><td><code>l</code></td><td>LEFT</td><td><code>z</code> / <code>o</code></td><td>O</td></tr>
+      <tr><td><code>r</code></td><td>RIGHT</td><td><code>x</code></td><td>X</td></tr>
+      <tr><td><code>u</code></td><td>UP</td><td><code>p</code></td><td>PAUSE</td></tr>
+      <tr><td><code>d</code></td><td>DOWN</td><td></td><td></td></tr>
+    </tbody>
+  </table>
+
+  <h2>Verified on hardware (2026-07-17)</h2>
+  <ul>
+    <li><b>Receive &rarr; map:</b> sent <code>r/d/l/u/o/x</code> over <code>/dev/ttyUSB1</code>; every key
+      registered in the log (<code>input.serial: &lt;key&gt;</code>) while boot/console logs kept flowing.</li>
+    <li><b>Full chain on the panel:</b> a <code>FORCE_FLASH_CART</code> dev flag (ignore any SD cart, run the
+      flash cart) let the input-reactive test cart run. Drove <code>RIGHT&times;22 + DOWN&times;22</code> via
+      pyserial; a bench-camera frame confirmed the square moved from centre to bottom-right (frame counter
+      64&nbsp;&rarr;&nbsp;148). Full chain <code>pyserial &rarr; UART0 &rarr; scanInput &rarr; btn() &rarr; panel</code>, camera-verified.</li>
+  </ul>
+  <div class="g"><b>Coexistence caveat &mdash; resolved.</b> Reading <code>UART0</code> RX while the console
+    logs on the same <code>UART0</code> TX <b>coexists cleanly</b> &mdash; keys registered while boot/console
+    logs kept flowing. No fallback to USB-Serial-JTAG needed.</div>
+
+  <h2>Files</h2>
+  <ul>
+    <li><b><code>components/input/</code></b> (6 files) &mdash; <code>input.h</code> (the interface),
+      <code>input_stub.c</code> (default), <code>input_serial.c</code>, <code>input_touch.c</code> (FT6236
+      skeleton, IN-2), <code>input_i2c.c</code> (expander skeleton, IN-3), and a <code>CMakeLists.txt</code>
+      that compiles exactly one backend by <code>INPUT_BACKEND</code>.</li>
+    <li><b>fork <code>platform/esp32/ESP32Host.cpp</code></b> &mdash; <code>scanInput()</code> now calls
+      <code>input_poll()</code> and computes the <code>KDown</code> edge; the <code>fake08</code> wrapper
+      <code>REQUIRES input</code>.</li>
+    <li><b><code>firmware/pico-e32-fake08/main/main.cpp</code></b> &mdash; input wiring +
+      <code>FORCE_FLASH_CART</code> + the input-reactive test cart; app <code>CMakeLists.txt</code> makes
+      <code>FORCE_FLASH_CART</code> opt-in.</li>
+  </ul>
+
+  <h2>Backlog</h2>
+  <ul>
+    <li><b>IN-2 &mdash; touch (FT6236).</b> Bring up the I&sup2;C controller; map screen zones (d-pad + O/X)
+      &rarr; mask; the board supplies its touch wiring via <code>board_input_config()</code> (I&sup2;C
+      pins/addr), symmetric with <code>board_sd_config</code>. On-board, no parts. <span class="pill next">next</span></li>
+    <li><b>IN-3 &mdash; I&sup2;C button expander.</b> Physical buttons via an expander at addr &ne; 0x38.
+      Skeleton kept so the switch is complete. <span class="pill block">parts-blocked</span></li>
+    <li><b>IN-4 &mdash; 30-vs-60 fps + input policy for Gate&nbsp;#4.</b> Once a real backend drives a cart, set the frame policy.</li>
+  </ul>
+
+  <p style="color:var(--muted);font-size:.9rem;margin-top:1.6rem">See also:
+    <a href="../../runtime/pico-e32-fake08-input.md">input spec &amp; protocol (IN-1&ndash;IN-4)</a> &middot;
+    <a href="2026-07-17-fake08-sd-cart-loader.html">SD cart loader</a> &middot;
+    <a href="../../hardware/pico-e32-bench-camera.md">bench camera</a></p>
+</div>
+</body>
+</html>

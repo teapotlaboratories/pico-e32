@@ -28,3 +28,7 @@ assets/celeste_cart.h
 tools/bench_cam.env
 captures/
 assets/celeste_p8.h
+
+# downloaded ROM/cart archives + in-progress downloads (user-local game content, not repo source)
+/assets/roms/
+*.part
