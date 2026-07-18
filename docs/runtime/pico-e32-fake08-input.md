@@ -86,9 +86,10 @@ so the receive→map step is verifiable from the serial log alone, independent o
   `input_stub`/`input_serial`, the compile-time switch, and the input-reactive test cart. **HITL-verified:**
   keys driven over `ttyUSB1` registered on-device while the console kept logging; the full
   receive → map → held-mask path confirmed from the serial log.
-- **IN-2 — touch (FT6236). 🔨 IN PROGRESS.** On-screen controls: the PICO-8 screen at the top (256×256), a
-  control deck below — a d-pad bottom-left, O/X bottom-right (gamepad diagonal), and a menu pill. Approved
-  design ref: [`pico-e32-fake08-touch-ui.html`](pico-e32-fake08-touch-ui.html).
+- **IN-2 — touch (FT6236). ✅ DONE (2026-07-18, PR #11).** All seven zones hardware-verified (serial tap
+  test) and confirmed driving real Celeste on the panel. On-screen controls: the PICO-8 screen at the top
+  (256×256), a control deck below — a d-pad bottom-left, O/X bottom-right (gamepad diagonal), and a menu
+  pill. Approved design ref: [`pico-e32-fake08-touch-ui.html`](pico-e32-fake08-touch-ui.html).
   - **Architecture (mirrors the SD split):** the *board* owns the FT6236 hardware **and orientation** —
     `board_touch_init()` (I²C 0x38, SDA38/SCL39, the `i2c_master` API) and
     `board_touch_read(xs, ys, max) → count` returns up to 2 points already in **display coordinates** (the
@@ -99,8 +100,10 @@ so the receive→map step is verifiable from the serial log alone, independent o
   - **2-point:** the FT6236 reports two touches, so a direction + O/X register together (move + jump).
   - **Layout zones** (panel 320×480, from the mockup): screen `y 0..256`; deck `y 256..480`. D-pad cross
     centred ~`(92,376)`, arms ~140×50; O ~`(212,414)` r31; X ~`(272,352)` r31; menu pill ~`(160,283)`.
-  - **Y-flip calibration** — the glass is upside-down (MIRROR_Y). First bring-up step: log raw + mapped
-    coords, tap the four screen corners, confirm/adjust the transform in `board_touch_read`.
+  - **Orientation (resolved)** — the glass is mounted a full **180°** (upside-down AND mirrored), not just
+    Y-flipped: `board_touch_read` flips **both** axes to match the display's `offset_rotation=2` (`ROTATE_180`).
+    The earlier Y-only guess *looked* right only because the bench camera's own h-mirror masked the X-flip;
+    reading the real panel caught it. Fix lives in the board's `ROTATE_180` + `board_touch_read`.
   - **Deck render** — draw the control deck **once** at boot (static; LovyanGFX primitives via the board)
     and move the game render to the top (`drawFrame` OY 112→0). The input path works from zones even before
     the deck is drawn (just not discoverable), so the order is: read → map → then draw.
@@ -108,4 +111,9 @@ so the receive→map step is verifiable from the serial log alone, independent o
     element reacts (camera-confirmed). On-board, no parts.
 - **IN-3 — I²C button expander.** Physical buttons via an expander at addr ≠ 0x38. Parts-blocked; skeleton
   kept so the switch is complete.
-- **IN-4 — 30-vs-60 fps + input policy for Gate #4.** Once a real backend drives a cart, set the frame policy.
+- **IN-4 — 30-vs-60 fps + input policy for Gate #4. 🟢 informed (2026-07-18).** Real backends now drive a
+  cart, and the pacing model is settled: the host **resumes fake-08's loop at 60 Hz**, and the cart's own
+  coroutine sets its logical rate (`_update` → 30 fps, `_update60` → 60 fps) by self-dividing. So there is
+  no host-side 30-vs-60 switch — the host always resumes at 60; the cart decides. Celeste (`_update`) runs a
+  steady 30 fps with ~6 ms of work (10 ms headroom). Needs `CONFIG_FREERTOS_HZ=1000`. See the
+  [fps-resume worklog](../worklog/2026-07-18-fake08-celeste-fps-resume.md). Remaining for Gate #4: **audio**.

@@ -30,10 +30,10 @@ We write one **`ESP32Host`**. Everything else is fake-08's, ported as-is.
 | Host responsibility | fake-08 signature (`source/host.*`) | our ESP32 implementation | status |
 |---|---|---|---|
 | **Framebuffer flush** | `drawFrame(uint8_t* picoFb, uint8_t* paletteMap, uint8_t drawMode)` — `picoFb` = native **128×128 4-bpp indexed** (8 KB) | nibble→RGB565 line-expand + 2× scale → `board_lcd_blit` (the board display driver we already have) | 🟢 **ready** — driver done (393 fps, upright); the scale/blit exists, needs the **4-bpp/nibble** unpack (our HG harness fb is 8-bpp) |
-| **Timing** | `setTargetFps`, `waitForTargetFps`, `deltaTMs` | `esp_timer` + `vTaskDelay` (already used in Gate #1/#3) | 🟢 **ready** |
+| **Timing** | `setTargetFps`, `waitForTargetFps`, `deltaTMs` | `esp_timer` + `vTaskDelay` (already used in Gate #1/#3) | ✅ **done** — the host **resumes fake-08's loop at 60 Hz** (its coroutine self-divides 30 fps carts); a 30 Hz resume ran carts at half speed. Needs `CONFIG_FREERTOS_HZ=1000` for smooth pacing. See the [fps-resume worklog](../worklog/2026-07-18-fake08-celeste-fps-resume.md) |
 | **Lua VM heap** | `luaL_newstate()` at `source/vm.cpp:300` | swap to `lua_newstate(psram_alloc,…)` with `MALLOC_CAP_SPIRAM`; keep `picoFb`, DMA buffers, GC nursery in **internal SRAM** | 🟢 **ready** — z8lua already vendored (`components/z8lua`), the VM fake-08 uses |
 | **Cart source** | `getFileContents`, `listcarts`, `saveCartData`, … | flash-embedded cart **and** the onboard microSD (SPI2, FatFs/VFS) | ✅ **done** — SD loader mounts the onboard microSD, scans for `.p8`/`.p8.png`, loads one, falls back to the flash cart. Verified on a 32 GB SDHC card. Was mislabelled parts-blocked — the slot is on-board. See the [SD worklog](../worklog/2026-07-17-fake08-sd-cart-loader.md) |
-| **Input** | `InputState_t scanInput()` → 8-bit mask (L/R/U/D/O/X/PAUSE) | a **compile-time-selectable seam** (`components/input`, `INPUT_BACKEND` = stub\|serial\|touch\|i2c) behind `scanInput` | 🟢 **seam done — the serial (UART) backend is HITL-verified on hardware**; touch (on-board FT6236) is next, **no parts**; the I²C-expander backend is parts-blocked. See the [input spec](pico-e32-fake08-input.md) |
+| **Input** | `InputState_t scanInput()` → 8-bit mask (L/R/U/D/O/X/PAUSE) | a **compile-time-selectable seam** (`components/input`, `INPUT_BACKEND` = stub\|serial\|touch\|i2c) behind `scanInput` | ✅ **done for the on-board paths** — **serial (UART)** and **touch (on-board FT6236 + on-glass control deck, IN-2)** both HITL-verified driving real Celeste; the I²C-expander backend is parts-blocked. See the [input spec](pico-e32-fake08-input.md) |
 | **Audio** | `Audio::FillAudioBuffer(...)` @ **22050 Hz S16**, the **pull/poll** path | ESP-IDF **I²S** feeder task → MAX98357A. **now:** stub | 🔴 **parts-blocked** (no MAX98357A/speaker yet) |
 
 **Key point:** *draw + timing + VM + a flash cart are all* 🟢 *ready — none are parts-blocked.* So the
@@ -87,6 +87,13 @@ spikes at room transitions** (~10 fps for that frame) as the only sub-30 event �
 sustained slowdown. The next perf lever is that transition spike, not general VM speed. See the
 [fps worklog](../worklog/2026-07-17-fake08-fps-strip-blit.md).
 
+**Pacing correction (2026-07-18):** those numbers are the *work* ceiling; the *delivered* rate was wrong.
+The host paced fake-08's loop at 30 Hz, but the loop coroutine is built to be **resumed at 60 Hz** and
+self-divides — so a 30 fps cart (`_update`, e.g. Celeste) ran one frame per two resumes = **15 fps of
+motion (half speed)**. Fixed by resuming at 60 Hz (`setTargetFps(60)` + the `ESP32Host` default) and
+`CONFIG_FREERTOS_HZ=1000` for jitter-free pacing → steady 30 fps. An opt-in on-screen FPS HUD
+(`-D SHOW_FPS=1`) shows the loop rate. See the [fps-resume worklog](../worklog/2026-07-18-fake08-celeste-fps-resume.md).
+
 Per plan §0.5 / development-plan.md:174: **a minimal `ESP32Host` (only `drawFrame` + timing; input/audio
 stubbed) running a flash-embedded cart on the panel.** This:
 - **De-risks the real unknown** the plan flags: *"nobody has run fake-08 on an ESP32 specifically"* — so
@@ -97,9 +104,13 @@ stubbed) running a flash-embedded cart on the panel.** This:
   instead of the hand-written one.
 
 Then Phase 1 fills the remaining seams → **Gate #4** (a real cart playable ≥30 fps with sound + input).
-**Input** now has a switchable driver (`components/input`): the serial backend is HITL-verified, and touch
-(the on-board FT6236) is the next backend — **no parts**; only the I²C-expander backend and **audio**
-(MAX98357A) are still parts-blocked. SD carts are **done** (the slot is on-board, no parts).
+**Real Celeste now plays end-to-end** (2026-07-18): the full `spr`/`map`/`print` draw path through
+fake-08's own `Vm::GameLoop`, driven on the panel by **both** the serial and the **touch** backends, at a
+correct, steady **30 fps** (see the fps note below and the
+[fps-resume worklog](../worklog/2026-07-18-fake08-celeste-fps-resume.md)). **Input** is done for the on-board
+paths (serial + touch, `components/input`); only the I²C-expander backend and **audio** (MAX98357A) remain
+parts-blocked. SD carts are **done** (the slot is on-board, no parts). So the only seam still blocking
+Gate #4 is **audio**.
 
 ## Open questions / risk
 

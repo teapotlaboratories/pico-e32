@@ -28,12 +28,15 @@ docs (per [`.ai/AGENTS.md`](../.ai/AGENTS.md) → *Plan first*).
   `spr`/`map`/`print` are still **no-op stubs**, so Celeste's logic runs at frame rate but has never drawn
   a pixel. **Not parts-blocked, and verifiable without the camera** (host frame dump → PNG) — the one
   Phase-1 item that can move right now. `HG-1` ✅ (sprite sheet extracted), `HG-5` ✅ unblocked (font is CC-0 from Lexaloffle). See [worklog](worklog/2026-07-15-host-graphics.md).
-- **Port fake-08** → `ESP32Host` — the primary runtime goal. **Draw-only port ✅, SD cart loader ✅, and a
-  compile-time-switchable input seam ✅** (serial backend HITL-verified; touch via the on-board FT6236 is
-  next, **no parts**) — see the [input backlog](runtime/pico-e32-fake08-input.md). Only **audio** (MAX98357A)
-  and the physical-button **I²C expander** remain parts-blocked. The hand-written `HG-*` draw API is a
-  de-risking harness, **superseded** by fake-08's own graphics. Plan in
-  [`runtime/pico-e32-fake08-port.md`](runtime/pico-e32-fake08-port.md).
+- **Port fake-08** → `ESP32Host` — the primary runtime goal. **Real Celeste now plays end-to-end** on the
+  panel (2026-07-18): draw-only port ✅, SD cart loader ✅, input seam ✅ (**serial + touch/FT6236 both
+  HITL-verified** driving Celeste — IN-2 done), and the **fps fixed** (the host resumes fake-08's loop at
+  60 Hz — a 30 Hz resume ran 30 fps carts at half speed; `CONFIG_FREERTOS_HZ=1000` for smooth pacing; opt-in
+  on-screen FPS HUD). See the [input backlog](runtime/pico-e32-fake08-input.md) and the
+  [fps-resume worklog](worklog/2026-07-18-fake08-celeste-fps-resume.md). **The only seam still blocking
+  Gate #4 is audio** (MAX98357A, parts-blocked); the physical-button **I²C expander** is also parts-blocked
+  (touch needs none). The hand-written `HG-*` draw API is a de-risking harness, **superseded** by fake-08's
+  own graphics. Plan in [`runtime/pico-e32-fake08-port.md`](runtime/pico-e32-fake08-port.md).
 - **Gate #4:** a real cart playable ≥ 30 fps with sound + input; set the 30-vs-60 fps policy.
 - Parts to buy: MAX98357A + speaker (audio); optionally an I²C GPIO expander + buttons for physical input
   (touch via the on-board FT6236 needs none). microSD + slot are on-board. (See plan §7.)
