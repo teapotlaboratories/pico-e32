@@ -34,8 +34,7 @@ components/             # shared components
 docs/
   pico-e32-todo.md       # master backlog index
   pico-e32-development-plan.md(.html)   # the plan of record + visual render
-  design-specification/  # feasibility + silicon-decision studies
-  reference/             # verified board pinouts
+  reference/             # board pinouts, z8lua research, feasibility + silicon-decision studies
   worklog/               # bring-up log (+ html/)
 firmware/               # ESP-IDF apps (build via the top-level Makefile)
   pico-e32-luabench/     #   Gate #2 — z8lua throughput (host-verified)

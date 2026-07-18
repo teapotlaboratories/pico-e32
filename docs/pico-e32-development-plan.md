@@ -1,7 +1,7 @@
 # ESP32-S3 PICO-8 Handheld — Refined Development Plan (v2, verified)
 
 **Status:** planning. This is the tightened, decision-locked distillation of
-[`pico-e32-runtime-feasibility.md`](design-specification/pico-e32-runtime-feasibility.md) after a
+[`pico-e32-runtime-feasibility.md`](reference/pico-e32-runtime-feasibility.md) after a
 verification pass against primary sources (vendor spec tables, fake-08/z8lua source,
 Espressif docs). It **supersedes** the original where they conflict; the original is
 kept as the fuller evidence base. Corrections to the original are listed in
@@ -11,7 +11,7 @@ kept as the fuller evidence base. Corrections to the original are listed in
 **3.5" ILI9488** board (i80, 2 MB), the ordered Makerfabs **4.0" 480×480 ST7701** board
 (RGB, 8 MB octal, onboard audio + charging), and the ESP-EYE camera. The alternative
 "locked-60fps → ESP32-P4" path is documented separately in
-[`pico-e32-silicon-decision.md`](design-specification/pico-e32-silicon-decision.md) and is the
+[`pico-e32-silicon-decision.md`](reference/pico-e32-silicon-decision.md) and is the
 fallback if the S3 misses the framerate bar (see [§3](#3-the-two-project-killers--phase-0-gono-go-gates)).
 
 > **First plan / starting point: build entirely on the 3.5" ILI9488 board.** Phases 0–1
@@ -407,7 +407,7 @@ its thermal-calibration caveat); or, as the nuclear option, **switch to the ESP3
 
 ## 9. Corrections to the original plan
 
-The original [`pico-e32-runtime-feasibility.md`](design-specification/pico-e32-runtime-feasibility.md) is
+The original [`pico-e32-runtime-feasibility.md`](reference/pico-e32-runtime-feasibility.md) is
 sound in outline; these specific points are wrong or outdated and are fixed above:
 
 1. **Board PSRAM:** the original's **2 MB** figure is **correct for this unit**
@@ -491,5 +491,5 @@ sound in outline; these specific points are wrong or outdated and are fixed abov
   <https://github.com/DavidVentura/PicoPico> ·
   <https://blog.davidv.dev/posts/pico8-console-part-2-performance/>
 - ESP-IDF RGB LCD (bounce buffers / PSRAM contention, for the 480×480 path): <https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/lcd/rgb_lcd.html>
-- Full evidence base: [`pico-e32-runtime-feasibility.md`](design-specification/pico-e32-runtime-feasibility.md),
-  [`pico-e32-silicon-decision.md`](design-specification/pico-e32-silicon-decision.md).
+- Full evidence base: [`pico-e32-runtime-feasibility.md`](reference/pico-e32-runtime-feasibility.md),
+  [`pico-e32-silicon-decision.md`](reference/pico-e32-silicon-decision.md).

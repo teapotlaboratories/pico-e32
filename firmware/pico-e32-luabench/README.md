@@ -54,7 +54,7 @@ Reads the two-column SRAM-vs-PSRAM result over UART.
 (≤ 33 ms → 30 fps; ≤ 16.6 ms → 60 fps) for a representative per-frame Lua workload.
 Reference lower bound: PicoPico runs Celeste at ~9 ms/frame on a *slower* ESP32 (LX6).
 If even the SRAM result blows the budget after `-O2`, that's the trigger to consider the
-ESP32-P4 (see `docs/design-specification/pico-e32-silicon-decision.md`).
+ESP32-P4 (see `docs/reference/pico-e32-silicon-decision.md`).
 
 ## Notes on the runtime (verified from source)
 
