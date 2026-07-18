@@ -6,6 +6,12 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768
 
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 
+# Frame pacing: the GameLoop caps at 30 fps with vTaskDelay, which sleeps in whole FreeRTOS ticks.
+# At the IDF default 100 Hz (10 ms/tick) a 33.3 ms target quantizes to ±10 ms — frames land at
+# 20/30/40 ms and the game visibly judders even though the per-frame WORK is only ~6 ms (measured:
+# Step 2.6 ms + drawFrame 3.6 ms). A 1 ms tick gives the pacer 1 ms granularity → smooth 30 fps.
+CONFIG_FREERTOS_HZ=1000
+
 # z8lua opcode dispatch is faster with jump tables (see components/z8lua/CMakeLists.txt); the component
 # already forces them for the interpreter.
 

@@ -74,6 +74,11 @@ int board_touch_read(int *xs, int *ys, int max);
  * Layout matches docs/runtime/pico-e32-fake08-touch-ui.html. Only meaningful with BOARD_HAS_TOUCH. */
 void board_draw_touch_deck(void);
 
+/* Dev HUD: paint the current loop FPS in the right letterbox (x >= 288), which the centred 256px game
+ * blit never overwrites — so it persists without a per-frame redraw and never covers gameplay. Called
+ * only by SHOW_FPS builds. */
+void board_lcd_draw_fps(int fps);
+
 #ifdef __cplusplus
 }
 #endif

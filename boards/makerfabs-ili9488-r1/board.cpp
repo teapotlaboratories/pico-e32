@@ -299,3 +299,21 @@ extern "C" void board_draw_touch_deck(void) {
     g.endWrite();
     ESP_LOGI(TAG, "touch control deck drawn");
 }
+
+/* Dev HUD: draw `fps` in the right letterbox (x 288..319). The centred game blit is x 32..287, so this
+ * strip is never overwritten — the readout persists and only needs repainting when the value changes. */
+extern "C" void board_lcd_draw_fps(int fps) {
+    if (!s_lcd) return;
+    if (fps < 0) fps = 0;
+    if (fps > 999) fps = 999;
+    auto &g = *s_lcd;
+    g.startWrite();
+    g.fillRect(288, 0, 32, 30, g.color888(0x0d, 0x11, 0x17));   /* clear the strip */
+    g.setTextSize(2);
+    g.setTextColor(g.color888(0x7f, 0xe0, 0x9a));               /* green: loop is healthy */
+    g.drawNumber(fps, 291, 2);
+    g.setTextSize(1);
+    g.setTextColor(g.color888(0x6a, 0x76, 0x86));
+    g.drawString("fps", 293, 20);
+    g.endWrite();
+}

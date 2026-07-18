@@ -31,6 +31,12 @@ idf_component_register(
 # Upstream third-party code: silence its warnings so a -Werror app build still passes.
 target_compile_options(${COMPONENT_LIB} PRIVATE -w)
 
+# Opt-in on-screen FPS HUD in ESP32Host (`make build … DEFS='-D SHOW_FPS=1'`). Off by default; the board
+# supplies board_lcd_draw_fps(), resolved at the final app link.
+if(DEFINED SHOW_FPS)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE SHOW_FPS=${SHOW_FPS})
+endif()
+
 # fake-08 is a C++17 codebase (its math helpers declare a global `lerp`, which collides with C++20's
 # std::lerp under IDF's default newer standard). Compile it at gnu++17 — its intended standard — so
 # ./fake08/source stays byte-identical. (Last -std wins.)

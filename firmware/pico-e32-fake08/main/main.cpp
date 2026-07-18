@@ -110,7 +110,11 @@ extern "C" void app_main(void) {
 
     host->setUpPaletteColors();  /* must precede oneTimeSetup — it builds the RGB565 LUT */
     host->oneTimeSetup(audio);
-    host->setTargetFps(30);
+    /* Resume fake-08's game-loop coroutine at 60 Hz (matches upstream source/main.cpp). The coroutine
+     * self-divides: a _update60 cart runs 60 fps, a 30 fps cart (_update, e.g. Celeste) burns an extra
+     * yield() and runs one frame per two resumes = 30 fps. Pacing at 30 Hz ran 30 fps carts at HALF
+     * speed (15 fps of motion). The host resumes at 60; the cart's own loop sets its logical rate. */
+    host->setTargetFps(60);
 
     /* Cart source ladder: an SD cart if a card is mounted and holds a .p8/.p8.png, else the flash cart. */
     host->setCartDirectory(SD_MOUNT_POINT);
