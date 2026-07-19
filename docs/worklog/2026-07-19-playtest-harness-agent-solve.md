@@ -163,13 +163,34 @@ clears. So without the VM-gate the agent would have shipped broken traces.
 replay of the agent's `solution.trace.json` on the real board cleared 2/2** (`CLEARED 100 M → 200 M → 300 M`,
 t≈12 s / 17 s). Committed to PR #13 (`1c189b6`).
 
+## 10. M6 — a play-test measures its own fps
+
+Unified the standalone `MEASURE_FPS` timing into the `TELEMETRY` stream, so a play-test measures its frame
+rate on the board with no separate build. The `TELEMETRY` loop
+(`firmware/pico-e32-fake08/main/main.cpp`) now times `vm->Step()` and `host->drawFrame()` and streams
+`T <frame> <step_us> <draw_us> <player-state…>` — the `<frame> <step> <draw>` prefix is generic; the
+`ExecuteLua` telemetry poke is *not* timed, so the numbers are the cart's real per-frame compute.
+
+`harness.FpsMeter` groups the per-Step timing into game-frames (`steps_per_frame`) and reports, given the
+target rate, min/avg/max of **achieved** = `min(target, ceiling)` (does the device hold the rate?) and
+**headroom** = `1e6/compute` (the uncapped ceiling). Achieved is derived from *compute vs the frame budget*,
+not wall-clock — so the per-frame telemetry overhead (the ExecuteLua + serial TX) doesn't skew it.
+`harness.run(fps_out=…)` returns the stats. `celeste_playtest.parse_line` was updated for the new format;
+`test_fps.py` unit-tests the aggregation.
+
+**Measured on the board while clearing Celeste** (still PASS 2/2, so input-sync is unaffected): over 510
+game-frames (target 30) — **achieved 9.2 / 29.9 / 30.0**, **headroom 9.2 / 64.1 / 112.6**. It holds 30 fps
+(avg 29.9) with ~2× compute headroom, and a single room-load spike (~108 ms) dips it to 9.2 — consistent with
+Gate #2's object-count-driven per-room 5–40 ms.
+
 ## State at end of session
 
 - **Done:** M0 (reorg), M1 (replay-from-root), M2 (Trace + dual replay + frame-count sync), M3 (search as a
-  cart-agnostic engine + `celeste/solve.py`), M4 (agent gym — the eyes, `gym.py`), **M5 (spawned solver agent
-  solved Celeste through the gym, verified on the board)**. All on PR #13 (branch `playtest-agent-gym`,
-  self-reviewed via `/review`). **Next:** M6 fps (unify `MEASURE_FPS` + `TELEMETRY`, achieved + headroom),
-  M7 video, M8 orchestrator, M9 a non-platformer cart (proves genre-agnosticism).
+  cart-agnostic engine + `celeste/solve.py`), M4 (agent gym — the eyes, `gym.py`), M5 (spawned solver agent
+  solved Celeste through the gym, verified on the board), **M6 (fps unified into the telemetry stream —
+  achieved + headroom, measured on the board)**. All on PR #13 (branch `playtest-agent-gym`, self-reviewed via
+  `/review`). **Next:** M7 video (generalize the sim/device video), M8 orchestrator, M9 a non-platformer cart
+  (proves genre-agnosticism).
 - **Board:** left flashed with the play-test build (`CELESTE + INPUT_BACKEND=serial + INPUT_HOLD_FRAMES=1 +
   FORCE_FLASH_CART + SHOW_FPS + TELEMETRY + CENTER_GAME`), idle at room 2 — a known-good dev build.
 - **Fork:** the eris experiment is reverted; `components/fake08/fake08` is clean (no gitlink change).

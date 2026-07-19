@@ -85,6 +85,7 @@
       <li><a href="#s7">Pivot: the harness is a <em>gym</em></a></li>
       <li><a href="#s8">Review + M4 — the gym's eyes</a></li>
       <li><a href="#s9">M5 — a spawned agent solves Celeste</a></li>
+      <li><a href="#s10">M6 — a play-test measures its own fps</a></li>
       <li><a href="#state">State at end of session</a></li>
     </ol>
   </nav>
@@ -295,8 +296,9 @@
 
   <div class="diag">
     <h3>The pipeline — agent solves the gym; the output is a replay-able <code>Trace</code></h3>
-    <p class="sub">Solid = landed (M2: the <code>Trace</code> contract + dual replay; and the spawned solver
-       agent, M4–M5 — §8–§9). Dashed = next — FPS + video (M6–M7, the ultimate goal).</p>
+    <p class="sub">Solid = landed (M2: the <code>Trace</code> contract + dual replay; the spawned solver
+       agent, M4–M5 — §8–§9; and the on-device fps measurement, M6 — §10). Dashed = still the goal — the
+       produced report (M8 orchestrator) + video (M7).</p>
     <svg viewBox="0 0 820 240" width="100%" role="img" aria-label="Pipeline: spawned solver agent produces a Trace, replayed on sim and device, yielding an fps and video report">
       <defs>
         <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
@@ -341,13 +343,13 @@
       <rect x="630" y="93" width="160" height="54" rx="9" style="fill:var(--codebg);stroke:var(--accent);stroke-width:1.6;stroke-dasharray:5 4"/>
       <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
         <text x="710" y="110" style="font:700 11px var(--mono)">report — GOAL</text>
-        <text x="710" y="125" style="font:10px var(--mono);fill:var(--muted)">fps min/max/avg · M6</text>
+        <text x="710" y="125" style="font:10px var(--mono);fill:var(--ok)">fps min/avg/max · M6 ✓ §10</text>
         <text x="710" y="139" style="font:10px var(--mono);fill:var(--muted)">sim.mp4 · device.mp4 · M7</text>
       </g>
     </svg>
     <p class="legend">Every node is grounded in the doc: the agent + gym (§7, M4–M5), the <code>Trace</code> and
-       its sim/device replays (§3, landed), and the FPS-across-full-playthroughs + video goal (top-of-doc goal,
-       M6–M7).</p>
+       its sim/device replays (§3, landed), the on-device fps measurement (M6, §10 — now landed), and the
+       consolidated report + video goal (top-of-doc goal, M7–M8).</p>
   </div>
 
   <p><b>Next:</b> <b>M4</b> — the gym's "eyes" (frame + filmstrip rendering, a <code>run(inputs)→observe</code>
@@ -499,15 +501,107 @@
     (<code>1c189b6</code>).
   </div>
 
+  <h2 id="s10">10. M6 — a play-test measures its own fps</h2>
+  <p>Unified the standalone <code>MEASURE_FPS</code> timing into the <code>TELEMETRY</code> stream, so a
+     play-test measures its frame rate on the board with <b>no separate build</b>. The <code>TELEMETRY</code>
+     loop (<code>firmware/pico-e32-fake08/main/main.cpp</code>) now times <code>vm-&gt;Step()</code> and
+     <code>host-&gt;drawFrame()</code> and streams
+     <code>T &lt;frame&gt; &lt;step_us&gt; &lt;draw_us&gt; &lt;player-state…&gt;</code> — the
+     <code>&lt;frame&gt; &lt;step&gt; &lt;draw&gt;</code> prefix is <b>generic</b>; the <code>ExecuteLua</code>
+     telemetry poke is <em>not</em> timed, so the numbers are the <b>cart's real per-frame compute</b>.</p>
+
+  <div class="diag">
+    <h3>The <code>T</code>-line — a generic timing prefix, a per-cart tail</h3>
+    <p class="sub">One line per <code>Step()</code>: the
+       <code>T &lt;frame&gt; &lt;step_us&gt; &lt;draw_us&gt;</code> prefix is cart-agnostic (what
+       <code>harness.FpsMeter</code> consumes); the <code>&lt;player-state…&gt;</code> tail is the cart's own
+       instrumentation (Celeste's <code>READ_LUA</code>). The <code>ExecuteLua</code> poke that emits the line
+       is not timed.</p>
+    <svg viewBox="0 0 820 172" width="100%" role="img" aria-label="The telemetry T-line splits into a generic timing prefix consumed by the FpsMeter and a per-cart player-state tail">
+      <!-- prefix chips (generic) -->
+      <rect x="30" y="40" width="44" height="38" rx="8" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+      <rect x="86" y="40" width="96" height="38" rx="8" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+      <rect x="194" y="40" width="104" height="38" rx="8" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+      <rect x="310" y="40" width="104" height="38" rx="8" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+      <g style="fill:var(--fg);text-anchor:middle;font:700 12px var(--mono)">
+        <text x="52" y="64">T</text>
+        <text x="134" y="64">&lt;frame&gt;</text>
+        <text x="246" y="64">&lt;step_us&gt;</text>
+        <text x="362" y="64">&lt;draw_us&gt;</text>
+      </g>
+      <text x="432" y="65" style="fill:var(--muted);text-anchor:middle;font:700 15px var(--mono)">|</text>
+      <!-- tail chip (per-cart) -->
+      <rect x="452" y="40" width="252" height="38" rx="8" style="fill:var(--surface);stroke:var(--warn);stroke-width:1.6"/>
+      <text x="578" y="64" style="fill:var(--fg);text-anchor:middle;font:700 12px var(--mono)">&lt;player-state…&gt;</text>
+      <!-- braces -->
+      <path d="M30,90 L30,96 L414,96 L414,90" fill="none" style="stroke:var(--ok);stroke-width:1.5"/>
+      <path d="M452,90 L452,96 L704,96 L704,90" fill="none" style="stroke:var(--warn);stroke-width:1.5"/>
+      <text x="222" y="116" style="fill:var(--ok);text-anchor:middle;font:700 11px var(--mono)">generic prefix → harness.FpsMeter (any cart)</text>
+      <text x="578" y="116" style="fill:var(--warn);text-anchor:middle;font:700 11px var(--mono)">cart tail → Celeste READ_LUA (per-cart)</text>
+      <text x="410" y="150" style="fill:var(--muted);text-anchor:middle;font:11px var(--mono)">ExecuteLua telemetry poke is NOT timed → step_us / draw_us = the cart's real compute</text>
+    </svg>
+    <p class="legend">The prefix is what makes the measurement cart-agnostic — any cart's play-test streams the
+       same <code>&lt;frame&gt; &lt;step_us&gt; &lt;draw_us&gt;</code>; only the tail is per-cart. This folds the
+       old standalone <code>MEASURE_FPS</code> timing into the one stream.</p>
+  </div>
+
+  <p><code>harness.FpsMeter</code> groups the per-<code>Step()</code> timing into game-frames
+     (<code>steps_per_frame</code>) and, given the target rate, reports min / avg / max of two quantities:</p>
+  <ul>
+    <li><b>achieved</b> = <code>min(target, ceiling)</code> — does the device hold the rate?</li>
+    <li><b>headroom</b> = <code>1e6 / compute</code> — the uncapped ceiling.</li>
+  </ul>
+  <p><b>Achieved is derived from compute vs the frame budget, not wall-clock</b> — so the per-frame telemetry
+     overhead (the <code>ExecuteLua</code> poke + serial TX) doesn't skew it.
+     <code>harness.run(fps_out=…)</code> returns the stats; <code>celeste_playtest.parse_line</code> was updated
+     for the new line format; and <code>test_fps.py</code> unit-tests the aggregation.</p>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:.8rem;margin:1.6rem 0">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">29.9 fps</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35"><b>achieved</b> avg — min <b>9.2</b> / max <b>30.0</b>. Holds the <b>30 fps</b> target</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">64.1 fps</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35"><b>headroom</b> avg — min <b>9.2</b> / max <b>112.6</b>. Uncapped ceiling, <b>~2×</b> the budget</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">510 fr</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">game-frames measured on the board (<b>target 30</b>) while clearing Celeste</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">~108 ms</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">one room-load spike → achieved dips to <b>9.2</b> (Gate #2's <b>5–40 ms</b>/room)</div>
+    </div>
+  </div>
+
+  <div class="bars">
+    <h3>Achieved vs headroom — on the board over 510 game-frames (target 30 fps), avg</h3>
+    <div class="bar"><div class="lab">achieved · avg</div><div class="track"><div class="fill a" style="width:46.6%">29.9 fps</div></div></div>
+    <div class="bar"><div class="lab">headroom · avg</div><div class="track"><div class="fill" style="width:100%;background:linear-gradient(90deg,#356ad4,#5b8bf0)">64.1 fps</div></div></div>
+    <p class="legend">To scale (headroom avg = full track): achieved sits at <b>~47%</b> of the uncapped
+       ceiling — <b>~2× compute headroom</b>. Achieved = <code>min(target, ceiling)</code>, derived from
+       compute vs the frame budget (not wall-clock), so per-frame telemetry overhead doesn't skew it. Ranges:
+       achieved min/max <b>9.2 / 30.0</b>, headroom min/max <b>9.2 / 112.6</b>.</p>
+  </div>
+
+  <div class="tldr">
+    <b class="ok">Measured on the board, still PASS 2/2 —</b> the play-test cleared Celeste <b>2/2</b>
+    (<code>100 M → 200 M → 300 M</code>) <em>while</em> measuring, so folding the timing into
+    <code>TELEMETRY</code> left <b>input-sync unaffected</b>. Over 510 game-frames it <b>holds 30 fps</b>
+    (avg 29.9) with <b>~2× compute headroom</b>; a single room-load spike (~108 ms) dips it to <b>9.2</b> —
+    consistent with Gate #2's object-count-driven per-room <b>5–40 ms</b>.
+  </div>
+
   <h2 id="state">State at end of session</h2>
   <ul>
     <li><b>Done:</b> M0 (reorg), M1 (replay-from-root), M2 (Trace + dual replay + frame-count sync), M3 (search
        as a cart-agnostic engine + <code>celeste/solve.py</code>), M4 (agent gym — the eyes,
-       <code>gym.py</code>), <b>M5 (spawned solver agent solved Celeste through the gym, verified on the
-       board)</b>. All on <b>PR #13</b> (branch <code>playtest-agent-gym</code>, self-reviewed via
-       <code>/review</code>). <b>Next:</b> M6 fps (unify <code>MEASURE_FPS</code> + <code>TELEMETRY</code>,
-       achieved + headroom), M7 video, M8 orchestrator, M9 a non-platformer cart (proves
-       genre-agnosticism).</li>
+       <code>gym.py</code>), M5 (spawned solver agent solved Celeste through the gym, verified on the board),
+       <b>M6 (fps unified into the telemetry stream — achieved + headroom, measured on the board)</b>. All on
+       <b>PR #13</b> (branch <code>playtest-agent-gym</code>, self-reviewed via <code>/review</code>).
+       <b>Next:</b> M7 video (generalize the sim/device video), M8 orchestrator, M9 a non-platformer cart
+       (proves genre-agnosticism).</li>
     <li><b>Board:</b> left flashed with the play-test build (<code>CELESTE + INPUT_BACKEND=serial +
        INPUT_HOLD_FRAMES=1 + FORCE_FLASH_CART + SHOW_FPS + TELEMETRY + CENTER_GAME</code>), idle at room 2 — a
        known-good dev build.</li>
