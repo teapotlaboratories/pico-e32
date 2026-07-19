@@ -62,7 +62,7 @@
   <p class="date">2026-07-18 · the play-test that clears rooms 1 &amp; 2 · fake-08 port</p>
 
   <div class="tldr">
-    <code>tools/celeste_playtest.py</code> now clears <b>Celeste rooms 1 and 2 ("100 M" → "200 M" → "300 M")</b>
+    <code>test/playtest/celeste/celeste_playtest.py</code> now clears <b>Celeste rooms 1 and 2 ("100 M" → "200 M" → "300 M")</b>
     with no human on the controls, and checks itself over the wire. Each room needs several frame-precise
     dashes/jumps a loose open-loop timeline can't land, so the input is <b>solved offline</b> against a physics
     twin and <b>delivered frame-synced</b> to a new serial position-telemetry stream. Two twin-fidelity bugs the
@@ -158,9 +158,9 @@
     <li><b>Input mapping bug:</b> the stub timeline used <code>x</code> for "jump", but Celeste is
        <code>k_jump=4=O</code> / <code>k_dash=5=X</code> — so <b><code>z</code>/<code>o</code> jumps,
        <code>x</code> dashes</b>. <code>x</code> was silently dashing.</li>
-    <li><code>tools/celeste_playtest.py</code> — resets, starts the game, delivers the embedded 97-frame plan
+    <li><code>test/playtest/celeste/celeste_playtest.py</code> — resets, starts the game, delivers the embedded 97-frame plan
        frame-synced, verifies over telemetry, exits 0 (PASS) / 1 (FAIL).</li>
-    <li><code>tools/celeste_solver/</code> — the physics twin + beam search that produced the plan;
+    <li><code>test/playtest/celeste/celeste_solver/</code> — the physics twin + beam search that produced the plan;
        <code>solve.py</code> re-prints the exact embedded <code>PLAN</code> (verified byte-identical).</li>
     <li>Firmware: <code>TELEMETRY</code> (app) and <code>INPUT_HOLD_FRAMES</code> (input backend) — opt-in, off
        by default.</li>

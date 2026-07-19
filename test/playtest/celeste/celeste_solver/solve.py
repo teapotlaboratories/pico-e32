@@ -3,11 +3,11 @@
 
 Beam-searches over macro-actions (run / jump / dash-in-8-directions), keeps winning routes ranked by
 margin (how far past the exit) and simplicity (fewest dashes), then prints the chosen route AND the
-per-game-frame key PLAN to embed in tools/celeste_playtest.py. The twin (celeste_sim.py) models
+per-game-frame key PLAN to embed in test/playtest/celeste/celeste_playtest.py. The twin (celeste_sim.py) models
 Celeste's move-before-update ordering and the 2-frame dash freeze, so game-frame index == the firmware
 frame counter / 2 and the PLAN can be delivered frame-synced. See the worklog for the method.
 
-    python3 tools/celeste_solver/solve.py            # search + print route + PLAN
+    python3 test/playtest/celeste/celeste_solver/solve.py   # search + print route + PLAN
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
@@ -156,7 +156,7 @@ def plan_from_route(route):
         plan.pop()
     return plan, outcome
 
-# The routes shipped in tools/celeste_playtest.py, one per room (found by this search; re-derivable by
+# The routes shipped in test/playtest/celeste/celeste_playtest.py, one per room (found by this search; re-derivable by
 # running it — `beam_solve_fast` for room (1,0) needs the full-state dedup, plain `beam_solve` suffices
 # for room (0,0)). Keyed by room (rx,ry).
 SHIPPED = {

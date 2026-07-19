@@ -1,10 +1,10 @@
 # Celeste level solver
 
 Offline solver that produces the hands-free input sequences used by
-[`tools/celeste_playtest.py`](../celeste_playtest.py) to clear **Celeste rooms 1 and 2
+[`celeste_playtest.py`](../celeste_playtest.py) to clear **Celeste rooms 1 and 2
 ("100 M" → "200 M" → "300 M")** on the fake-08 port. Each room needs several frame-precise dashes/jumps,
 so the sequences are **solved**, not hand-tuned, then delivered frame-synced. Method and evidence:
-[`docs/worklog/2026-07-18-celeste-playtest-clear.md`](../../docs/worklog/2026-07-18-celeste-playtest-clear.md).
+[`docs/worklog/2026-07-18-celeste-playtest-clear.md`](../../../../docs/worklog/2026-07-18-celeste-playtest-clear.md).
 
 ## Files
 
@@ -16,11 +16,11 @@ so the sequences are **solved**, not hand-tuned, then delivered frame-synced. Me
 ## Reproduce the shipped plans
 
 ```sh
-python3 tools/celeste_solver/solve.py            # prints both PLANs embedded in celeste_playtest.py
-python3 tools/celeste_solver/solve.py --search 1 0   # re-run the search for room (1,0) (a couple of minutes)
+python3 solve.py            # prints both PLANs embedded in celeste_playtest.py
+python3 solve.py --search 1 0   # re-run the search for room (1,0) (a couple of minutes)
 ```
 
-The printed `PLAN`s are byte-for-byte the `PLAN_100M` / `PLAN_200M` in `tools/celeste_playtest.py`.
+The printed `PLAN`s are byte-for-byte the `PLAN_100M` / `PLAN_200M` in `../celeste_playtest.py`.
 
 ## Why a twin + why it must match frame-for-frame
 

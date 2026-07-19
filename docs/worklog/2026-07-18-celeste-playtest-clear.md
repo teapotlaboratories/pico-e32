@@ -1,6 +1,6 @@
 # 2026-07-18 — Driving Celeste through full levels, hands-free over serial
 
-Goal: extend `tools/celeste_playtest.py` to clear **full Celeste levels** with no human on the controls,
+Goal: extend `test/playtest/celeste/celeste_playtest.py` to clear **full Celeste levels** with no human on the controls,
 and leave it as a repeatable, self-checking integration test for the whole fake-08 stack (cart → VM →
 input → physics → the 30/60 fps loop). Prior state: Celeste plays end-to-end and the serial input backend
 (IN-1) is HITL-verified; the play-test was a framework with a stub timeline.
@@ -114,7 +114,7 @@ Then two red herrings before the real fix:
 that, room 2 cleared first try and **reproducibly** — the same clears at frames 618 and 908, run after run.
 (The robustness re-solve was unnecessary; its route works fine, so it's the one shipped.)
 
-## A local fake-08 emulator — the exact VM, headless (`tools/fake08-sim`)
+## A local fake-08 emulator — the exact VM, headless (`test/playtest/fake08-sim`)
 
 To take the hand-written twin out of the trust chain, built a **native desktop build of the exact VM the
 device runs** — same `components/fake08` source + the same `components/z8lua` — linked without modifying the
@@ -133,16 +133,16 @@ needs per-node savestates; `Vm::serializeLuaState` (eris) returns 0 here because
 (which fills the eris `perm` table) is commented out and the main Lua state isn't reachable from the sandbox
 `ExecuteLua` to set it up (a small vendored getter would do it). So the search runs on the fast Python twin —
 now *proven exact by this emulator* — and the emulator is the validator + renderer. See
-[`tools/fake08-sim/README.md`](../../tools/fake08-sim/README.md).
+[`test/playtest/fake08-sim/README.md`](../../test/playtest/fake08-sim/README.md).
 
 ## Deliverables
 
-- `tools/fake08-sim/` — headless native build of the device VM (exact physics) + ctypes bindings + a run
+- `test/playtest/fake08-sim/` — headless native build of the device VM (exact physics) + ctypes bindings + a run
   renderer; validates plans and produces the comparison video.
-- `tools/celeste_playtest.py` — self-contained: resets, starts the game, and for **each room** waits for its
+- `test/playtest/celeste/celeste_playtest.py` — self-contained: resets, starts the game, and for **each room** waits for its
   spawn and delivers that room's embedded plan frame-synced (draining telemetry so the frame clock stays
   real-time), verifying each clear over the wire; exits 0 (PASS) / 1 (FAIL). Clears **100 M → 200 M → 300 M**.
-- `tools/celeste_solver/` — the physics twin (`celeste_sim.py`, room-parameterised) + beam search
+- `test/playtest/celeste/celeste_solver/` — the physics twin (`celeste_sim.py`, room-parameterised) + beam search
   (`solve.py`: `beam_solve` and the full-state `beam_solve_fast`) that produced the plans; `solve.py`
   re-prints both embedded `PLAN`s (verified byte-identical).
 - Firmware: `TELEMETRY` (app), `INPUT_HOLD_FRAMES` (input backend) — both opt-in, off by default.

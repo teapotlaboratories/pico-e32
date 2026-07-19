@@ -11,7 +11,7 @@
 #   tools/record_video.sh [-t SECONDS] [-o OUT.mp4] [label]      # record for SECONDS (default 20)
 #   tools/record_video.sh [-o OUT.mp4] -- <command...>           # record until <command> exits
 # e.g. film the hands-free Celeste play-test end to end:
-#   tools/record_video.sh -o /tmp/celeste.mp4 -- python3 tools/celeste_playtest.py /dev/ttyUSB0
+#   tools/record_video.sh -o /tmp/celeste.mp4 -- python3 test/playtest/celeste/celeste_playtest.py /dev/ttyUSB0
 #
 # Host from BENCH_CAM_HOST or tools/bench_cam.env (BENCH_CAM_HOST=<ip>). Tunables (env; set empty to
 # disable): VIDEO_SIZE=svga  VIDEO_ROTATE=1 (transpose)  VIDEO_CROP=WxH+X+Y (default none — whole frame)
