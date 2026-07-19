@@ -86,6 +86,7 @@
       <li><a href="#s8">Review + M4 — the gym's eyes</a></li>
       <li><a href="#s9">M5 — a spawned agent solves Celeste</a></li>
       <li><a href="#s10">M6 — a play-test measures its own fps</a></li>
+      <li><a href="#s11">M7 — generalize the video (sim + device)</a></li>
       <li><a href="#state">State at end of session</a></li>
     </ol>
   </nav>
@@ -297,8 +298,8 @@
   <div class="diag">
     <h3>The pipeline — agent solves the gym; the output is a replay-able <code>Trace</code></h3>
     <p class="sub">Solid = landed (M2: the <code>Trace</code> contract + dual replay; the spawned solver
-       agent, M4–M5 — §8–§9; and the on-device fps measurement, M6 — §10). Dashed = still the goal — the
-       produced report (M8 orchestrator) + video (M7).</p>
+       agent, M4–M5 — §8–§9; the on-device fps measurement, M6 — §10; and the generalized sim/device video,
+       M7 — §11). Dashed = still the goal — the consolidated report (M8 orchestrator).</p>
     <svg viewBox="0 0 820 240" width="100%" role="img" aria-label="Pipeline: spawned solver agent produces a Trace, replayed on sim and device, yielding an fps and video report">
       <defs>
         <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
@@ -344,12 +345,12 @@
       <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
         <text x="710" y="110" style="font:700 11px var(--mono)">report — GOAL</text>
         <text x="710" y="125" style="font:10px var(--mono);fill:var(--ok)">fps min/avg/max · M6 ✓ §10</text>
-        <text x="710" y="139" style="font:10px var(--mono);fill:var(--muted)">sim.mp4 · device.mp4 · M7</text>
+        <text x="710" y="139" style="font:10px var(--mono);fill:var(--ok)">sim.mp4 · device.mp4 · M7 ✓</text>
       </g>
     </svg>
     <p class="legend">Every node is grounded in the doc: the agent + gym (§7, M4–M5), the <code>Trace</code> and
-       its sim/device replays (§3, landed), the on-device fps measurement (M6, §10 — now landed), and the
-       consolidated report + video goal (top-of-doc goal, M7–M8).</p>
+       its sim/device replays (§3, landed), the on-device fps measurement (M6, §10 — landed), the generalized
+       sim/device video (M7, §11 — landed), and the consolidated report goal (M8 orchestrator).</p>
   </div>
 
   <p><b>Next:</b> <b>M4</b> — the gym's "eyes" (frame + filmstrip rendering, a <code>run(inputs)→observe</code>
@@ -593,15 +594,105 @@
     consistent with Gate #2's object-count-driven per-room <b>5–40 ms</b>.
   </div>
 
+  <h2 id="s11">11. M7 — generalize the video (sim + device)</h2>
+  <p>Extracted a shared, cart-agnostic sim-video renderer <code>render.py</code>: it plays a <code>Trace</code>
+     on the sim — a cart's <code>reset(seg)</code> to reach each segment's start, then the segment's masks, with
+     an optional <code>stop_on_clear(state, seg)</code> so the clip ends exactly at the clear — captures
+     <b>every game-frame</b>, and encodes to mp4 at the game rate (<code>60 / steps_per_frame</code>).
+     <code>celeste/render_run.py</code> is now a <b>thin adapter</b> over it
+     (<code>reset = spawn(rx,ry)</code>, clear = <code>(rx,ry)</code> advances) and renders a <em>trace file</em>
+     (default <code>solution.trace.json</code>) rather than the embedded plans.</p>
+  <p>The <b>device</b> side was already generic: <code>tools/record_video.sh -- &lt;a celeste_playtest.py
+     --trace=… run&gt;</code> films whatever plays through the <b>bench camera</b>. So both videos are driven by
+     the <b>same</b> <code>Trace</code> — one file → a sim video <em>and</em> a device video, for any cart that
+     supplies a <code>reset</code>.</p>
+
+  <div class="diag">
+    <h3>One <code>Trace</code>, two videos — a host render and a filmed board</h3>
+    <p class="sub">The same trace file feeds both paths: the cart-agnostic <code>render.py</code> replays it on
+       the sim and encodes an mp4; <code>record_video.sh</code> films the same trace replaying on the board
+       through the bench camera. The only per-cart piece is the <code>reset</code> the adapter supplies.</p>
+    <svg viewBox="0 0 820 244" width="100%" role="img" aria-label="One Trace feeds two video paths: the sim renderer render.py encodes an mp4, and the device path films the board via the bench camera">
+      <defs>
+        <marker id="ah11" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L7,3 L0,6 z" style="fill:var(--line)"/>
+        </marker>
+      </defs>
+      <!-- edges from the Trace -->
+      <path d="M160,110 C182,110 182,63 196,63" fill="none" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah11)"/>
+      <path d="M160,140 C182,140 182,198 196,198" fill="none" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah11)"/>
+      <!-- SIM lane edges -->
+      <line x1="385" y1="63" x2="411" y2="63" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah11)"/>
+      <line x1="565" y1="63" x2="591" y2="63" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah11)"/>
+      <!-- DEVICE lane edges -->
+      <line x1="385" y1="198" x2="411" y2="198" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah11)"/>
+      <line x1="565" y1="198" x2="591" y2="198" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah11)"/>
+      <!-- Trace node -->
+      <rect x="10" y="98" width="150" height="54" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+      <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
+        <text x="85" y="120" style="font:700 12px var(--mono)">one Trace</text>
+        <text x="85" y="135" style="font:10px var(--mono);fill:var(--muted)">same file · any cart</text>
+        <text x="85" y="148" style="font:10px var(--mono);fill:var(--muted)">reset + masks</text>
+      </g>
+      <!-- SIM lane -->
+      <text x="200" y="26" style="fill:var(--muted);font:600 11px var(--mono)">SIM — sim video (host)</text>
+      <rect x="200" y="36" width="185" height="54" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+      <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
+        <text x="292" y="55" style="font:700 11px var(--mono)">render.py</text>
+        <text x="292" y="70" style="font:10px var(--mono);fill:var(--muted)">reset(seg) + masks → capture</text>
+        <text x="292" y="83" style="font:10px var(--mono);fill:var(--muted)">stop_on_clear → ends at clear</text>
+      </g>
+      <rect x="415" y="36" width="150" height="54" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+      <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
+        <text x="490" y="59" style="font:700 11px var(--mono)">ffmpeg</text>
+        <text x="490" y="74" style="font:10px var(--mono);fill:var(--muted)">mp4 @ 60/steps_per_frame</text>
+      </g>
+      <rect x="595" y="36" width="205" height="54" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+      <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
+        <text x="697" y="59" style="font:700 12px var(--mono)">sim.mp4</text>
+        <text x="697" y="74" style="font:10px var(--mono);fill:var(--ok)">257 fr / 8.6 s ✓</text>
+      </g>
+      <!-- DEVICE lane -->
+      <text x="200" y="160" style="fill:var(--muted);font:600 11px var(--mono)">DEVICE — device video (bench camera)</text>
+      <rect x="200" y="170" width="185" height="56" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+      <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
+        <text x="292" y="191" style="font:700 11px var(--mono)">celeste_playtest.py</text>
+        <text x="292" y="205" style="font:10px var(--mono);fill:var(--muted)">--trace replays on board</text>
+        <text x="292" y="218" style="font:10px var(--mono);fill:var(--muted)">serial · INPUT_HOLD_FRAMES=1</text>
+      </g>
+      <rect x="415" y="170" width="150" height="56" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+      <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
+        <text x="490" y="194" style="font:700 10px var(--mono)">record_video.sh</text>
+        <text x="490" y="209" style="font:10px var(--mono);fill:var(--muted)">bench camera stream</text>
+      </g>
+      <rect x="595" y="170" width="205" height="56" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+      <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
+        <text x="697" y="194" style="font:700 12px var(--mono)">device.mp4</text>
+        <text x="697" y="209" style="font:10px var(--mono);fill:var(--ok)">same trace on real HW ✓</text>
+      </g>
+    </svg>
+    <p class="legend">One <code>Trace</code> drives both paths — the cart-agnostic <code>render.py</code> encodes
+       the sim mp4 (<code>reset</code> is the only per-cart hook), while <code>record_video.sh</code> films the
+       same trace replaying on the board. Every box here is landed (M7).</p>
+  </div>
+
+  <div class="tldr">
+    <b class="ok">Verified —</b> rendered the M5 <code>solution.trace.json</code> to mp4 via the generalized path
+    (<b>257 frames / 8.6 s</b>) and filmed the same trace on the board earlier — both sent as <b>side-by-side
+    proof</b>. One <code>Trace</code> now yields a sim video <em>and</em> a device video; the renderer is
+    cart-agnostic, the only per-cart piece is the <code>reset</code> the adapter supplies.
+  </div>
+
   <h2 id="state">State at end of session</h2>
   <ul>
     <li><b>Done:</b> M0 (reorg), M1 (replay-from-root), M2 (Trace + dual replay + frame-count sync), M3 (search
        as a cart-agnostic engine + <code>celeste/solve.py</code>), M4 (agent gym — the eyes,
        <code>gym.py</code>), M5 (spawned solver agent solved Celeste through the gym, verified on the board),
-       <b>M6 (fps unified into the telemetry stream — achieved + headroom, measured on the board)</b>. All on
+       M6 (fps unified into the telemetry stream — achieved + headroom, measured on the board),
+       <b>M7 (generalized sim/device video — shared <code>render.py</code> + Celeste adapter)</b>. All on
        <b>PR #13</b> (branch <code>playtest-agent-gym</code>, self-reviewed via <code>/review</code>).
-       <b>Next:</b> M7 video (generalize the sim/device video), M8 orchestrator, M9 a non-platformer cart
-       (proves genre-agnosticism).</li>
+       <b>Next:</b> M8 orchestrator (one call: spawn solver → sim + device → fold fps + both videos into one
+       report), M9 a non-platformer cart (proves genre-agnosticism).</li>
     <li><b>Board:</b> left flashed with the play-test build (<code>CELESTE + INPUT_BACKEND=serial +
        INPUT_HOLD_FRAMES=1 + FORCE_FLASH_CART + SHOW_FPS + TELEMETRY + CENTER_GAME</code>), idle at room 2 — a
        known-good dev build.</li>
