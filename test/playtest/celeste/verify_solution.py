@@ -20,11 +20,12 @@ import gym
 from trace import Trace
 
 CART = os.path.join(os.getcwd(), "assets/celeste.p8")
-OUT = sys.argv[1] if len(sys.argv) > 1 else HERE
+OUT = sys.argv[1] if len(sys.argv) > 1 else "/tmp/celeste-verify"   # throwaway PNGs -> /tmp, not the source tree
 TRACE = os.path.join(HERE, "solution.trace.json")
 
 
 def main():
+    os.makedirs(OUT, exist_ok=True)
     VM.init(CART)
     tr = Trace.load(TRACE)
     print(f"trace: {tr.cart}, steps_per_frame={tr.steps_per_frame}, {len(tr.segments)} segments, "
