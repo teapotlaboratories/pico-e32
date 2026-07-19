@@ -183,7 +183,7 @@ test/playtest/<cart>/
 | M2 | Portable `Trace` + dual replay proven — same file clears on sim **and** device | ✅ done |
 | M3 | Beam search tool — cart-agnostic engine `search.py` + Celeste adapter `celeste/solve.py`; climbs a room on the exact VM | ✅ done (optional tool) |
 | M4 | **Agent-facing gym** — the eyes: `gym.snapshot` + `gym.run_filmstrip` render viewable frame/filmstrip PNGs of a run (verified on Celeste room 0) | ✅ done |
-| M5 | **Spawned solver-agent flow**: agent reads the cart, drives the gym, writes its own scripts/instrumentation **standalone & isolated under `<cart>/`**, emits a verified `Trace` — **proven on Celeste** | ⏳ next |
+| M5 | **Spawned solver-agent flow**: agent read the cart, drove the gym, wrote its own scripts **isolated under `celeste/`**, and emitted a verified `Trace` — **proven on Celeste** (independent sim replay + device replay 2/2 on the board) | ✅ done |
 | M6 | Unified fps telemetry (achieved **and** headroom) + harness aggregation → min/max/avg | 📋 todo |
 | M7 | Generalize video capture (sim `render_run` → any cart+trace; device `record_video.sh` already generic) | 📋 todo |
 | M8 | One-call orchestrator: `playtest <cart>` → spawn solver → sim + device → emit the report | 📋 todo |
@@ -198,11 +198,14 @@ test/playtest/<cart>/
   `run_filmstrip(masks, path, every=, reset=, label=)` replays a run and montages sampled, labelled frames
   into one contact-sheet PNG (returns the captured `read()` states too) — so a solver agent experiments and
   *observes* in one look. Deterministic. Verified on Celeste room 0 (the climb reads y96 → y4 across the strip).
-- **M5 — solver-agent flow.** Spawn a per-cart solver agent with the gym as its toolset, scoped to
-  `test/playtest/<cart>/` per the **standalone & isolated contract** above: it reads the cart's Lua, writes
-  its own scripts/state-reader *there*, iterates to a `Trace`, self-verifies via sim replay, and touches no
-  shared code. Prove it on Celeste (compare against the known-good reference trace). May invoke the shared
-  beam engine `search.py`, wired per-cart like `celeste/solve.py`.
+- **M5 — solver-agent flow. ✅ done.** A spawned solver agent, given the gym as its toolset and scoped to
+  `test/playtest/celeste/`, inspected the cart with `gym.snapshot`, derived each room's input by re-running
+  the twin's beam search and **VM-gating every route** (a real finding: several twin "wins" fail on the exact
+  VM — the twin is a model, the VM is ground truth), and emitted `celeste/solution.trace.json` (2 segments,
+  207 frames) plus `make_solution.py` / `verify_solution.py` / `README.md` — all isolated in `celeste/`, no
+  shared code touched. Independently verified: sim replay clears both rooms, a filmstrip eye-check, and
+  **device replay 2/2 on the board**. Solver agents may also **share images + ask the owner questions** while
+  solving (the Collaborate affordance).
 - **M6 — fps.** `MEASURE_FPS` and `TELEMETRY` are today mutually-exclusive loops in
   `firmware/pico-e32-fake08/main/main.cpp`. Unify: one loop streaming `T <fc> <step_us> <draw_us> …`. Harness
   records the per-frame series → min/max/avg **achieved** + **headroom**. Fold into the trace `meta` + report.
