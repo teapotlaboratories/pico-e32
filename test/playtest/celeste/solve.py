@@ -54,6 +54,9 @@ def main():
     ap.add_argument("--depth", type=int, default=18)
     args = ap.parse_args()
     rx, ry = args.rx, args.ry
+    if (rx, ry) not in SPAWN:                       # fail fast, before the (expensive) solve
+        print(f"no known spawn for room ({rx},{ry}); add it to SPAWN in {os.path.relpath(__file__)}")
+        return 2
 
     VM.init(os.path.join(os.getcwd(), "assets/celeste.p8"))
     print(f"solving celeste room ({rx},{ry}) beam={args.beam} depth={args.depth}...", flush=True)

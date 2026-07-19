@@ -54,6 +54,10 @@ int sim_init(const char* cart_path) {
     if (fread(buf.data(), 1, n, f) != (size_t)n) { fclose(f); return 0; }
     fclose(f);
 
+    // NOTE: re-init in the same process (the orchestrator replays then renders; tests re-init) leaks the
+    // prior VM/Host/Ram/Audio. That's deliberate: fake-08's objects aren't teardown-safe (their destructors
+    // double-free and crash), so we can't delete them. The leak is bounded — a couple of inits per process,
+    // freed at exit — and preferable to a crash.
     host = new Host(0, 0);
     ram = new PicoRam(); ram->Reset();
     audio = new Audio(ram);
