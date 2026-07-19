@@ -40,7 +40,12 @@
           tool (M3). An eris savestate speed-up was investigated and <strong>PARKED</strong> as a multi-bug dead-end
           (<code>u_proto</code> heap-use-after-free + <code>Vm::Step</code> global-buffer-overflow, matching upstream
           <code>47c48ad</code>). The pivot: the genericity lives in the <strong>environment</strong> — a deterministic gym a
-          <strong>spawned solver agent</strong> drives — not in a fixed solver.</span>
+          <strong>spawned solver agent</strong> drives — not in a fixed solver. On that gym: the agent's <strong>eyes</strong>
+          (<code>gym.py</code> snapshot/filmstrip, M4), a <strong>spawned agent that solved Celeste</strong> hands-free and
+          emitted a verified Trace (M5), <strong>on-device fps</strong> folded into the telemetry stream (achieved + headroom,
+          M6), a <strong>cart-agnostic sim/device video</strong> pipeline (M7), and a <strong>one-call orchestrator</strong>
+          (<code>orchestrate.py</code>) that folds both replays into a single <code>report.json</code> — all verified on the
+          board (M8). Next: a non-platformer cart to prove genre-agnosticism (M9).</span>
       </li>
       <li>
         <span class="d">2026-07-18</span>

@@ -197,15 +197,35 @@ Verified: rendered the M5 `solution.trace.json` to mp4 (**257 frames / 8.6 s**) 
 filmed the same trace on the board earlier (both sent as side-by-side proof). So one trace → a sim video and
 a device video, any cart that supplies a reset.
 
+## 12. M8 — the one-call orchestrator (sim + device → one report)
+
+Folded the whole pipeline into a single cart-agnostic call, `orchestrate.py`: given a solved `Trace` it runs
+the **sim** (`render.replay()` to verify + `render.render()` → `sim.mp4`) **and** the **device** (a cart hook
+that replays frame-synced over serial → cleared + fps, then `record_video.sh` → `device.mp4` off the bench
+camera), and writes `report.json`:
+`{cart, segments, frames, sim{cleared,total,video,per-segment}, device{cleared,total,fps{achieved,headroom},video}, pass}`.
+A cart supplies only its sim `reset`/`stop` callables + the device replay/record hooks — the orchestration is
+generic. `celeste/orchestrate_run.py` is the thin Celeste entry (`--sim-only` skips the board); the device
+replay hook is `celeste_playtest.replay_device()` (added so the harness fps series is captured
+programmatically). Named `*_run.py` to avoid shadowing the shared `orchestrate` module (same convention as
+`render_run.py` / `solve.py`).
+
+Verified **end-to-end on the board**: sim 2/2 + device 2/2 cleared, achieved **9.2/29.9/30.0**, headroom
+**9.2/64.0/112.1** over 507 game-frames, `sim.mp4` (8.6 s, 512×512) + `device.mp4` (22.6 s, 480×640) written,
+`pass: true`. Added `test_orchestrate.py` (sim-path smoke test — report well-formed, both rooms clear, video
+non-empty; SKIPs without the sim). The report + videos are throwaway (`/tmp`, per `.ai/AGENTS.md`); the
+committed deliverable is the orchestrator code + the trace.
+
 ## State at end of session
 
 - **Done:** M0 (reorg), M1 (replay-from-root), M2 (Trace + dual replay + frame-count sync), M3 (search as a
   cart-agnostic engine + `celeste/solve.py`), M4 (agent gym — the eyes, `gym.py`), M5 (spawned solver agent
   solved Celeste through the gym, verified on the board), M6 (fps unified into the telemetry stream —
-  achieved + headroom, measured on the board), **M7 (generalized sim/device video — shared `render.py` +
-  Celeste adapter)**. All on PR #13 (branch `playtest-agent-gym`, self-reviewed via `/review`). **Next:** M8
-  orchestrator (one call: spawn solver → sim + device → fold fps + both videos into one report), M9 a
-  non-platformer cart (proves genre-agnosticism).
+  achieved + headroom, measured on the board), M7 (generalized sim/device video — shared `render.py` +
+  Celeste adapter), **M8 (one-call orchestrator — shared `orchestrate.py` + Celeste `orchestrate_run.py`,
+  sim + device folded into one `report.json`, verified on the board)**. All on PR #13 (branch
+  `playtest-agent-gym`, self-reviewed via `/review`). **Next:** M9 a non-platformer cart (proves
+  genre-agnosticism).
 - **Board:** left flashed with the play-test build (`CELESTE + INPUT_BACKEND=serial + INPUT_HOLD_FRAMES=1 +
   FORCE_FLASH_CART + SHOW_FPS + TELEMETRY + CENTER_GAME`), idle at room 2 — a known-good dev build.
 - **Fork:** the eris experiment is reverted; `components/fake08/fake08` is clean (no gitlink change).

@@ -87,6 +87,7 @@
       <li><a href="#s9">M5 — a spawned agent solves Celeste</a></li>
       <li><a href="#s10">M6 — a play-test measures its own fps</a></li>
       <li><a href="#s11">M7 — generalize the video (sim + device)</a></li>
+      <li><a href="#s12">M8 — the one-call orchestrator (sim + device → one report)</a></li>
       <li><a href="#state">State at end of session</a></li>
     </ol>
   </nav>
@@ -297,9 +298,9 @@
 
   <div class="diag">
     <h3>The pipeline — agent solves the gym; the output is a replay-able <code>Trace</code></h3>
-    <p class="sub">Solid = landed (M2: the <code>Trace</code> contract + dual replay; the spawned solver
-       agent, M4–M5 — §8–§9; the on-device fps measurement, M6 — §10; and the generalized sim/device video,
-       M7 — §11). Dashed = still the goal — the consolidated report (M8 orchestrator).</p>
+    <p class="sub">Every node is landed: the <code>Trace</code> contract + dual replay (M2); the spawned solver
+       agent (M4–M5 — §8–§9); the on-device fps measurement (M6 — §10); the generalized sim/device video
+       (M7 — §11); and the consolidated one-call report (M8 — §12).</p>
     <svg viewBox="0 0 820 240" width="100%" role="img" aria-label="Pipeline: spawned solver agent produces a Trace, replayed on sim and device, yielding an fps and video report">
       <defs>
         <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
@@ -310,8 +311,8 @@
       <line x1="160" y1="120" x2="186" y2="120" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah)"/>
       <path d="M340,120 C372,120 372,57 396,57" fill="none" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah)"/>
       <path d="M340,120 C372,120 372,183 396,183" fill="none" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah)"/>
-      <path d="M550,57 C592,57 592,108 626,110" fill="none" style="stroke:var(--line);stroke-width:2;stroke-dasharray:5 4" marker-end="url(#ah)"/>
-      <path d="M550,183 C592,183 592,132 626,130" fill="none" style="stroke:var(--line);stroke-width:2;stroke-dasharray:5 4" marker-end="url(#ah)"/>
+      <path d="M550,57 C592,57 592,108 626,110" fill="none" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah)"/>
+      <path d="M550,183 C592,183 592,132 626,130" fill="none" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah)"/>
       <!-- A: spawned solver agent (done — M4–M5) -->
       <rect x="10" y="93" width="150" height="54" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
       <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
@@ -340,17 +341,17 @@
         <text x="475" y="190" style="font:10px var(--mono);fill:var(--muted)">flash + replay</text>
         <text x="475" y="203" style="font:700 10px var(--mono);fill:var(--ok)">PASS 2/2 (§3)</text>
       </g>
-      <!-- E: report (goal) -->
-      <rect x="630" y="93" width="160" height="54" rx="9" style="fill:var(--codebg);stroke:var(--accent);stroke-width:1.6;stroke-dasharray:5 4"/>
+      <!-- E: report (done — M8) -->
+      <rect x="630" y="93" width="160" height="54" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
       <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
-        <text x="710" y="110" style="font:700 11px var(--mono)">report — GOAL</text>
+        <text x="710" y="110" style="font:700 11px var(--mono)">report.json — M8</text>
         <text x="710" y="125" style="font:10px var(--mono);fill:var(--ok)">fps min/avg/max · M6 ✓ §10</text>
-        <text x="710" y="139" style="font:10px var(--mono);fill:var(--ok)">sim.mp4 · device.mp4 · M7 ✓</text>
+        <text x="710" y="139" style="font:10px var(--mono);fill:var(--ok)">sim.mp4 · device.mp4 · one call ✓</text>
       </g>
     </svg>
     <p class="legend">Every node is grounded in the doc: the agent + gym (§7, M4–M5), the <code>Trace</code> and
        its sim/device replays (§3, landed), the on-device fps measurement (M6, §10 — landed), the generalized
-       sim/device video (M7, §11 — landed), and the consolidated report goal (M8 orchestrator).</p>
+       sim/device video (M7, §11 — landed), and the consolidated one-call report (M8, §12 — landed).</p>
   </div>
 
   <p><b>Next:</b> <b>M4</b> — the gym's "eyes" (frame + filmstrip rendering, a <code>run(inputs)→observe</code>
@@ -683,16 +684,92 @@
     cart-agnostic, the only per-cart piece is the <code>reset</code> the adapter supplies.
   </div>
 
+  <h2 id="s12">12. M8 — the one-call orchestrator (sim + device → one report)</h2>
+  <p>Folded the whole play-test into a single cart-agnostic call, <code>orchestrate.py</code>: given a solved
+     <code>Trace</code> it runs the <b>sim</b> (<code>render.replay()</code> to verify + <code>render.render()</code>
+     → <code>sim.mp4</code>) <b>and</b> the <b>device</b> (a cart hook replays frame-synced over serial → cleared
+     + fps, then <code>record_video.sh</code> films it off the bench camera → <code>device.mp4</code>), and writes
+     one <code>report.json</code>:
+     <code>{cart, segments, frames, sim{cleared,total,video,…}, device{cleared,total,fps{achieved,headroom},video}, pass}</code>.</p>
+  <p>A cart supplies only its sim <code>reset</code>/<code>stop</code> callables and the device replay/record
+     hooks — the orchestration is generic. <code>celeste/orchestrate_run.py</code> is the thin Celeste entry
+     (<code>--sim-only</code> skips the board); the device replay hook is
+     <code>celeste_playtest.replay_device()</code>, added so the harness fps series is captured programmatically.
+     It's named <code>*_run.py</code> to avoid shadowing the shared <code>orchestrate</code> module — the same
+     convention as <code>render_run.py</code> / <code>solve.py</code>.</p>
+
+  <div class="diag">
+    <h3>One call folds both replays into one <code>report.json</code></h3>
+    <p class="sub">The same <code>Trace</code> the solver emitted drives both lanes; <code>orchestrate.py</code>
+       verifies each, captures the device fps, encodes/films a video on each side, and writes a single report.
+       The only per-cart pieces are the sim <code>reset</code>/<code>stop</code> and the device hooks.</p>
+    <svg viewBox="0 0 820 244" width="100%" role="img" aria-label="orchestrate.py runs a Trace through a sim lane and a device lane and folds both into one report.json">
+      <defs>
+        <marker id="ah12" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L7,3 L0,6 z" style="fill:var(--line)"/>
+        </marker>
+      </defs>
+      <!-- orchestrate -> lanes -->
+      <path d="M160,110 C200,110 200,63 226,63" fill="none" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah12)"/>
+      <path d="M160,140 C200,140 200,198 226,198" fill="none" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah12)"/>
+      <!-- lanes -> report -->
+      <path d="M480,63 C545,63 545,110 606,112" fill="none" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah12)"/>
+      <path d="M480,198 C545,198 545,138 606,136" fill="none" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah12)"/>
+      <!-- orchestrate node -->
+      <rect x="10" y="95" width="150" height="60" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+      <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
+        <text x="85" y="116" style="font:700 12px var(--mono)">orchestrate.py</text>
+        <text x="85" y="131" style="font:10px var(--mono);fill:var(--muted)">one call · any cart</text>
+        <text x="85" y="145" style="font:10px var(--mono);fill:var(--muted)">Trace in</text>
+      </g>
+      <!-- SIM lane -->
+      <text x="230" y="26" style="fill:var(--muted);font:600 11px var(--mono)">SIM lane (host)</text>
+      <rect x="230" y="36" width="250" height="54" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+      <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
+        <text x="355" y="55" style="font:700 11px var(--mono)">replay() + render()</text>
+        <text x="355" y="70" style="font:10px var(--mono);fill:var(--muted)">verify → sim.mp4 (8.6 s)</text>
+        <text x="355" y="83" style="font:700 10px var(--mono);fill:var(--ok)">2/2 cleared ✓</text>
+      </g>
+      <!-- DEVICE lane -->
+      <text x="230" y="160" style="fill:var(--muted);font:600 11px var(--mono)">DEVICE lane (board + bench camera)</text>
+      <rect x="230" y="170" width="250" height="56" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+      <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
+        <text x="355" y="189" style="font:700 11px var(--mono)">replay_device() + record</text>
+        <text x="355" y="204" style="font:10px var(--mono);fill:var(--muted)">verify + fps → device.mp4 (22.6 s)</text>
+        <text x="355" y="217" style="font:700 10px var(--mono);fill:var(--ok)">2/2 · 9.2/29.9/30.0 ✓</text>
+      </g>
+      <!-- report node -->
+      <rect x="610" y="93" width="200" height="60" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+      <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
+        <text x="710" y="113" style="font:700 12px var(--mono)">report.json</text>
+        <text x="710" y="128" style="font:10px var(--mono);fill:var(--muted)">sim · device · fps · videos</text>
+        <text x="710" y="142" style="font:700 10px var(--mono);fill:var(--ok)">pass: true</text>
+      </g>
+    </svg>
+    <p class="legend">One command runs both lanes and folds them into a single report — the sim half needs no
+       hardware (<code>--sim-only</code>), the device half adds the on-board fps and a filmed run. Every box here
+       is landed (M8), verified end-to-end on the board.</p>
+  </div>
+
+  <div class="tldr">
+    <b class="ok">Verified end-to-end on the board —</b> <code>orchestrate_run.py &lt;board&gt;</code>: sim
+    <b>2/2</b> + device <b>2/2</b> cleared, achieved <b>9.2/29.9/30.0</b>, headroom <b>9.2/64.0/112.1</b> over
+    507 game-frames, <code>sim.mp4</code> (8.6 s) + <code>device.mp4</code> (22.6 s) written, <code>pass: true</code>.
+    A sim-path smoke test (<code>test_orchestrate.py</code>) keeps the report path covered without a board. The
+    report + videos are throwaway (<code>/tmp</code>); the committed deliverable is the orchestrator + the trace.
+  </div>
+
   <h2 id="state">State at end of session</h2>
   <ul>
     <li><b>Done:</b> M0 (reorg), M1 (replay-from-root), M2 (Trace + dual replay + frame-count sync), M3 (search
        as a cart-agnostic engine + <code>celeste/solve.py</code>), M4 (agent gym — the eyes,
        <code>gym.py</code>), M5 (spawned solver agent solved Celeste through the gym, verified on the board),
        M6 (fps unified into the telemetry stream — achieved + headroom, measured on the board),
-       <b>M7 (generalized sim/device video — shared <code>render.py</code> + Celeste adapter)</b>. All on
+       M7 (generalized sim/device video — shared <code>render.py</code> + Celeste adapter),
+       <b>M8 (one-call orchestrator — shared <code>orchestrate.py</code> + Celeste <code>orchestrate_run.py</code>,
+       sim + device folded into one <code>report.json</code>, verified on the board)</b>. All on
        <b>PR #13</b> (branch <code>playtest-agent-gym</code>, self-reviewed via <code>/review</code>).
-       <b>Next:</b> M8 orchestrator (one call: spawn solver → sim + device → fold fps + both videos into one
-       report), M9 a non-platformer cart (proves genre-agnosticism).</li>
+       <b>Next:</b> M9 a non-platformer cart (proves genre-agnosticism).</li>
     <li><b>Board:</b> left flashed with the play-test build (<code>CELESTE + INPUT_BACKEND=serial +
        INPUT_HOLD_FRAMES=1 + FORCE_FLASH_CART + SHOW_FPS + TELEMETRY + CENTER_GAME</code>), idle at room 2 — a
        known-good dev build.</li>

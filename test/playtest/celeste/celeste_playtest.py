@@ -119,6 +119,16 @@ def segments_from_trace(path):
     return segs, tr.steps_per_frame
 
 
+def replay_device(port, tracefile, timeout=42):
+    """Replay a trace on the device (board) programmatically — returns (cleared, total, fps_stats). Used by
+    the orchestrator; drives the same frame-synced harness as `--trace`, capturing the fps series."""
+    segments, spf = segments_from_trace(tracefile)
+    fps = {}
+    n = run(port, parse_line, segments, settle=8, lead=2, steps_per_frame=spf,
+            start_sends=START_SENDS, timeout=timeout, done_grace=2, fps_out=fps, verbose=False)
+    return n, len(segments), (fps or None)
+
+
 def _replay_sim():
     """Replay a trace on the SIM (mirror of the device path). Usage: celeste_playtest.py --sim --trace=<file>."""
     tf = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--trace=")), None)
