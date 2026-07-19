@@ -67,6 +67,46 @@ for ~`HOLD_FRAMES` frames** then auto-released, so a single byte is a tap and re
 Upper/lower case both accepted. Unknown bytes ignored. Each received key is logged (`input.serial: r`)
 so the receive→map step is verifiable from the serial log alone, independent of the camera.
 
+`O` and `X` are the two action buttons; **which one a cart uses for what is the cart's business.** In
+Celeste, `k_jump=4=O` and `k_dash=5=X`, so **`z`/`o` = jump and `x` = dash** (easy to get backwards).
+
+## Frame-exact HITL: telemetry + `INPUT_HOLD_FRAMES` (the Celeste play-test)
+
+Two opt-in build flags turn the serial path into a **deterministic, self-checking** test harness — used
+by [`tools/celeste_playtest.py`](../../tools/celeste_playtest.py) to drive Celeste through **two full levels
+("100 M" → "200 M" → "300 M")** hands-free and confirm each over the wire. Both default off (normal builds
+unchanged).
+
+- **`-D TELEMETRY=1`** (app: `firmware/pico-e32-fake08/main.cpp`) — a `GameLoop` variant that prints, each
+  frame, `T <frame> <x> <y> <room.x> <room.y> <spd.x> <spd.y> <djump>` over UART. It reads the running
+  cart's `player`/`room` via the public `Vm::ExecuteLua` (runs in the cart sandbox), so it needs **no cart
+  edit and no change to vendored fake-08**. This gives the driver ground-truth position (verify a clear via
+  the `room.x/y` change) *and* a frame clock to sync input to. TX (telemetry) and RX (input) share UART0
+  cleanly.
+- **`-D INPUT_HOLD_FRAMES=1`** (this backend) — overrides the default 6-frame auto-release so each byte is
+  held **exactly one frame**. Re-send every frame to hold; frame-exact control for an automated,
+  frame-synced driver. (6 stays the default for a human typing single keys.)
+
+Why frame-exact: each room needs several frame-precise dashes/jumps a loose open-loop timeline can't land.
+The input for each room is *solved* offline against a physics twin
+([`tools/celeste_solver/`](../../tools/celeste_solver/)) and delivered locked to the telemetry frame
+counter; after a room clears, the player respawns at the next room's spawn and the driver re-syncs. (The
+driver **drains** the telemetry each loop so the frame counter stays real-time — otherwise the 60 Hz stream
+backs up and delivery lags on the later room.) Result: the same clears at the same frames, every run. Build:
+
+```sh
+make flash APP=pico-e32-fake08 BOARD=makerfabs-ili9488-r1 PORT=<board> \
+     DEFS='-D CELESTE=1 -D INPUT_BACKEND=serial -D INPUT_HOLD_FRAMES=1 \
+           -D FORCE_FLASH_CART=1 -D SHOW_FPS=1 -D TELEMETRY=1 -D CENTER_GAME=1'
+python3 tools/celeste_playtest.py <board>     # -> CLEARED 100 M -> 200 M -> 300 M ; PASS (exit 0)
+```
+
+`-D CENTER_GAME=1` (gated in `components/fake08/CMakeLists.txt`, applied in `ESP32Host.cpp`'s `OY`) centres
+the 256×256 game blit vertically on the 320×480 panel. The default is flush to the top, leaving the bottom
+224 px for the touch control-deck; the serial play-test has no deck, so it centres instead. Optional.
+
+See [`docs/worklog/2026-07-18-celeste-playtest-clear.md`](../worklog/2026-07-18-celeste-playtest-clear.md).
+
 ## HITL verification — DONE (2026-07-17)
 
 1. Built `-D INPUT_BACKEND=serial`, flashed to `ttyUSB1`. ✅

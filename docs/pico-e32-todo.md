@@ -32,8 +32,14 @@ docs (per [`.ai/AGENTS.md`](../.ai/AGENTS.md) → *Plan first*).
   panel (2026-07-18): draw-only port ✅, SD cart loader ✅, input seam ✅ (**serial + touch/FT6236 both
   HITL-verified** driving Celeste — IN-2 done), and the **fps fixed** (the host resumes fake-08's loop at
   60 Hz — a 30 Hz resume ran 30 fps carts at half speed; `CONFIG_FREERTOS_HZ=1000` for smooth pacing; opt-in
-  on-screen FPS HUD). See the [input backlog](runtime/pico-e32-fake08-input.md) and the
-  [fps-resume worklog](worklog/2026-07-18-fake08-celeste-fps-resume.md). **The only seam still blocking
+  on-screen FPS HUD). A **hands-free play-test now clears two full Celeste levels** ("100 M" → "200 M" →
+  "300 M") over serial and self-verifies over the wire — each room's input is solved offline against a physics
+  twin ([`tools/celeste_solver`](../tools/celeste_solver)) and delivered frame-synced to a new
+  position-telemetry stream (`TELEMETRY=1` + `INPUT_HOLD_FRAMES=1`); run
+  [`tools/celeste_playtest.py`](../tools/celeste_playtest.py).
+  See the [input backlog](runtime/pico-e32-fake08-input.md) and the worklogs
+  [fps-resume](worklog/2026-07-18-fake08-celeste-fps-resume.md) +
+  [play-test clear](worklog/2026-07-18-celeste-playtest-clear.md). **The only seam still blocking
   Gate #4 is audio** (MAX98357A, parts-blocked); the physical-button **I²C expander** is also parts-blocked
   (touch needs none). The hand-written `HG-*` draw API is a de-risking harness, **superseded** by fake-08's
   own graphics. Plan in [`runtime/pico-e32-fake08-port.md`](runtime/pico-e32-fake08-port.md).

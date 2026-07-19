@@ -17,7 +17,13 @@
 
 #define IN_UART     UART_NUM_0
 #define IN_RX_BUF   256
-#define HOLD_FRAMES 6        /* ~200 ms at 30 fps */
+/* game-update frames a byte stays held (auto-release). Default 6 (~200 ms at 30 fps) suits a human
+ * typing single keys; an automated frame-synced driver overrides it to 1 (`-D INPUT_HOLD_FRAMES=1`)
+ * for frame-exact control (each byte = exactly one held frame; re-send every frame to keep held). */
+#ifndef INPUT_HOLD_FRAMES
+#define INPUT_HOLD_FRAMES 6
+#endif
+#define HOLD_FRAMES INPUT_HOLD_FRAMES
 
 static const char *TAG = "input.serial";
 static bool    s_ok;

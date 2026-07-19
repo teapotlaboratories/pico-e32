@@ -63,8 +63,13 @@ cp tools/bench_cam.env.example tools/bench_cam.env   # set BENCH_CAM_HOST=<ip>
   measures with exactly the AWB this rig exists to avoid. **Re-apply the settings on the first capture
   of any session** (they persist until the next reset):
   ```sh
-  curl -o frame.jpg 'http://<ip>/capture?awb=0&exp=600&gain=0&sat=2'
+  curl -o frame.jpg 'http://<ip>/capture?size=qxga&awb=0&exp=600&gain=0&sat=2'
   ```
+- **Frame size persists across `/stream` and `/capture` (same sensor).** An earlier
+  `/stream?size=svga` (used to *aim* the rig) leaves the sensor at **800×600**, and a bare `/capture`
+  then quietly measures at SVGA — soft on the small panel. Pass **`size=qxga`** on the first capture
+  to restore full **2048×1536** (both endpoints accept `size=qvga…qxga`). Symptom: captures come back
+  small (e.g. `800×600`) instead of `2048×1536` and look blurry — `identify frame.jpg` shows which.
 - **Lens film:** these ship with a protective film over the lens — captures come back black,
   and auto-exposure will *not* save you. Peel it before blaming the firmware.
 - **A failed camera probe self-diagnoses:** if `esp_camera_init()` fails, the firmware scans the
@@ -78,7 +83,40 @@ tools/capture_frame.sh                 # -> /tmp/pico-e32-captures/20260715-1015
 tools/capture_frame.sh gate1-bars      # -> /tmp/pico-e32-captures/20260715-101500-gate1-bars.jpg
 ```
 It prints the path it wrote. The endpoint drops one frame before returning, so you always
-get a *current* image rather than a stale buffered one.
+get a *current* image rather than a stale buffered one. It shoots at **QXGA** (forces `size=qxga`),
+so a still is always full-resolution even if a prior `/stream?size=svga` left the sensor small.
+
+## Recording video — SVGA, not QXGA
+
+```sh
+tools/record_video.sh -t 20 my-clip                       # 20 s -> /tmp/pico-e32-captures/<ts>-my-clip.mp4
+tools/record_video.sh -o /tmp/x.mp4 -- <command...>       # record until <command> exits
+# film the hands-free Celeste play-test end to end:
+tools/record_video.sh -o /tmp/celeste.mp4 -- python3 tools/celeste_playtest.py /dev/ttyUSB0
+```
+
+**Stills use QXGA; video uses SVGA — on purpose.** The bench cam encodes JPEG in-chip and ships it over
+2.4 GHz WiFi, and *that* pipeline is the ceiling — a hard **~6 Mbit/s** throughput wall, not the sensor.
+So frame rate is bandwidth-bound: it's whatever `6 Mbit/s ÷ frame-size` works out to (measured 2026-07-18,
+clean at 20 MHz XCLK):
+
+| size | frame | fps |
+|---|---|---|
+| QXGA 2048×1536 | ~176 KB | ~4.5 |
+| UXGA 1600×1200 | ~107 KB | ~7 |
+| SVGA 800×600 | ~25 KB | ~23 |
+| VGA 640×480 | ~18 KB | ~27 |
+
+For a *still*, frame rate is irrelevant and resolution is everything (the panel is a small part of frame),
+so `capture_frame.sh` forces **QXGA** — the OV3660's full 3 MP array. For *motion*, fps is everything —
+QXGA's ~4.5 fps is a slideshow against a 30 fps game — so `record_video.sh` defaults to **SVGA** (~23 fps,
+still legible). 30 fps needs ≤ VGA; **1080p tops out ~5 fps** (~10 at throwaway quality) and is
+unreachable at 30 on this cam — see the fps investigation in
+[`2026-07-18` worklog](../worklog/2026-07-18-celeste-playtest-clear.md). Raising XCLK past 20 MHz does
+**not** help (it's bandwidth-bound, and 24 MHz corrupts every frame — tested, reverted). `record_video.sh`
+rotates 90° CW (the mount) and brightens for the dark cart, like a judged still; its knobs (size, crop,
+brightness, fps) are env vars in its header. Video is a throwaway diagnostic → `/tmp` unless you pass
+`-o` or `CAPTURE_DIR=`.
 
 ## The loop (display changes)
 
@@ -158,7 +196,9 @@ red=TL, green=TR, blue=BL, yellow=BR, stub pointing right.
 /capture?awb=0&exp=1200&gain=0&sat=2     # DARK content (a mostly-dark cart): brightest CLEAN exposure
 ```
 
-- **UXGA (1600×1200)** — the panel is a small part of frame; resolution is what buys resolvable detail.
+- **QXGA (2048×1536)** — the OV3660's full array; the panel is a small part of frame, so resolution is
+  what buys resolvable detail, and a still doesn't care about frame rate. `capture_frame.sh` forces it.
+  (The bullet's numbers below were first tuned at UXGA on 2026-07-16; QXGA only samples finer.)
 - **`awb=0`** — auto white balance renormalises hue toward grey, destroying the *relative* colour
   judgement the rig exists for. It costs an absolute cast (see the rule above).
 - **Exposure is scene-dependent — pick by how bright the content is.** `exp=600, gain=0` is tuned for the
@@ -200,8 +240,8 @@ pointing; switch back to UXGA before measuring, and **close the tab** — a live
 - Account for **backlight glare, focus, and colour cast** — the panel is emissive, so the
   camera's white balance can shift hues. Judge *relative* colour (bar order, which bar is
   red vs blue) rather than absolute RGB values.
-- Camera is SVGA (800×600) JPEG — ample to read a 320×480 panel. The F is a **fisheye**: expect
-  barrel distortion at the edges, so centre the panel in frame.
+- Camera captures JPEG up to QXGA (2048×1536); stills use QXGA, video SVGA (see *Recording video*).
+  The F is a **fisheye**: expect barrel distortion at the edges, so centre the panel in frame.
 
 ## Evidence
 

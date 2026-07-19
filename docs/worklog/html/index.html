@@ -31,6 +31,16 @@
     <ul class="entries">
       <li>
         <span class="d">2026-07-18</span>
+        <a class="t" href="2026-07-18-celeste-playtest-clear.html">Driving Celeste through full levels, hands-free over serial</a>
+        <span class="s">The play-test now clears <strong>rooms 1 &amp; 2 ("100 M" → "200 M" → "300 M")</strong> with no human on the
+          controls. Each room's input is <strong>solved offline</strong> against a physics twin and <strong>delivered
+          frame-synced</strong> to a new serial position-telemetry stream (<code>TELEMETRY=1</code>, <code>INPUT_HOLD_FRAMES=1</code>
+          — no cart/vendored edits, via <code>Vm::ExecuteLua</code>). Cruxes: two twin-fidelity bugs (<strong>move-before-update</strong>
+          + the <strong>2-frame dash freeze</strong>) for room 1, and a <strong>driver-lag</strong> bug (reading one telemetry line
+          per loop) for room 2. Result: the same clears at frames 618 &amp; 908, every run; camera confirms "200 M" and "300 M".</span>
+      </li>
+      <li>
+        <span class="d">2026-07-18</span>
         <a class="t" href="2026-07-18-fake08-celeste-fps-resume.html">Celeste plays, but "fps is horrible" — the 60 Hz-resume fix</a>
         <span class="s">First real cart end-to-end (Celeste through fake-08's own <code>GameLoop</code>), then "fps is horrible."
           Measured the work at <strong>~6 ms/frame (162 fps capable)</strong>, so it was pacing, not the S3. Two bugs:

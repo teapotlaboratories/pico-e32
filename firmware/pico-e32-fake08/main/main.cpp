@@ -186,6 +186,33 @@ extern "C" void app_main(void) {
             host->waitForTargetFps();
         }
     }
+#elif defined(TELEMETRY)
+    /* Opt-in serial telemetry (DEFS='-D TELEMETRY=1') for hardware-in-the-loop input solving/verification.
+     * Mirrors GameLoop() but, each frame, prints the Celeste player position + current room over UART via
+     * printh. It reads them with the public Vm::ExecuteLua, which runs in the cart's sandbox environment
+     * (where Celeste's `objects`/`player`/`room` globals live) — so this needs NO cart edit and NO change to
+     * the vendored fake-08 source. One line per Step (60 Hz resume; a 30 fps cart updates every 2nd line):
+     *   "T <x> <y> <room.x> <room.y> <spd.x> <spd.y> <djump>"   ('x' fields until the player object exists).
+     * Pairs with INPUT_BACKEND=serial so tools/celeste_playtest.py can frame-sync input and detect the
+     * room transition (room.x/y change) that proves a level was cleared. See docs/runtime. */
+    ESP_LOGI(TAG, "TELEMETRY: per-frame player pos over UART (T <frame> x y rx ry sx sy dj)");
+    {
+        while (true) {
+            host->waitForTargetFps();
+            vm->Step();
+            host->drawFrame(vm->GetPicoInteralFb(), vm->GetScreenPaletteMap(), 0);
+            /* Inject the (monotonic, per-Step) frame counter into the printh line so the driver has an
+             * exact frame clock to sync input to. One line per Step (60 Hz resume; 30 fps cart updates
+             * every 2nd line). ExecuteLua runs in the cart sandbox where objects/player/room live. */
+            int fc = vm->GetFrameCount();
+            char snip[420];
+            snprintf(snip, sizeof(snip),
+                "local p for o in all(objects) do if o.type==player then p=o end end "
+                "if p then printh('T %d '..p.x..' '..p.y..' '..room.x..' '..room.y..' '..p.spd.x..' '..p.spd.y..' '..p.djump) "
+                "else printh('T %d x x '..room.x..' '..room.y..' x x x') end", fc, fc);
+            vm->ExecuteLua(snip, "");
+        }
+    }
 #else
     ESP_LOGI(TAG, "entering GameLoop");
     vm->GameLoop(); /* fake-08's own loop; never returns */

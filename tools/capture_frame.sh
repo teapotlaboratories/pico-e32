@@ -3,11 +3,19 @@
 # This is the hardware-in-the-loop verification step for display changes — see
 # docs/hardware/pico-e32-bench-camera.md and .ai/AGENTS.md -> Verifying changes.
 #
+# STILLS are shot at QXGA (2048x1536) — the OV3660's full 3 MP array, so the small panel resolves as
+# sharply as the sensor allows. (Video is the opposite: tools/record_video.sh uses SVGA for frame rate,
+# since fps is bandwidth-bound at ~6 Mbit/s — see the bench doc.) Frame rate is irrelevant for a still,
+# so max resolution wins. Forcing size=qxga here also undoes an earlier /stream?size=svga (aiming) that
+# would otherwise leave the sensor small and every still soft.
+#
 # Usage:
 #   tools/capture_frame.sh [label]        # -> /tmp/pico-e32-captures/<ts>[-label].jpg
 #
 # The camera host (the camera's IP) comes from BENCH_CAM_HOST, or tools/bench_cam.env:
 #   BENCH_CAM_HOST=192.168.1.42
+# CAP_QUERY= appends extra sensor params for this shot, e.g. the dark-cart tuning:
+#   CAP_QUERY='awb=0&exp=1200&gain=0&sat=2' tools/capture_frame.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -31,8 +39,10 @@ ts="$(date +%Y%m%d-%H%M%S)"
 out="$CAPTURE_DIR/${ts}${label:+-$label}.jpg"
 mkdir -p "$CAPTURE_DIR"
 
-if ! curl -sf --max-time 15 "http://${HOST}/capture" -o "$out"; then
-  echo "error: capture failed from http://${HOST}/capture" >&2
+# size=qxga guarantees full resolution regardless of what the sensor was last left at.
+query="size=qxga${CAP_QUERY:+&${CAP_QUERY}}"
+if ! curl -sf --max-time 20 "http://${HOST}/capture?${query}" -o "$out"; then
+  echo "error: capture failed from http://${HOST}/capture?${query}" >&2
   echo "  is the bench camera powered and on the network? try: curl -I http://${HOST}/capture" >&2
   rm -f "$out"
   exit 1

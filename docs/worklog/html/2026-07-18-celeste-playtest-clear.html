@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Driving Celeste through full levels, hands-free over serial — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8;
+        --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  :root[data-theme="light"]{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;--ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  :root[data-theme="dark"]{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;--border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)} .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;font-family:var(--mono)}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:9px;padding:.9rem 1.05rem;overflow-x:auto;font-size:.82rem;line-height:1.5;font-family:var(--mono)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left}
+  th{background:var(--codebg);font-family:var(--mono);font-size:.82rem}
+  td.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .bad{color:var(--bad);font-weight:600} .ok{color:var(--ok);font-weight:600} .warn{color:var(--warn);font-weight:600}
+  .bars{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.2rem 1.3rem;margin:1.3rem 0}
+  .bars h3{margin:.1rem 0 1rem;font-size:.95rem}
+  .bar{display:grid;grid-template-columns:150px 1fr;align-items:center;gap:.8rem;margin:.55rem 0}
+  .bar .lab{font:600 .8rem/1.2 var(--mono);color:var(--muted)}
+  .bar .track{position:relative;background:var(--codebg);border-radius:7px;height:30px;overflow:hidden}
+  .bar .fill{position:absolute;inset:0 auto 0 0;border-radius:7px;display:flex;align-items:center;justify-content:flex-end;padding-right:.55rem;font:700 .8rem/1 var(--mono);color:#fff;white-space:nowrap}
+  .fill.b{background:linear-gradient(90deg,#c0392b,#e0563f)}
+  .fill.a{background:linear-gradient(90deg,#1a7f4b,#2faa68)}
+  .diag{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.3rem;margin:1.3rem 0}
+  .diag h3{margin:.1rem 0 .4rem;font-size:.95rem}
+  .diag .sub{color:var(--muted);font-size:.82rem;margin:0 0 1rem}
+  .frames{display:flex;gap:.4rem;flex-wrap:wrap;align-items:flex-end}
+  .fr{display:flex;flex-direction:column;align-items:center;gap:.25rem;min-width:56px}
+  .fr .box{width:100%;height:46px;border-radius:6px;display:flex;align-items:center;justify-content:center;font:700 .72rem/1 var(--mono);border:1px solid var(--border);text-align:center}
+  .fr .fno{font:.68rem/1 var(--mono);color:var(--muted)}
+  .fr .pos{font:.66rem/1 var(--mono);color:var(--muted)}
+  .box.idle{background:var(--codebg);color:var(--muted)}
+  .box.dash{background:linear-gradient(180deg,#5b8bf0,#356ad4);color:#fff;border-color:transparent}
+  .box.frz{background:repeating-linear-gradient(45deg,var(--codebg),var(--codebg) 5px,transparent 5px,transparent 10px);color:var(--warn)}
+  .box.mv{background:linear-gradient(180deg,#2faa68,#1a7f4b);color:#fff;border-color:transparent}
+  .legend{font-size:.78rem;color:var(--muted);margin-top:.7rem}
+  .foot{margin-top:2.6rem;padding-top:1rem;border-top:1px solid var(--border);color:var(--muted);font-size:.85rem}
+  figure{margin:1.3rem 0;text-align:center}
+  figure img{max-width:min(270px,46%);border-radius:10px;border:1px solid var(--border);margin:0 .25rem;vertical-align:top}
+  figcaption{color:var(--muted);font-size:.82rem;margin-top:.5rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <h1>Driving Celeste through full levels, hands-free over serial</h1>
+  <p class="date">2026-07-18 · the play-test that clears rooms 1 &amp; 2 · fake-08 port</p>
+
+  <div class="tldr">
+    <code>tools/celeste_playtest.py</code> now clears <b>Celeste rooms 1 and 2 ("100 M" → "200 M" → "300 M")</b>
+    with no human on the controls, and checks itself over the wire. Each room needs several frame-precise
+    dashes/jumps a loose open-loop timeline can't land, so the input is <b>solved offline</b> against a physics
+    twin and <b>delivered frame-synced</b> to a new serial position-telemetry stream. Two twin-fidelity bugs the
+    telemetry exposed — <b>move-before-update</b> ordering and the <b>2-frame dash freeze</b> — were the crux
+    for room 1; a <b>driver-lag</b> bug (reading one telemetry line per loop) was the crux for room 2. Result:
+    <b class="ok">the same clears at frames 618 and 908, every run.</b>
+  </div>
+
+  <h2>The room is hard, and open-loop can't clear it reliably</h2>
+  <p>Room (0,0) decoded from the cart (<code>__map__</code>/<code>__gff__</code>): spawn at <b>(8, 96)</b>, floor +
+     up-pointing spikes along the bottom, exit is the <b>top gap at cols 13–14</b>
+     (<code>player.update</code>: <code>if this.y&lt;-4 … next_room()</code>). A physics twin + beam search proved
+     <b>every solution needs ≥3 dashes</b> (no ≤2-dash route exists), each landed on a specific ledge — and
+     that under ±2-frame serial jitter the best routes clear only 25–40 %. A fixed open-loop timeline would be a
+     <em>flaky</em> test. The owner chose "push for a real clear" and named the unlock:
+     <b>solve it in sim; print the character position over serial.</b></p>
+
+  <h2>Serial position telemetry — no cart or vendored-source edits</h2>
+  <p><code>-D TELEMETRY=1</code> prints, each frame,
+     <code>T &lt;frame&gt; x y room.x room.y spd.x spd.y djump</code>, reading the live cart's
+     <code>player</code>/<code>room</code> globals via the public <code>Vm::ExecuteLua</code> (runs in the cart
+     sandbox). It gives ground-truth position <em>and</em> a frame clock. It immediately confirmed the twin was
+     already pixel-exact on positions:</p>
+  <table>
+    <tr><th>quantity</th><th>hardware telemetry</th><th>twin</th></tr>
+    <tr><td>spawn</td><td class="n">(8, 96), djump 1</td><td class="n ok">match</td></tr>
+    <tr><td>standing-jump apex</td><td class="n">y = 77 (+19 px)</td><td class="n ok">y = 77</td></tr>
+    <tr><td>run stop (blocked by step)</td><td class="n">x = 17</td><td class="n ok">x = 17</td></tr>
+    <tr><td>dash launch spd</td><td class="n">(3.5355, −3.5355)</td><td class="n ok">match</td></tr>
+    <tr><td>walk speed</td><td class="n">2 px / frame @ spd 1</td><td class="n ok">match</td></tr>
+    <tr><td>same timeline twice</td><td class="n" colspan="2">byte-identical trajectory → delivery is <b class="ok">deterministic</b></td></tr>
+  </table>
+
+  <h2>The crux: two timing bugs positions alone hid</h2>
+  <p>Positions matched; <em>timing</em> did not — and frame-synced dashes need timing. Raw telemetry of the first
+     dash showed velocity set at frame 378 but the position <b>frozen for 3 frames</b>, moving only at 384:</p>
+  <div class="diag">
+    <h3>Why the dash's velocity applies 3 frames late</h3>
+    <p class="sub">One box = one game-frame. The twin (naïvely: move-after-update, no freeze) moved on the dash
+       frame — 3 frames early.</p>
+    <div class="frames">
+      <div class="fr"><div class="box idle">idle</div><div class="fno">f376</div><div class="pos">8,96</div></div>
+      <div class="fr"><div class="box dash">DASH<br>spd set</div><div class="fno">f378</div><div class="pos">8,96</div></div>
+      <div class="fr"><div class="box frz">frozen</div><div class="fno">f380</div><div class="pos">8,96</div></div>
+      <div class="fr"><div class="box frz">frozen</div><div class="fno">f382</div><div class="pos">8,96</div></div>
+      <div class="fr"><div class="box mv">MOVE</div><div class="fno">f384</div><div class="pos">13,91</div></div>
+    </div>
+    <p class="legend"><b>(1)</b> Celeste's object loop runs <code>obj.move(spd)</code> <b>before</b>
+      <code>obj.type.update()</code>, so velocity set on frame <i>f</i> first moves the player on <i>f+1</i>.
+      <b>(2)</b> a dash sets <code>freeze=2</code> — <code>_update</code> returns early for the next 2 frames.
+      Un-modelled, the twin ran 3 frames short per dash, so the 2nd dash's <code>x</code> arrived mid-air
+      (djump=0) and was dropped. Modelling both aligns the twin 1:1 with the firmware frame counter.</p>
+  </div>
+
+  <h2>Frame-exact delivery → deterministic clear</h2>
+  <p><code>-D INPUT_HOLD_FRAMES=1</code> makes each serial byte hold exactly one frame (default 6 for manual
+     use); the driver re-sends every frame, locked to the telemetry counter. Delivering the freeze-aware plan:
+     <b class="ok">CLEARED (0,0) → (1,0) at t = 12.05 s, frame 618.</b></p>
+  <div class="bars">
+    <h3>Clear rate — open-loop (jittered) vs frame-synced</h3>
+    <div class="bar"><div class="lab">open-loop · ±2f jitter</div><div class="track"><div class="fill b" style="width:40%">25–40 %</div></div></div>
+    <div class="bar"><div class="lab">frame-synced</div><div class="track"><div class="fill a" style="width:100%">6 / 6 runs · same frame</div></div></div>
+  </div>
+
+  <h2>Room 2 (200 M → 300 M) — and a bug diagnosed wrong twice</h2>
+  <p>The twin was generalised to any room (auto-detect spawn + <code>fake_wall</code> from the map). Room 2's
+     exit gap has <b>no ledge under it</b>, so the plain beam stalled at y=13 — its position-only dedup pruned
+     the <code>djump</code> the final up-dash needs; a <b>full-state dedup</b> (position, djump, freeze,
+     velocity) fixed it. Then two red herrings: the first hardware run matched the twin exactly, then stuck at
+     a wall — it <em>looked</em> like a fragile route (a jitter-robustness re-solve scored only ~0.47). But the
+     hardware is <b>deterministic</b> (room 1 clears identically every run), so the failure was the <em>same</em>
+     every time. Real cause: the multi-room driver read <b>one telemetry line per loop</b>, so at 60 Hz the OS
+     buffer backed up and by room 2 it acted on a <b>stale frame counter</b>, delivering inputs late.
+     <b class="ok">Fix:</b> drain the buffer each iteration, deliver against the newest counter → room 2 cleared
+     first try, reproducibly.</p>
+
+  <h2>Verified — over the wire and on the glass</h2>
+  <ul>
+    <li><b>Telemetry:</b> <code>room.x/y</code> goes <code>(0,0)→(1,0)→(2,0)</code> = <code>100 M → 200 M →
+       300 M</code>. Reproduced many times, identical clear frames (618, 908) each run.</li>
+    <li><b>Camera:</b> the panel shows the <b>"200 M"</b> and <b>"300 M"</b> room titles, the "60" FPS HUD, and
+       Madeline respawned in the next room.</li>
+  </ul>
+  <figure>
+    <img src="../../hardware/evidence/2026-07-18-celeste-200m-clear.png" alt="bench-camera frame of the 200 M room">
+    <img src="../../hardware/evidence/2026-07-18-celeste-300m-clear.png" alt="bench-camera frame of the 300 M room">
+    <figcaption>Bench camera, rotated 90° CW: room titles <b>"200 M"</b> then <b>"300 M"</b> — two levels
+      cleared hands-free. <code>docs/hardware/evidence/2026-07-18-celeste-{200,300}m-clear.png</code></figcaption>
+  </figure>
+
+  <h2>Deliverables &amp; a bug fixed along the way</h2>
+  <ul>
+    <li><b>Input mapping bug:</b> the stub timeline used <code>x</code> for "jump", but Celeste is
+       <code>k_jump=4=O</code> / <code>k_dash=5=X</code> — so <b><code>z</code>/<code>o</code> jumps,
+       <code>x</code> dashes</b>. <code>x</code> was silently dashing.</li>
+    <li><code>tools/celeste_playtest.py</code> — resets, starts the game, delivers the embedded 97-frame plan
+       frame-synced, verifies over telemetry, exits 0 (PASS) / 1 (FAIL).</li>
+    <li><code>tools/celeste_solver/</code> — the physics twin + beam search that produced the plan;
+       <code>solve.py</code> re-prints the exact embedded <code>PLAN</code> (verified byte-identical).</li>
+    <li>Firmware: <code>TELEMETRY</code> (app) and <code>INPUT_HOLD_FRAMES</code> (input backend) — opt-in, off
+       by default.</li>
+  </ul>
+
+  <h2>Lessons</h2>
+  <ul>
+    <li>A twin that matches <em>positions</em> can still mismatch <em>timing</em>. Frame-synced control is
+       unforgiving of exactly the details skipped as "cosmetic" — update order and the dash freeze.</li>
+    <li>Serial position telemetry was the highest-leverage tool on this bench: it calibrated the twin, made the
+       clear deterministic, and became the test's own PASS check. <code>Vm::ExecuteLua</code> reads live cart
+       state without touching the cart or the vendored source.</li>
+    <li>When a <em>deterministic</em> system fails deterministically, don't reach for a randomness model. Room 2's
+       "0.47 clear rate" sent me down a jitter-robustness path; the truth was a driver falling behind a 60 Hz
+       stream. <b>Drain the buffer; act on the newest sample, not the oldest.</b></li>
+  </ul>
+
+  <p class="foot">pico-e32 · source worklog: <code>docs/worklog/2026-07-18-celeste-playtest-clear.md</code></p>
+</div>
+</body>
+</html>

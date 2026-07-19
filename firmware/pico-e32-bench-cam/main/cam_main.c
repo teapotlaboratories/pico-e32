@@ -118,7 +118,12 @@ static esp_err_t camera_start(void)
         .pin_d7 = PIN_D7, .pin_d6 = PIN_D6, .pin_d5 = PIN_D5, .pin_d4 = PIN_D4,
         .pin_d3 = PIN_D3, .pin_d2 = PIN_D2, .pin_d1 = PIN_D1, .pin_d0 = PIN_D0,
         .pin_vsync = PIN_VSYNC, .pin_href = PIN_HREF, .pin_pclk = PIN_PCLK,
-        .xclk_freq_hz = 20000000,
+        .xclk_freq_hz = 20000000,   /* 20 MHz -> 10 MHz JPEG PCLK. TESTED 2026-07-18: raising to 24 MHz
+                                     * (12 MHz PCLK) corrupted EVERY frame incl. SVGA (bad JPEG markers,
+                                     * lost MCU blocks) for only ~5-8% more fps -- the classic-ESP32
+                                     * I2S/DVP path overruns above 10 MHz PCLK here. Keep 20 MHz. And
+                                     * fps at these sizes is bandwidth-bound (~6 Mbit/s), not PCLK-bound,
+                                     * so a faster pixel clock wouldn't help even if it were clean. */
         .ledc_timer = LEDC_TIMER_0, .ledc_channel = LEDC_CHANNEL_0,
         .pixel_format = PIXFORMAT_JPEG,
         .frame_size   = FRAMESIZE_UXGA,   /* 1600x1200 — the panel is a small part of frame */
@@ -328,6 +333,26 @@ static int query_int(const char *q, const char *key, int dflt)
     return (end == buf) ? dflt : (int)v;
 }
 
+/* Apply a ?size= value (shared by /stream and /capture). Names cover the OV3660's full range
+ * qvga..qxga so the fps-vs-resolution ceiling can be swept from the wire. Returns true if it set
+ * a size (caller then settles). Unknown value -> false (left unchanged). */
+static bool apply_size(sensor_t *s, const char *v)
+{
+    framesize_t fs;
+    if      (!strcmp(v, "qvga")) fs = FRAMESIZE_QVGA;   /* 320x240  */
+    else if (!strcmp(v, "vga"))  fs = FRAMESIZE_VGA;    /* 640x480  */
+    else if (!strcmp(v, "svga")) fs = FRAMESIZE_SVGA;   /* 800x600  */
+    else if (!strcmp(v, "xga"))  fs = FRAMESIZE_XGA;    /* 1024x768 */
+    else if (!strcmp(v, "hd"))   fs = FRAMESIZE_HD;     /* 1280x720  (720p) */
+    else if (!strcmp(v, "sxga")) fs = FRAMESIZE_SXGA;   /* 1280x1024 */
+    else if (!strcmp(v, "uxga")) fs = FRAMESIZE_UXGA;   /* 1600x1200 */
+    else if (!strcmp(v, "fhd"))  fs = FRAMESIZE_FHD;    /* 1920x1080 (1080p) */
+    else if (!strcmp(v, "qxga")) fs = FRAMESIZE_QXGA;   /* 2048x1536 (sensor max) */
+    else return false;
+    s->set_framesize(s, fs);
+    return true;
+}
+
 
 /* GET /stream -> MJPEG (multipart/x-mixed-replace). Open it in a browser to aim the rig
  * live instead of capturing one frame at a time. Honours whatever exposure/AWB the last
@@ -345,13 +370,8 @@ static esp_err_t stream_get(httpd_req_t *req)
     sensor_t *s = esp_camera_sensor_get();
     if (httpd_req_get_url_query_str(req, q, sizeof q) == ESP_OK && s) {
         char v[16];
-        if (httpd_query_key_value(q, "size", v, sizeof v) == ESP_OK) {
-            if      (!strcmp(v, "svga")) s->set_framesize(s, FRAMESIZE_SVGA);
-            else if (!strcmp(v, "xga"))  s->set_framesize(s, FRAMESIZE_XGA);
-            else if (!strcmp(v, "uxga")) s->set_framesize(s, FRAMESIZE_UXGA);
-            else if (!strcmp(v, "vga"))  s->set_framesize(s, FRAMESIZE_VGA);
+        if (httpd_query_key_value(q, "size", v, sizeof v) == ESP_OK && apply_size(s, v))
             vTaskDelay(pdMS_TO_TICKS(300));   /* let the sensor settle after a size change */
-        }
     }
     esp_err_t res = httpd_resp_set_type(req, STREAM_TYPE);
     if (res != ESP_OK) return res;
@@ -385,6 +405,8 @@ static esp_err_t stream_get(httpd_req_t *req)
  *   ?auto=1        force auto exposure/gain back on
  *   ?awb=0|1       auto white balance off/on -- OFF to judge real colour on a panel
  *   ?sat=-2..2     saturation   ?con=-2..2  contrast   ?sharp=-2..2  sharpness
+ *   ?size=uxga|xga|svga|vga  frame size -- uxga (1600x1200) for detail; restores it if a
+ *                            prior /stream?size=svga (aiming) left the sensor small
  * Values persist in the sensor until changed, so a bare /capture reuses the last setting. */
 static esp_err_t capture_get(httpd_req_t *req)
 {
@@ -393,6 +415,14 @@ static esp_err_t capture_get(httpd_req_t *req)
     sensor_t *s = esp_camera_sensor_get();
 
     if (s && have_q) {
+        /* Frame size persists in the sensor, so an earlier /stream?size=svga (used for aiming) leaves
+         * /capture stuck at SVGA -- soft on the small panel. Accept ?size= here too so one capture URL
+         * can restore full resolution, matching /stream. (Init default is UXGA; see FRAMESIZE_UXGA.) */
+        char v[16];
+        if (httpd_query_key_value(q, "size", v, sizeof v) == ESP_OK && apply_size(s, v))
+            vTaskDelay(pdMS_TO_TICKS(300));   /* let the sensor settle after a size change */
+        int jq = query_int(q, "q", -1);       /* JPEG quality 0..63 (lower = better/bigger). */
+        if (jq >= 0) s->set_quality(s, jq);
         if (query_int(q, "auto", 0)) {
             s->set_exposure_ctrl(s, 1);
             s->set_gain_ctrl(s, 1);

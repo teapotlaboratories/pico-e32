@@ -37,6 +37,13 @@ if(DEFINED SHOW_FPS)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE SHOW_FPS=${SHOW_FPS})
 endif()
 
+# Opt-in: vertically centre the game blit on the panel (`… DEFS='-D CENTER_GAME=1'`). Default is flush to
+# the top, leaving the bottom 224 px for the touch control-deck. Builds with no deck (e.g. the serial
+# play-test) can centre it instead.
+if(DEFINED CENTER_GAME)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE CENTER_GAME=${CENTER_GAME})
+endif()
+
 # fake-08 is a C++17 codebase (its math helpers declare a global `lerp`, which collides with C++20's
 # std::lerp under IDF's default newer standard). Compile it at gnu++17 — its intended standard — so
 # ./fake08/source stays byte-identical. (Last -std wins.)

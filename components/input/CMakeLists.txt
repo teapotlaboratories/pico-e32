@@ -19,3 +19,10 @@ idf_component_register(
     REQUIRES driver
 )
 message(STATUS "input: backend '${INPUT_BACKEND}' (${_input_src})")
+
+# Opt-in override for the serial backend's auto-release hold length (game-update frames per byte).
+# `... DEFS='-D INPUT_BACKEND=serial -D INPUT_HOLD_FRAMES=1'` gives frame-exact input for an automated,
+# frame-synced driver; the default (6) is unchanged for manual single-key use.
+if(DEFINED INPUT_HOLD_FRAMES)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE INPUT_HOLD_FRAMES=${INPUT_HOLD_FRAMES})
+endif()

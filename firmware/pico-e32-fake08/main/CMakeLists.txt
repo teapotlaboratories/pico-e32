@@ -25,3 +25,10 @@ endif()
 if(DEFINED FORCE_FLASH_CART)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE FORCE_FLASH_CART=${FORCE_FLASH_CART})
 endif()
+
+# Opt-in serial position telemetry: `... DEFS='-D CELESTE=1 -D TELEMETRY=1'` runs a GameLoop variant that
+# prints the Celeste player position + current room each frame over UART (via ExecuteLua/printh) for
+# hardware-in-the-loop input solving/verification. Pairs with INPUT_BACKEND=serial. Off by default.
+if(DEFINED TELEMETRY)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE TELEMETRY=${TELEMETRY})
+endif()

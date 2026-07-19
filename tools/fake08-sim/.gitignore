@@ -1,0 +1,8 @@
+build/
+libfake08sim.so
+vframes/
+*.o
+*.ppm
+*.png
+*.mp4
+__pycache__/
