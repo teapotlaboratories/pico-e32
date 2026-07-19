@@ -84,6 +84,7 @@
       <li><a href="#s6">Search engine — built, then demoted (M3)</a></li>
       <li><a href="#s7">Pivot: the harness is a <em>gym</em></a></li>
       <li><a href="#s8">Review + M4 — the gym's eyes</a></li>
+      <li><a href="#s9">M5 — a spawned agent solves Celeste</a></li>
       <li><a href="#state">State at end of session</a></li>
     </ol>
   </nav>
@@ -294,8 +295,8 @@
 
   <div class="diag">
     <h3>The pipeline — agent solves the gym; the output is a replay-able <code>Trace</code></h3>
-    <p class="sub">Solid = landed this session (M2: the <code>Trace</code> contract + dual replay). Dashed =
-       next — the spawned solver agent (M4–M5), then FPS + video (M6–M7, the ultimate goal).</p>
+    <p class="sub">Solid = landed (M2: the <code>Trace</code> contract + dual replay; and the spawned solver
+       agent, M4–M5 — §8–§9). Dashed = next — FPS + video (M6–M7, the ultimate goal).</p>
     <svg viewBox="0 0 820 240" width="100%" role="img" aria-label="Pipeline: spawned solver agent produces a Trace, replayed on sim and device, yielding an fps and video report">
       <defs>
         <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
@@ -308,12 +309,12 @@
       <path d="M340,120 C372,120 372,183 396,183" fill="none" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah)"/>
       <path d="M550,57 C592,57 592,108 626,110" fill="none" style="stroke:var(--line);stroke-width:2;stroke-dasharray:5 4" marker-end="url(#ah)"/>
       <path d="M550,183 C592,183 592,132 626,130" fill="none" style="stroke:var(--line);stroke-width:2;stroke-dasharray:5 4" marker-end="url(#ah)"/>
-      <!-- A: spawned solver agent (next) -->
-      <rect x="10" y="93" width="150" height="54" rx="9" style="fill:var(--codebg);stroke:var(--accent);stroke-width:1.6;stroke-dasharray:5 4"/>
+      <!-- A: spawned solver agent (done — M4–M5) -->
+      <rect x="10" y="93" width="150" height="54" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
       <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
         <text x="85" y="112" style="font:700 11px var(--mono)">spawned solver agent</text>
         <text x="85" y="128" style="font:10px var(--mono);fill:var(--muted)">one per cart · M4–M5</text>
-        <text x="85" y="141" style="font:10px var(--mono);fill:var(--muted)">observes rendered frames</text>
+        <text x="85" y="141" style="font:700 10px var(--mono);fill:var(--ok)">SOLVED (§9)</text>
       </g>
       <!-- B: Trace (done) -->
       <rect x="190" y="93" width="150" height="54" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
@@ -407,14 +408,106 @@
     solver agent that drives the gym.
   </div>
 
+  <h2 id="s9">9. M5 — a spawned agent solves Celeste through the gym</h2>
+  <p>The payoff. Spawned a <b>Celeste solver agent</b> scoped to <code>test/playtest/celeste/</code> with the
+     gym as its toolset (<code>fake08sim</code>, <code>gym.py</code>, <code>trace.py</code>, the twin), and gave
+     it the isolation contract plus the <b>Collaborate</b> affordance — it may share a <code>gym</code> image
+     and ask the owner a question mid-solve, routed via <code>SendMessage</code> to <code>main</code>. It:</p>
+  <ul>
+    <li><b>Inspected</b> the cart with <code>gym.snapshot</code> — booted Celeste, Read the title + room frames,
+       and confirmed the win condition (room <code>(rx,ry)</code> advances) by eye against the on-screen
+       <code>100 M</code> / <code>200 M</code> / <code>300 M</code> labels.</li>
+    <li><b>Derived</b> each room's input by re-running the twin's <code>beam_solve_fast</code>, then
+       <b>VM-gated every route on the exact device VM</b> — a route is accepted only if the <em>real VM</em>
+       clears on it.</li>
+    <li><b>Emitted</b> <code>celeste/solution.trace.json</code> (2 segments, <b>207 game-frames</b>:
+       100 M = 94, 200 M = 113), plus <code>make_solution.py</code> (a re-runnable producer),
+       <code>verify_solution.py</code>, and <code>README.md</code> — all <b>isolated in <code>celeste/</code>,
+       shared core untouched</b> (<b>0 files modified outside</b>).</li>
+  </ul>
+
+  <div class="tldr" style="border-left-color:var(--warn)">
+    <b class="warn">The twin is a model; the VM is ground truth —</b> this is what made the gate matter. For
+    room <code>(0,0)</code> the twin's top route also "won" <em>in the twin</em> but <b class="bad">failed on
+    the VM one pixel short</b>; the next candidate cleared — a fresh <b>94-frame</b> route, distinct from the
+    97-frame reference. For room <code>(1,0)</code>, <b>all 25</b> fresh twin-"win" shortcuts stalled on the VM
+    at ~halfway (min_y <code>63–78</code> — the dash-heavy routes diverge there), while the twin's canonical
+    wall-climb route — which the twin even <em>mislabels as not a win</em> — is the one the real VM clears.
+    Without the VM-gate the agent would have shipped <b class="bad">broken traces</b>.
+  </div>
+
+  <div class="diag">
+    <h3>The VM-gate — the twin proposes, the real VM decides</h3>
+    <p class="sub">Every route the twin ranked a "win" is re-checked on the exact device VM; only a route the
+       <em>real VM</em> clears is accepted. On both rooms the twin's own top pick was wrong.</p>
+    <svg viewBox="0 0 820 200" width="100%" role="img" aria-label="The VM gate rejects the twin's top routes and accepts the routes the real device VM clears">
+      <defs>
+        <marker id="ah9" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L7,3 L0,6 z" style="fill:var(--line)"/>
+        </marker>
+      </defs>
+      <!-- column labels -->
+      <text x="125" y="22" style="fill:var(--muted);font:600 11px var(--mono);text-anchor:middle">twin — a model</text>
+      <text x="400" y="22" style="fill:var(--muted);font:600 11px var(--mono);text-anchor:middle">VM-gate — ground truth</text>
+      <text x="688" y="22" style="fill:var(--muted);font:600 11px var(--mono);text-anchor:middle">what ships</text>
+      <!-- edges -->
+      <line x1="240" y1="66" x2="304" y2="90" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah9)"/>
+      <line x1="240" y1="156" x2="304" y2="134" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah9)"/>
+      <line x1="496" y1="90" x2="564" y2="66" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah9)"/>
+      <line x1="496" y1="134" x2="564" y2="156" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah9)"/>
+      <!-- twin chips (VM-rejected) -->
+      <rect x="20" y="44" width="220" height="44" rx="9" style="fill:var(--surface);stroke:var(--bad);stroke-width:1.6"/>
+      <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
+        <text x="130" y="63" style="font:700 11px var(--mono)">room (0,0): top route "wins"</text>
+        <text x="130" y="79" style="font:10px var(--mono);fill:var(--bad)">✗ VM: 1 px short</text>
+      </g>
+      <rect x="20" y="134" width="220" height="44" rx="9" style="fill:var(--surface);stroke:var(--bad);stroke-width:1.6"/>
+      <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
+        <text x="130" y="153" style="font:700 11px var(--mono)">room (1,0): 25 fresh "wins"</text>
+        <text x="130" y="169" style="font:10px var(--mono);fill:var(--bad)">✗ VM: all stall ~halfway (min_y 63–78)</text>
+      </g>
+      <!-- gate -->
+      <rect x="304" y="52" width="192" height="120" rx="10" style="fill:var(--codebg);stroke:var(--accent);stroke-width:1.8"/>
+      <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
+        <text x="400" y="102" style="font:700 12px var(--mono)">VM-GATE</text>
+        <text x="400" y="120" style="font:10px var(--mono);fill:var(--muted)">accept only if the</text>
+        <text x="400" y="134" style="font:10px var(--mono);fill:var(--muted)">real device VM clears</text>
+      </g>
+      <!-- VM-accepted chips (what ships) -->
+      <rect x="564" y="44" width="246" height="44" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+      <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
+        <text x="687" y="63" style="font:700 11px var(--mono)">next candidate clears</text>
+        <text x="687" y="79" style="font:10px var(--mono);fill:var(--ok)">✓ 94 fr (≠ the 97-fr reference)</text>
+      </g>
+      <rect x="564" y="134" width="246" height="44" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+      <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
+        <text x="687" y="153" style="font:700 11px var(--mono)">canonical wall-climb clears</text>
+        <text x="687" y="169" style="font:10px var(--mono);fill:var(--ok)">✓ 113 fr (twin labels it not-a-win)</text>
+      </g>
+    </svg>
+    <p class="legend">Both rooms' <em>ships</em> column is a route the twin did <b>not</b> rank first — for
+       <code>(1,0)</code> it is one the twin explicitly mislabels as not a win. The gate is what caught it:
+       <code>94 + 113 = 207</code> game-frames, all VM-verified.</p>
+  </div>
+
+  <div class="tldr">
+    <b class="ok">Independently verified — not the agent's word.</b> My own sim replay clears both rooms
+    (<b class="ok">94/94</b>, <b class="ok">113/113</b>); a <code>gym.run_filmstrip</code> of room 0's fresh
+    route, Read by eye, climbs <code>y = 96 → −3</code> and exits the top; and <b>device replay</b> of the
+    agent's <code>solution.trace.json</code> on the real board cleared <b class="ok">2/2</b>
+    (<code>CLEARED 100 M → 200 M → 300 M</code>, t ≈ 12 s / 17 s). Committed to <b>PR #13</b>
+    (<code>1c189b6</code>).
+  </div>
+
   <h2 id="state">State at end of session</h2>
   <ul>
     <li><b>Done:</b> M0 (reorg), M1 (replay-from-root), M2 (Trace + dual replay + frame-count sync), M3 (search
-       as a cart-agnostic engine + <code>celeste/solve.py</code>), <b>M4 (agent gym — the eyes,
-       <code>gym.py</code>)</b>. Committed as <b>PR #13</b> (branch <code>playtest-agent-gym</code>,
-       self-reviewed via <code>/review</code>). <b>Next:</b> M5 (spawn a Celeste solver agent that drives the
-       gym). Then M6 fps (unify <code>MEASURE_FPS</code> + <code>TELEMETRY</code>, achieved + headroom), M7
-       video, M8 orchestrator, M9 a non-platformer cart.</li>
+       as a cart-agnostic engine + <code>celeste/solve.py</code>), M4 (agent gym — the eyes,
+       <code>gym.py</code>), <b>M5 (spawned solver agent solved Celeste through the gym, verified on the
+       board)</b>. All on <b>PR #13</b> (branch <code>playtest-agent-gym</code>, self-reviewed via
+       <code>/review</code>). <b>Next:</b> M6 fps (unify <code>MEASURE_FPS</code> + <code>TELEMETRY</code>,
+       achieved + headroom), M7 video, M8 orchestrator, M9 a non-platformer cart (proves
+       genre-agnosticism).</li>
     <li><b>Board:</b> left flashed with the play-test build (<code>CELESTE + INPUT_BACKEND=serial +
        INPUT_HOLD_FRAMES=1 + FORCE_FLASH_CART + SHOW_FPS + TELEMETRY + CENTER_GAME</code>), idle at room 2 — a
        known-good dev build.</li>
