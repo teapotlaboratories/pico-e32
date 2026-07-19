@@ -1,0 +1,8 @@
+# Build + render outputs across all playtest subdirs (the native VM build, render frames/videos).
+__pycache__/
+*.pyc
+build/
+libfake08sim.so
+*.o
+vframes/
+*.ppm

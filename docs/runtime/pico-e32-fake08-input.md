@@ -73,7 +73,7 @@ Celeste, `k_jump=4=O` and `k_dash=5=X`, so **`z`/`o` = jump and `x` = dash** (ea
 ## Frame-exact HITL: telemetry + `INPUT_HOLD_FRAMES` (the Celeste play-test)
 
 Two opt-in build flags turn the serial path into a **deterministic, self-checking** test harness — used
-by [`tools/celeste_playtest.py`](../../tools/celeste_playtest.py) to drive Celeste through **two full levels
+by [`test/playtest/celeste/celeste_playtest.py`](../../test/playtest/celeste/celeste_playtest.py) to drive Celeste through **two full levels
 ("100 M" → "200 M" → "300 M")** hands-free and confirm each over the wire. Both default off (normal builds
 unchanged).
 
@@ -89,7 +89,7 @@ unchanged).
 
 Why frame-exact: each room needs several frame-precise dashes/jumps a loose open-loop timeline can't land.
 The input for each room is *solved* offline against a physics twin
-([`tools/celeste_solver/`](../../tools/celeste_solver/)) and delivered locked to the telemetry frame
+([`test/playtest/celeste/celeste_solver/`](../../test/playtest/celeste/celeste_solver/)) and delivered locked to the telemetry frame
 counter; after a room clears, the player respawns at the next room's spawn and the driver re-syncs. (The
 driver **drains** the telemetry each loop so the frame counter stays real-time — otherwise the 60 Hz stream
 backs up and delivery lags on the later room.) Result: the same clears at the same frames, every run. Build:
@@ -98,7 +98,7 @@ backs up and delivery lags on the later room.) Result: the same clears at the sa
 make flash APP=pico-e32-fake08 BOARD=makerfabs-ili9488-r1 PORT=<board> \
      DEFS='-D CELESTE=1 -D INPUT_BACKEND=serial -D INPUT_HOLD_FRAMES=1 \
            -D FORCE_FLASH_CART=1 -D SHOW_FPS=1 -D TELEMETRY=1 -D CENTER_GAME=1'
-python3 tools/celeste_playtest.py <board>     # -> CLEARED 100 M -> 200 M -> 300 M ; PASS (exit 0)
+python3 test/playtest/celeste/celeste_playtest.py <board>   # -> CLEARED 100 M -> 200 M -> 300 M ; PASS (exit 0)
 ```
 
 `-D CENTER_GAME=1` (gated in `components/fake08/CMakeLists.txt`, applied in `ESP32Host.cpp`'s `OY`) centres

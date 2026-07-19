@@ -81,6 +81,11 @@ void sim_start_room(int rx, int ry) {
 void sim_exec(const char* lua) { vm->ExecuteLua(lua, ""); }
 int  sim_peek(int addr)        { return ram->data[addr & 0xffff]; }
 
+// The VM's per-Step frame counter — the SAME clock the device streams in telemetry (main.cpp uses
+// vm->GetFrameCount()). Increments by 2 per sim_step (a 30 fps cart = 2 resumes/game-frame). This is what
+// lets a solution built on the host be frame-synced to the device: index button presses by this count.
+int  sim_frame_count()         { return (int)vm->GetFrameCount(); }
+
 void sim_step(uint8_t held) {
     uint8_t kdown = held & ~g_prev_held;   // edge, like the device's scanInput (Celeste uses btn(), but
     simhost_set_input(kdown, held);         //   this keeps btnp() correct too)

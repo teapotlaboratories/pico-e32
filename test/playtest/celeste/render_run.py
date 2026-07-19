@@ -2,12 +2,13 @@
 """Render the sim playing the two solved rooms (100 M -> 200 M -> 300 M) to an mp4 — the pixel-perfect
 device VM, for side-by-side comparison with the bench-camera video. Usage: python3 render_run.py <out.mp4>"""
 import sys, os, re, ast, ctypes, subprocess
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "fake08-sim"))   # the shared VM lives one level up
 import fake08sim as S
 S._lib.sim_draw.argtypes = []
-REPO = "/home/argonite/Developments/pico-e32"
+REPO = os.path.abspath(os.path.join(HERE, "..", "..", ".."))  # test/playtest/celeste -> repo root
 
-src = open(os.path.join(REPO, "tools", "celeste_playtest.py")).read()
+src = open(os.path.join(HERE, "celeste_playtest.py")).read()  # the driver is this dir's sibling
 def emb(n): return ast.literal_eval("[" + re.search(n + r" = \[(.*?)\n\]", src, re.S).group(1) + "]")
 ROOMS = [((0, 0), emb("PLAN_100M")), ((1, 0), emb("PLAN_200M"))]
 

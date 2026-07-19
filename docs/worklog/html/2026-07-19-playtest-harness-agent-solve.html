@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Play-test harness → a gym for agent-solved carts + FPS measurement — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8;
+        --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  :root[data-theme="light"]{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;--ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  :root[data-theme="dark"]{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;--border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)} .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;font-family:var(--mono)}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:9px;padding:.9rem 1.05rem;overflow-x:auto;font-size:.82rem;line-height:1.5;font-family:var(--mono)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left}
+  th{background:var(--codebg);font-family:var(--mono);font-size:.82rem}
+  td.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .bad{color:var(--bad);font-weight:600} .ok{color:var(--ok);font-weight:600} .warn{color:var(--warn);font-weight:600}
+  .bars{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.2rem 1.3rem;margin:1.3rem 0}
+  .bars h3{margin:.1rem 0 1rem;font-size:.95rem}
+  .bar{display:grid;grid-template-columns:150px 1fr;align-items:center;gap:.8rem;margin:.55rem 0}
+  .bar .lab{font:600 .8rem/1.2 var(--mono);color:var(--muted)}
+  .bar .track{position:relative;background:var(--codebg);border-radius:7px;height:30px;overflow:hidden}
+  .bar .fill{position:absolute;inset:0 auto 0 0;border-radius:7px;display:flex;align-items:center;justify-content:flex-end;padding-right:.55rem;font:700 .8rem/1 var(--mono);color:#fff;white-space:nowrap}
+  .fill.b{background:linear-gradient(90deg,#c0392b,#e0563f)}
+  .fill.a{background:linear-gradient(90deg,#1a7f4b,#2faa68)}
+  .diag{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.3rem;margin:1.3rem 0}
+  .diag h3{margin:.1rem 0 .4rem;font-size:.95rem}
+  .diag .sub{color:var(--muted);font-size:.82rem;margin:0 0 1rem}
+  .frames{display:flex;gap:.4rem;flex-wrap:wrap;align-items:flex-end}
+  .fr{display:flex;flex-direction:column;align-items:center;gap:.25rem;min-width:56px}
+  .fr .box{width:100%;height:46px;border-radius:6px;display:flex;align-items:center;justify-content:center;font:700 .72rem/1 var(--mono);border:1px solid var(--border);text-align:center}
+  .fr .fno{font:.68rem/1 var(--mono);color:var(--muted)}
+  .fr .pos{font:.66rem/1 var(--mono);color:var(--muted)}
+  .box.idle{background:var(--codebg);color:var(--muted)}
+  .box.dash{background:linear-gradient(180deg,#5b8bf0,#356ad4);color:#fff;border-color:transparent}
+  .box.frz{background:repeating-linear-gradient(45deg,var(--codebg),var(--codebg) 5px,transparent 5px,transparent 10px);color:var(--warn)}
+  .box.mv{background:linear-gradient(180deg,#2faa68,#1a7f4b);color:#fff;border-color:transparent}
+  .legend{font-size:.78rem;color:var(--muted);margin-top:.7rem}
+  .foot{margin-top:2.6rem;padding-top:1rem;border-top:1px solid var(--border);color:var(--muted);font-size:.85rem}
+  figure{margin:1.3rem 0;text-align:center}
+  figure img{max-width:min(270px,46%);border-radius:10px;border:1px solid var(--border);margin:0 .25rem;vertical-align:top}
+  figcaption{color:var(--muted);font-size:.82rem;margin-top:.5rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <h1>Play-test harness → a gym for agent-solved carts + FPS measurement</h1>
+  <p class="date">2026-07-19 · restructure, the replay-able <code>Trace</code>, frame-count sync, a parked savestate dead-end, and the pivot to a gym · fake-08 port</p>
+
+  <div class="tldr">
+    Turns the one-off Celeste play-test into a reusable rig whose ultimate purpose is <b>measuring real
+    on-device FPS across full playthroughs of arbitrary carts</b>, with the playthrough produced by an
+    <b>agentic AI — no human</b>. This session landed the restructure (M0), a <b>replay-from-root</b> backend
+    (M1), the replay-able <b>Trace</b> contract with <b class="ok">dual sim + device replay</b> and a
+    <b>host↔device frame-count sync</b> (M2), and a beam search <b>demoted to an optional tool</b> (M3). An
+    eris savestate speed-up was investigated and <b class="bad">PARKED</b> as a multi-bug dead-end. The
+    pivot: the genericity lives in the <b>environment</b> — a deterministic, fully-observable <b>gym</b> a
+    <b>spawned solver agent</b> drives — not in a fixed solver. Area doc / milestones:
+    <code>test/playtest/README.md</code> (the plan); this log is the running record.
+  </div>
+
+  <nav aria-label="Contents" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:.85rem 1.1rem;margin:1.4rem 0">
+    <div style="font:600 .74rem/1 var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:.55rem">On this page</div>
+    <ol style="margin:0;padding-left:1.2rem;columns:2;column-gap:2rem;font-size:.92rem">
+      <li><a href="#s1">Restructure into <code>test/playtest/</code> (M0)</a></li>
+      <li><a href="#s2">Replay-from-root backend (M1)</a></li>
+      <li><a href="#s3">The <code>Trace</code> contract + dual replay (M2)</a></li>
+      <li><a href="#s4">Host↔device frame-count sync (M2)</a></li>
+      <li><a href="#s5">eris savestates — parked (dead-end)</a></li>
+      <li><a href="#s6">Search engine — built, then demoted (M3)</a></li>
+      <li><a href="#s7">Pivot: the harness is a <em>gym</em></a></li>
+      <li><a href="#state">State at end of session</a></li>
+    </ol>
+  </nav>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:.8rem;margin:1.6rem 0">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">242 µs</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">VM <code>step</code> per frame — runs Celeste's real <code>_update</code>+<code>_draw</code></div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">47 µs</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">VM <code>read</code> — state signature. <b>~5× cheaper</b> than <code>step</code></div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">152 KB</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35"><code>serializeLuaState</code> blob — single round-trip <b>bit-exact</b></div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">+2 / frame</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">frame clock (30 fps cart = 2 <code>Step()</code>s). 97 game-frames → <b>+194</b></div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">210 fr</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">one <code>Trace</code>, <b>2 segments</b> — replays to clear on <b>sim + device</b></div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">96→53</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">search room-0 min-y climb <code>96→69→58→53</code> (deterministic)</div>
+    </div>
+  </div>
+
+  <h2 id="s1">1. Restructure into <code>test/playtest/</code> (M0)</h2>
+  <p>Moved (via <code>git mv</code>, history preserved) the Celeste play-test tooling out of <code>tools/</code>
+     into a per-cart layout:</p>
+  <pre>test/playtest/
+├─ trace.py           the solution contract (per-frame masks in segments)
+├─ harness.py         generic device driver (frame-synced serial delivery + verification)
+├─ fake08-sim/        the SHARED native VM (cart-agnostic) — moved from tools/fake08-sim
+└─ celeste/           per-cart area: celeste_playtest.py, celeste_solver/, render_run.py</pre>
+  <p>The shared VM sits at the top level (any cart reuses it); only cart-specific tooling lives under
+     <code>&lt;cart&gt;/</code>. Fixed the path depths on the move (the sim <code>Makefile</code>
+     <code>../../</code> → <code>../../../</code> to reach the repo root now that it's one dir deeper;
+     <code>celeste_sim.py</code>'s cart path likewise), and updated <b>~6 external references</b>
+     (<code>firmware/.../main.cpp</code> comment, <code>tools/record_video.sh</code>, four docs).
+     <code>render_run.py</code> (Celeste-specific) moved under <code>celeste/</code>;
+     <code>fake08sim.py</code> (generic) stayed with the shared VM.</p>
+
+  <h2 id="s2">2. Replay-from-root backend (M1)</h2>
+  <p>Validated the primitive a generic solver needs: <code>spawn(rx,ry)</code> + <code>step</code> on the exact
+     VM.</p>
+  <ul>
+    <li><b>Deterministic:</b> replaying the same input from spawn gives <b>byte-identical</b> final state
+       across runs.</li>
+    <li><b>Reproduces the clear:</b> replaying the known Celeste room-0 plan reaches room <code>(1,0)</code>.</li>
+  </ul>
+  <p>So a search can reach any node by <code>spawn + replay(prefix)</code> — <b>no savestate needed</b>.
+     Command: <code>python3</code> driving <code>fake08sim</code>; final state
+     <code>{x:103, y:-4, rx:1, ry:0}</code> (crossed the top exit), identical both runs.</p>
+
+  <h2 id="s3">3. The <code>Trace</code> contract + dual replay (M2) — the hard requirement</h2>
+  <p>A <b>solution is a portable, replay-able <code>Trace</code></b> (per-game-frame button masks in ordered
+     segments), <em>not</em> a savestate or a solver object. Hard invariant: <b>it must replay-to-clear on BOTH
+     the sim and the device</b>, from the same file.</p>
+  <p>Built <code>test/playtest/trace.py</code> (format + <code>keys↔mask</code>), added
+     <code>fake08sim.step_mask()</code> (replay a raw mask), and made <code>celeste_playtest.py</code> accept
+     <code>--trace=&lt;file&gt;</code>. Proof — the <b>same</b> <code>celeste_solution.trace.json</code>
+     (2 segments, 210 frames):</p>
+  <table>
+    <tr><th>side</th><th>result</th><th>verdict</th></tr>
+    <tr><td>sim replay</td><td class="n"><code>100 M → room(1,0)</code>, <code>200 M → room(2,0)</code></td><td class="n ok">PASS</td></tr>
+    <tr><td>device replay</td><td class="n"><code>CLEARED 100 M → 200 M → 300 M</code>, exit 0 — board on <code>/dev/ttyUSB0</code> (CP2104)</td><td class="n ok">PASS 2/2</td></tr>
+  </table>
+  <div class="tldr">
+    <b class="ok">PASS —</b> because the sim <em>is</em> the device's VM, a trace that clears on the sim clears
+    on the device. The one <code>celeste_solution.trace.json</code> (2 segments, 210 frames) verified on both
+    the desktop VM and real hardware.
+  </div>
+
+  <h2 id="s4">4. Host↔device frame-count sync (M2)</h2>
+  <p>To let a host-built solution line up with the device's frames, both sides must share the VM's frame clock.
+     The device telemetry already streams it (<code>T &lt;frame&gt; …</code> from
+     <code>vm-&gt;GetFrameCount()</code>); the <b>host did not expose it</b>. Added
+     <code>sim_frame_count()</code> → <code>vm-&gt;GetFrameCount()</code>
+     (<code>test/playtest/fake08-sim/sim.cpp</code>), surfaced as <code>fake08sim.frame_count()</code> and
+     included in every <code>read()['fc']</code>.</p>
+  <p>Verified the two are the same clock: the host counter <b>increments +2 per game-frame</b> (a 30 fps cart =
+     2 VM <code>Step()</code>s/frame), matching the device's per-Step count — replaying <b>97 game-frames</b>
+     advanced it by exactly <b>194</b>. The absolute origins differ (host was <b>116</b> at spawn; the device
+     differs by its own boot sequence), so the harness anchors the host's <em>relative</em> frames to the
+     device telemetry count at each segment start (<code>plan_fc0</code>): <b>frame count = the clock, the
+     anchor = the phase.</b></p>
+
+  <div class="diag">
+    <h3>Two clocks, one rate — anchored at <code>plan_fc0</code></h3>
+    <p class="sub">Both sides tick <code>vm-&gt;GetFrameCount()</code> at +2 per game-frame; only the absolute
+       origin differs. The harness pins the host's relative frame to the device's telemetry count at each
+       segment start.</p>
+    <svg viewBox="0 0 820 214" width="100%" role="img" aria-label="Host and device frame counters both increment +2 per game-frame, anchored at plan_fc0">
+      <!-- host lane -->
+      <text x="10" y="44" style="fill:var(--muted);font:600 11px var(--mono)">host — fake08sim.frame_count() = vm-&gt;GetFrameCount()</text>
+      <line x1="120" y1="66" x2="770" y2="66" style="stroke:var(--line);stroke-width:2"/>
+      <!-- device lane -->
+      <text x="10" y="146" style="fill:var(--muted);font:600 11px var(--mono)">device — telemetry T &lt;frame&gt; = vm-&gt;GetFrameCount()</text>
+      <line x1="120" y1="168" x2="770" y2="168" style="stroke:var(--line);stroke-width:2"/>
+      <!-- ticks -->
+      <g style="stroke:var(--line);stroke-width:2">
+        <line x1="200" y1="60" x2="200" y2="72"/><line x1="290" y1="60" x2="290" y2="72"/><line x1="380" y1="60" x2="380" y2="72"/><line x1="470" y1="60" x2="470" y2="72"/><line x1="560" y1="60" x2="560" y2="72"/><line x1="650" y1="60" x2="650" y2="72"/>
+        <line x1="200" y1="162" x2="200" y2="174"/><line x1="290" y1="162" x2="290" y2="174"/><line x1="380" y1="162" x2="380" y2="174"/><line x1="470" y1="162" x2="470" y2="174"/><line x1="560" y1="162" x2="560" y2="174"/><line x1="650" y1="162" x2="650" y2="174"/>
+      </g>
+      <g style="fill:var(--fg);font:11px var(--mono);text-anchor:middle;font-variant-numeric:tabular-nums">
+        <text x="200" y="90">116</text><text x="290" y="90">118</text><text x="380" y="90">120</text><text x="470" y="90">122</text><text x="560" y="90">124</text><text x="650" y="90">126</text>
+        <text x="200" y="156">fc₀</text><text x="290" y="156">fc₀+2</text><text x="380" y="156">fc₀+4</text><text x="470" y="156">fc₀+6</text><text x="560" y="156">fc₀+8</text><text x="650" y="156">fc₀+10</text>
+      </g>
+      <!-- +2 bracket on host -->
+      <path d="M200,52 L200,46 L290,46 L290,52" fill="none" style="stroke:var(--accent);stroke-width:1.5"/>
+      <text x="245" y="40" style="fill:var(--accent);font:700 11px var(--mono);text-anchor:middle">+2 / game-frame</text>
+      <!-- anchor -->
+      <line x1="200" y1="66" x2="200" y2="168" style="stroke:var(--ok);stroke-width:2;stroke-dasharray:5 4"/>
+      <circle cx="200" cy="66" r="4" style="fill:var(--ok)"/><circle cx="200" cy="168" r="4" style="fill:var(--ok)"/>
+      <text x="214" y="120" style="fill:var(--ok);font:700 11px var(--mono)">anchor: host frame 0 ⟷ device plan_fc0</text>
+      <!-- note -->
+      <text x="770" y="200" style="fill:var(--muted);font:11px var(--mono);text-anchor:end">host base 116 @ spawn · device base = boot · 97 fr → +194</text>
+    </svg>
+    <p class="legend">The clock is shared; the origins are not — so the harness re-anchors per segment start
+       (<code>plan_fc0</code>) rather than assuming a common zero.</p>
+  </div>
+
+  <h2 id="s5">5. eris VM savestates — investigated, then <span class="bad">PARKED</span> (dead-end, honest)</h2>
+  <p>O(1) snapshot/restore would make a <em>search</em> fast, so I investigated why the vendored eris savestate
+     returns 0.</p>
+  <p><b>Root cause (confirmed):</b> <code>Vm::serializeLuaState</code>
+     (<code>components/fake08/fake08/source/vm.cpp:1493</code>) pcalls <code>eris.persist_all</code>, which
+     errors because <code>eris.init_persist_all()</code> — which builds the perms table by walking sorted
+     <code>_G</code> — is <b>commented out</b> (<code>vm.cpp:170-184</code>). With an empty perms table, eris
+     tries to serialize the <b>~120 registered C-API functions</b> and raises <code>ERIS_ERR_CFUNC</code>. The
+     bios already <em>defines</em> <code>init_persist_all</code>/<code>persist_all</code>/<code>restore_all</code>
+     (<code>p8GlobalLuaFunctions.h:337-379</code>); eris is already linked in both sim and device builds.</p>
+  <p><b>Experiment:</b> uncommented the block in the fork working tree, rebuilt the sim, and ran a round-trip
+     acceptance test (save at spawn → replay the plan → restore → replay → assert identical state +
+     framebuffer).</p>
+  <ul>
+    <li>A <b>single round-trip is bit-exact</b> — <code>serializeLuaState</code> produced a <b>152 KB</b> blob
+       and restore reproduced the state.</li>
+    <li><b>But under load it corrupts.</b> ASAN (built via a new <code>EXTRA_CXXFLAGS</code>/<code>EXTRA_LDFLAGS</code>
+       hook in the sim <code>Makefile</code>) pinned two distinct bugs: a <b class="bad">heap-use-after-free in
+       <code>u_proto</code></b> during unpersist (GC frees a half-rebuilt <code>Proto</code>; a
+       <code>collectgarbage("stop")</code> guard reduced but did not eliminate it), and then a
+       <b class="bad">global-buffer-overflow in <code>Vm::Step</code></b> after restore
+       (<code>ldo.c:319</code>). Flaky (<b>~2/4 runs</b> under ASAN).</li>
+  </ul>
+  <div class="tldr" style="border-left-color:var(--bad)">
+    <b class="bad">Dead-end (parked) —</b> this is exactly why upstream commit
+    <code>47c48ad "debug segfault in lua close or load cart"</code> disabled it. Making eris robust for this
+    z8lua/fix32 build is an open-ended <b>multi-bug</b> fix (heap-use-after-free in <code>u_proto</code> on
+    unpersist + global-buffer-overflow in <code>Vm::Step</code> after restore). <b>Decision: revert the fork
+    edits (fork clean again) and PARK it.</b> The round-trip test + the ASAN <code>Makefile</code> hook are left
+    in place for a future pass. It is <b>off the critical path</b> — replay-from-root supersedes it
+    (§2, §6).
+  </div>
+
+  <h2 id="s6">6. Search engine (<code>search.py</code>) — built, then demoted to a tool (M3)</h2>
+  <p>Built a generic replay-from-root <b>beam search</b> (reusing the twin's proven macro set; dedup on the VM's
+     <code>read()</code> signature, which already matches the twin's winning key
+     <code>(x,y,djump,freeze,sign spd)</code> — so no state widening was needed). It <b>climbs room 0
+     deterministically</b> (min-y <code>96→69→58→53</code>).</p>
+
+  <div class="bars">
+    <h3>Room-0 min-y climb — deterministic (lower <code>y</code> = higher up the room)</h3>
+    <div class="bar"><div class="lab">step 0 · spawn</div><div class="track"><div class="fill b" style="width:100%">y = 96</div></div></div>
+    <div class="bar"><div class="lab">step 1</div><div class="track"><div class="fill a" style="width:71.9%">y = 69</div></div></div>
+    <div class="bar"><div class="lab">step 2</div><div class="track"><div class="fill a" style="width:60.4%">y = 58</div></div></div>
+    <div class="bar"><div class="lab">step 3</div><div class="track"><div class="fill a" style="width:55.2%">y = 53</div></div></div>
+    <p class="legend">Bar widths ∝ min-<code>y</code> (relative to the spawn's <code>y = 96</code>); shorter =
+       climbed higher. The beam descends the counter <code>96 → 69 → 58 → 53</code> every run.</p>
+  </div>
+
+  <p><b>Profiling finding (flipped my assumption):</b> <code>step</code> = <b>242 µs</b>, <code>read</code> =
+     <b>47 µs</b> — the cost is VM <em>stepping</em> (each frame runs Celeste's real <code>_update</code>+<code>_draw</code>),
+     not reading. Replay-from-root re-steps the <b>~27-frame spawn animation</b> <em>plus the whole prefix per
+     eval</em>, so a narrow beam (<b>80</b>) stalls (can't hold the lateral-setup states the solution needs) and
+     a wide beam is slow (<b>~30–50 min/room</b>). Batching the prefix without reads barely helped (reads were
+     already cheap).</p>
+
+  <div class="tldr" style="border-left-color:var(--warn)">
+    <b class="warn">VM-step-bound —</b> replay-from-root is <em>correct</em> but bounded by VM stepping, not
+    reading (<code>step</code> 242 µs ≫ <code>read</code> 47 µs). Rather than chase wide-beam perf (or the
+    parked savestates), the search is <b>demoted to an optional per-genre tool</b> an agent may invoke — not
+    the path.
+  </div>
+
+  <h2 id="s7">7. Pivot: the harness is a <em>gym</em>, an agent is the solver</h2>
+  <p>Key correction from the owner: <b>other carts are not guaranteed to be Celeste-shaped</b> (rooms, a player
+     object, a climb heuristic, a solvable-by-fixed-input traversal), and <b>no human</b> should record the
+     solution. So the genericity cannot live in a fixed solver — it lives in the <em>environment</em>:</p>
+  <ul>
+    <li>Build a deterministic, fully-observable <b>gym</b>; a <b>spawned solver agent</b> (one per cart) drives
+       it.</li>
+    <li>The agent <b>observes via rendered frames</b> (the universal channel), and <b>writes its own per-cart
+       instrumentation</b> by reading the cart's <code>.p8</code> Lua (the way Celeste's <code>READ_LUA</code>
+       was hand-written).</li>
+    <li><b>Isolation contract:</b> the agent may use tools and write whatever scripts it needs, but its entire
+       output is <b>standalone and isolated in <code>test/playtest/&lt;cart&gt;/</code></b>; the shared core
+       (<code>fake08sim</code>, <code>trace</code>, <code>harness</code>, <code>search</code>) is imported
+       <b>read-only</b>. Deliverable = a self-contained solution package (<code>solve.py</code>,
+       <code>solution.trace.json</code>, helpers, notes).</li>
+    <li>Algorithmic solvers (the §6 beam search) are optional tools the agent may call.</li>
+  </ul>
+
+  <div class="diag">
+    <h3>The pipeline — agent solves the gym; the output is a replay-able <code>Trace</code></h3>
+    <p class="sub">Solid = landed this session (M2: the <code>Trace</code> contract + dual replay). Dashed =
+       next — the spawned solver agent (M4–M5), then FPS + video (M6–M7, the ultimate goal).</p>
+    <svg viewBox="0 0 820 240" width="100%" role="img" aria-label="Pipeline: spawned solver agent produces a Trace, replayed on sim and device, yielding an fps and video report">
+      <defs>
+        <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L7,3 L0,6 z" style="fill:var(--line)"/>
+        </marker>
+      </defs>
+      <!-- edges -->
+      <line x1="160" y1="120" x2="186" y2="120" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah)"/>
+      <path d="M340,120 C372,120 372,57 396,57" fill="none" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah)"/>
+      <path d="M340,120 C372,120 372,183 396,183" fill="none" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah)"/>
+      <path d="M550,57 C592,57 592,108 626,110" fill="none" style="stroke:var(--line);stroke-width:2;stroke-dasharray:5 4" marker-end="url(#ah)"/>
+      <path d="M550,183 C592,183 592,132 626,130" fill="none" style="stroke:var(--line);stroke-width:2;stroke-dasharray:5 4" marker-end="url(#ah)"/>
+      <!-- A: spawned solver agent (next) -->
+      <rect x="10" y="93" width="150" height="54" rx="9" style="fill:var(--codebg);stroke:var(--accent);stroke-width:1.6;stroke-dasharray:5 4"/>
+      <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
+        <text x="85" y="112" style="font:700 11px var(--mono)">spawned solver agent</text>
+        <text x="85" y="128" style="font:10px var(--mono);fill:var(--muted)">one per cart · M4–M5</text>
+        <text x="85" y="141" style="font:10px var(--mono);fill:var(--muted)">observes rendered frames</text>
+      </g>
+      <!-- B: Trace (done) -->
+      <rect x="190" y="93" width="150" height="54" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+      <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
+        <text x="265" y="110" style="font:700 12px var(--mono)">Trace</text>
+        <text x="265" y="125" style="font:10px var(--mono);fill:var(--muted)">per-frame masks · segments</text>
+        <text x="265" y="139" style="font:10px var(--mono);fill:var(--muted)">210 fr / 2 seg</text>
+      </g>
+      <!-- C: sim (done) -->
+      <rect x="400" y="30" width="150" height="54" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+      <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
+        <text x="475" y="49" style="font:700 12px var(--mono)">sim</text>
+        <text x="475" y="64" style="font:10px var(--mono);fill:var(--muted)">replay + render</text>
+        <text x="475" y="77" style="font:700 10px var(--mono);fill:var(--ok)">PASS (§3)</text>
+      </g>
+      <!-- D: device (done) -->
+      <rect x="400" y="156" width="150" height="54" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+      <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
+        <text x="475" y="175" style="font:700 12px var(--mono)">device</text>
+        <text x="475" y="190" style="font:10px var(--mono);fill:var(--muted)">flash + replay</text>
+        <text x="475" y="203" style="font:700 10px var(--mono);fill:var(--ok)">PASS 2/2 (§3)</text>
+      </g>
+      <!-- E: report (goal) -->
+      <rect x="630" y="93" width="160" height="54" rx="9" style="fill:var(--codebg);stroke:var(--accent);stroke-width:1.6;stroke-dasharray:5 4"/>
+      <g style="fill:var(--fg);text-anchor:middle;font-family:var(--mono)">
+        <text x="710" y="110" style="font:700 11px var(--mono)">report — GOAL</text>
+        <text x="710" y="125" style="font:10px var(--mono);fill:var(--muted)">fps min/max/avg · M6</text>
+        <text x="710" y="139" style="font:10px var(--mono);fill:var(--muted)">sim.mp4 · device.mp4 · M7</text>
+      </g>
+    </svg>
+    <p class="legend">Every node is grounded in the doc: the agent + gym (§7, M4–M5), the <code>Trace</code> and
+       its sim/device replays (§3, landed), and the FPS-across-full-playthroughs + video goal (top-of-doc goal,
+       M6–M7).</p>
+  </div>
+
+  <p><b>Next:</b> <b>M4</b> — the gym's "eyes" (frame + filmstrip rendering, a <code>run(inputs)→observe</code>
+     primitive); <b>M5</b> — spawn a Celeste solver agent against it and check its trace against the known-good
+     reference.</p>
+
+  <h2 id="state">State at end of session</h2>
+  <ul>
+    <li><b>Done:</b> M0 (reorg), M1 (replay-from-root), M2 (Trace + dual replay + frame-count sync), M3 (search
+       as a tool). <b>Next:</b> M4 (agent gym), M5 (spawned solver on Celeste). Then M6 fps (unify
+       <code>MEASURE_FPS</code> + <code>TELEMETRY</code>, achieved + headroom), M7 video, M8 orchestrator, M9 a
+       non-platformer cart.</li>
+    <li><b>Board:</b> left flashed with the play-test build (<code>CELESTE + INPUT_BACKEND=serial +
+       INPUT_HOLD_FRAMES=1 + FORCE_FLASH_CART + SHOW_FPS + TELEMETRY + CENTER_GAME</code>), idle at room 2 — a
+       known-good dev build.</li>
+    <li><b>Fork:</b> the eris experiment is reverted; <code>components/fake08/fake08</code> is clean (no gitlink
+       change).</li>
+    <li><b>Verification:</b> host-side (sim build, frame-count arithmetic, dual replay) verified by unit-style
+       runs on the desktop VM; the device half of the trace replay verified on real hardware
+       (<b class="ok">PASS 2/2</b>). The eris dead-end verified via ASAN.</li>
+  </ul>
+
+  <p class="foot">pico-e32 · source worklog: <code>docs/worklog/2026-07-19-playtest-harness-agent-solve.md</code>
+     · area doc: <code>test/playtest/README.md</code></p>
+</div>
+</body>
+</html>

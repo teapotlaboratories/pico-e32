@@ -11,7 +11,7 @@ import math
 
 # ---- room geometry from cart ----
 import os
-P8 = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "celeste.p8")
+P8 = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "assets", "celeste.p8")
 _txt = open(P8).read().splitlines()
 def _sec(name):
     out, grab = [], False

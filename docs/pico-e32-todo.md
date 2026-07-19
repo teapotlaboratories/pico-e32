@@ -34,9 +34,9 @@ docs (per [`.ai/AGENTS.md`](../.ai/AGENTS.md) → *Plan first*).
   60 Hz — a 30 Hz resume ran 30 fps carts at half speed; `CONFIG_FREERTOS_HZ=1000` for smooth pacing; opt-in
   on-screen FPS HUD). A **hands-free play-test now clears two full Celeste levels** ("100 M" → "200 M" →
   "300 M") over serial and self-verifies over the wire — each room's input is solved offline against a physics
-  twin ([`tools/celeste_solver`](../tools/celeste_solver)) and delivered frame-synced to a new
+  twin ([`test/playtest/celeste/celeste_solver`](../test/playtest/celeste/celeste_solver)) and delivered frame-synced to a new
   position-telemetry stream (`TELEMETRY=1` + `INPUT_HOLD_FRAMES=1`); run
-  [`tools/celeste_playtest.py`](../tools/celeste_playtest.py).
+  [`test/playtest/celeste/celeste_playtest.py`](../test/playtest/celeste/celeste_playtest.py).
   See the [input backlog](runtime/pico-e32-fake08-input.md) and the worklogs
   [fps-resume](worklog/2026-07-18-fake08-celeste-fps-resume.md) +
   [play-test clear](worklog/2026-07-18-celeste-playtest-clear.md). **The only seam still blocking
@@ -46,6 +46,14 @@ docs (per [`.ai/AGENTS.md`](../.ai/AGENTS.md) → *Plan first*).
 - **Gate #4:** a real cart playable ≥ 30 fps with sound + input; set the 30-vs-60 fps policy.
 - Parts to buy: MAX98357A + speaker (audio); optionally an I²C GPIO expander + buttons for physical input
   (touch via the on-board FT6236 needs none). microSD + slot are on-board. (See plan §7.)
+- **Play-test harness → agent-solved carts + on-device FPS — [`test/playtest/README.md`](../test/playtest/README.md)**
+  (`M0`…`M9`): the Celeste play-test restructured into a reusable rig whose goal is **measuring real on-device
+  FPS across full playthroughs of arbitrary carts**, with the playthrough produced by an **agentic AI (no
+  human)** driving a deterministic **gym** on the exact device VM. A solution is a replay-able `Trace` that
+  must clear on **both** the sim and the device (proven for Celeste). `M0`–`M3` done (reorg; replay-from-root;
+  `Trace` + dual-replay + host↔device frame-count sync; beam search demoted to an optional tool); next `M4`
+  (agent-facing gym) → `M5` (spawned Celeste solver agent, isolated per-cart). eris VM savestates diagnosed +
+  **parked** (multi-bug, matches upstream `47c48ad`). See [worklog](worklog/2026-07-19-playtest-harness-agent-solve.md).
 
 ## Later — Phase 2+ (the 4.0" ST7701 board)
 

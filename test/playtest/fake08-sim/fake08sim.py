@@ -12,8 +12,10 @@ _lib = ctypes.CDLL(os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib
 _lib.sim_init.argtypes = [ctypes.c_char_p]; _lib.sim_init.restype = ctypes.c_int
 _lib.sim_start_room.argtypes = [ctypes.c_int, ctypes.c_int]
 _lib.sim_step.argtypes = [ctypes.c_ubyte]
+_lib.sim_steps.argtypes = [ctypes.c_char_p, ctypes.c_int]
 _lib.sim_read.argtypes = [ctypes.POINTER(ctypes.c_int)] * 9
 _lib.sim_frame_rgb.argtypes = [ctypes.POINTER(ctypes.c_ubyte)]
+_lib.sim_frame_count.restype = ctypes.c_int
 
 # serial keys -> PICO-8 button bits (P8_KEY_*): L=1 R=2 U=4 D=8 O(z/o)=16 X(x)=32
 BIT = {'l': 1, 'r': 2, 'u': 4, 'd': 8, 'z': 16, 'o': 16, 'x': 32}
@@ -30,8 +32,11 @@ def init(cart):
 
 def start_room(rx, ry): _lib.sim_start_room(rx, ry)
 def step(keys):         _lib.sim_step(mask(keys))
+def step_mask(m):       _lib.sim_step(m & 0xff)   # replay a raw held-button mask (from a trace)
+def steps(masks):       _lib.sim_steps(bytes(m & 0xff for m in masks), len(masks))  # batch, no read (fast)
 def save():             _lib.sim_save()
 def restore():          _lib.sim_restore()
+def frame_count():      return _lib.sim_frame_count()   # the VM's per-Step clock (== device telemetry frame)
 
 def spawn(rx, ry, maxsteps=80):
     """begin_game() + load_room(rx,ry), then step until the player_spawn animation finishes and the real
@@ -60,7 +65,8 @@ def read():
     v = [ctypes.c_int() for _ in range(9)]
     _lib.sim_read(*[ctypes.byref(x) for x in v])
     f, x, y, rx, ry, dj, fz, sx, sy = [c.value for c in v]
-    return dict(found=f, x=x, y=y, rx=rx, ry=ry, dj=dj, fz=fz, sx=sx, sy=sy)
+    # fc = the VM frame counter (== the device's telemetry frame), so a host-built solution is frame-synced.
+    return dict(found=f, x=x, y=y, rx=rx, ry=ry, dj=dj, fz=fz, sx=sx, sy=sy, fc=_lib.sim_frame_count())
 
 def frame_rgb():
     buf = (ctypes.c_ubyte * (128 * 128 * 3))()

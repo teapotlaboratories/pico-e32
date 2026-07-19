@@ -92,7 +92,7 @@ so a still is always full-resolution even if a prior `/stream?size=svga` left th
 tools/record_video.sh -t 20 my-clip                       # 20 s -> /tmp/pico-e32-captures/<ts>-my-clip.mp4
 tools/record_video.sh -o /tmp/x.mp4 -- <command...>       # record until <command> exits
 # film the hands-free Celeste play-test end to end:
-tools/record_video.sh -o /tmp/celeste.mp4 -- python3 tools/celeste_playtest.py /dev/ttyUSB0
+tools/record_video.sh -o /tmp/celeste.mp4 -- python3 test/playtest/celeste/celeste_playtest.py /dev/ttyUSB0
 ```
 
 **Stills use QXGA; video uses SVGA — on purpose.** The bench cam encodes JPEG in-chip and ships it over

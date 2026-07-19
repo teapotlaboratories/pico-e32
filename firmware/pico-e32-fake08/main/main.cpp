@@ -193,7 +193,7 @@ extern "C" void app_main(void) {
      * (where Celeste's `objects`/`player`/`room` globals live) — so this needs NO cart edit and NO change to
      * the vendored fake-08 source. One line per Step (60 Hz resume; a 30 fps cart updates every 2nd line):
      *   "T <x> <y> <room.x> <room.y> <spd.x> <spd.y> <djump>"   ('x' fields until the player object exists).
-     * Pairs with INPUT_BACKEND=serial so tools/celeste_playtest.py can frame-sync input and detect the
+     * Pairs with INPUT_BACKEND=serial so test/playtest/celeste/celeste_playtest.py can frame-sync input and detect the
      * room transition (room.x/y change) that proves a level was cleared. See docs/runtime. */
     ESP_LOGI(TAG, "TELEMETRY: per-frame player pos over UART (T <frame> x y rx ry sx sy dj)");
     {

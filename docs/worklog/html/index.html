@@ -30,6 +30,19 @@
       linked from this index (see <a href="../../../.ai/AGENTS.md">.ai/AGENTS.md</a> → Worklogs).</p>
     <ul class="entries">
       <li>
+        <span class="d">2026-07-19</span>
+        <a class="t" href="2026-07-19-playtest-harness-agent-solve.html">Play-test harness → a gym for agent-solved carts + FPS measurement</a>
+        <span class="s">Turned the one-off Celeste play-test into a reusable rig aimed at <strong>measuring real on-device
+          FPS across full playthroughs of arbitrary carts, solved by an agentic AI (no human)</strong>. Landed the
+          restructure into <code>test/playtest/</code> (M0), replay-from-root (M1), and the replay-able <strong>Trace</strong>
+          contract with <strong>dual sim + device replay</strong> plus a <strong>host↔device frame-count sync</strong>
+          (host <code>+2</code>/game-frame, anchored at <code>plan_fc0</code>) (M2); the beam search is demoted to an optional
+          tool (M3). An eris savestate speed-up was investigated and <strong>PARKED</strong> as a multi-bug dead-end
+          (<code>u_proto</code> heap-use-after-free + <code>Vm::Step</code> global-buffer-overflow, matching upstream
+          <code>47c48ad</code>). The pivot: the genericity lives in the <strong>environment</strong> — a deterministic gym a
+          <strong>spawned solver agent</strong> drives — not in a fixed solver.</span>
+      </li>
+      <li>
         <span class="d">2026-07-18</span>
         <a class="t" href="2026-07-18-celeste-playtest-clear.html">Driving Celeste through full levels, hands-free over serial</a>
         <span class="s">The play-test now clears <strong>rooms 1 &amp; 2 ("100 M" → "200 M" → "300 M")</strong> with no human on the
