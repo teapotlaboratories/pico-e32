@@ -81,6 +81,11 @@ resolve what it surfaces before merging. It is **user-triggered and billed, so t
 the agent must **not merge — and should remind the owner to run the review first** — until a code review has
 been run on the branch/PR being merged.
 
+**The local `/review` is fine for the agent to run — and encouraged.** `/review <PR#>` (or `/review` on the
+local branch) is the lightweight, in-session review: **not** billed and **not** owner-only, so the agent may
+run it on its own initiative to self-check a branch/PR and apply the fixes before handing off. It is separate
+from the billed `/code-review`/`ultra` above (the deeper cloud review), which stays owner-triggered.
+
 **Default merge strategy: rebase + merge** (`gh pr merge --rebase`). Replay the
 branch's commits onto the base so `main` stays linear — no merge bubbles. Prefer
 this over a merge commit or squash unless there is a concrete reason not to.

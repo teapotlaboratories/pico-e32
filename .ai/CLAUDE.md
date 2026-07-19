@@ -30,7 +30,8 @@ Most important rules:
 - **Run `/code-review` at least once before any merge** — it's user-triggered +
   billed (the agent can't launch it), so the agent must not merge until it's been
   run. Then **merge with rebase + merge by default** (`gh pr merge --rebase`); keep
-  `main` linear. See
+  `main` linear. The local **`/review`** (not billed) is fine for the agent to run
+  on its own to self-check a branch/PR — separate from the billed `/code-review`. See
   [AGENTS.md → Merging pull requests](AGENTS.md#merging-pull-requests).
 - **No mis-linking `#N` in PR/commit text** — a bare `#N` auto-links to a
   *same-repo* issue/PR, so cross-repo refs must be qualified as `owner/repo#N` and
