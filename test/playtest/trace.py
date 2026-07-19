@@ -77,6 +77,9 @@ class Trace:
     def load(cls, path):
         with open(path) as f:
             d = json.load(f)
+        v = d.get("version")
+        if v != cls.VERSION:
+            raise ValueError(f"unsupported trace version {v!r} (expected {cls.VERSION}) in {path}")
         return cls(d["cart"], [Segment.from_dict(s) for s in d["segments"]],
                    d.get("steps_per_frame", 2), d.get("meta"))
 

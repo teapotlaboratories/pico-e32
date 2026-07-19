@@ -14,7 +14,7 @@ Perf note: replay-from-root re-plays a node's whole prefix per expansion, so cos
 beam * |cands| * prefix_len per depth. Fine for room-sized problems; VM savestates (parked) would make it
 O(1) per node. Keep the beam modest.
 """
-import sys, os, time
+import sys, os, time, argparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -93,26 +93,22 @@ CELESTE_NAME = {(0, 0): "100 M", (1, 0): "200 M"}
 
 
 def main():
-    cart = sys.argv[1] if len(sys.argv) > 1 else "celeste"
-    rx, ry = (int(sys.argv[2]), int(sys.argv[3])) if len(sys.argv) > 3 else (0, 0)
-    out = None
-    for a in sys.argv:
-        if a.startswith("-o"):
-            out = sys.argv[sys.argv.index(a) + 1] if a == "-o" else a[2:]
-    if cart != "celeste":
+    ap = argparse.ArgumentParser(description="replay-from-root solver on the exact device VM")
+    ap.add_argument("cart", nargs="?", default="celeste")
+    ap.add_argument("rx", nargs="?", type=int, default=0)
+    ap.add_argument("ry", nargs="?", type=int, default=0)
+    ap.add_argument("-o", "--out", default=None, help="write the solution Trace to this path")
+    ap.add_argument("--beam", type=int, default=300)
+    ap.add_argument("--depth", type=int, default=18)
+    args = ap.parse_args()
+    if args.cart != "celeste":
         print("only the celeste adapter exists so far"); return 2
-
-    def _opt(flag, default):
-        for a in sys.argv:
-            if a.startswith(flag + "="):
-                return int(a.split("=", 1)[1])
-        return default
-    beam, depth = _opt("--beam", 300), _opt("--depth", 18)
+    rx, ry = args.rx, args.ry
 
     VM.init(os.path.join(os.getcwd(), "assets/celeste.p8"))
-    print(f"solving celeste room ({rx},{ry}) on the exact VM (replay-from-root, beam={beam} depth={depth})...", flush=True)
+    print(f"solving celeste room ({rx},{ry}) on the exact VM (replay-from-root, beam={args.beam} depth={args.depth})...", flush=True)
     t0 = time.monotonic()
-    wins = beam_search(rx, ry, celeste_cands(), beam=beam, depth=depth)
+    wins = beam_search(rx, ry, celeste_cands(), beam=args.beam, depth=args.depth)
     print(f"done in {time.monotonic()-t0:.1f}s: {len(wins)} winning routes", flush=True)
     if not wins:
         print("NO SOLUTION found (try a larger beam/depth)"); return 1
@@ -131,8 +127,8 @@ def main():
         VM.step_mask(mm); s = VM.read()
         if (s['rx'], s['ry']) != (rx, ry): cleared = True; break
     print("sim replay of emitted trace:", "CLEAR" if cleared else "FAIL")
-    if out and cleared:
-        tr.save(out); print(f"wrote {out}")
+    if args.out and cleared:
+        tr.save(args.out); print(f"wrote {args.out}")
     return 0 if cleared else 1
 
 

@@ -227,6 +227,13 @@ See [`docs/runtime/pico-e32-fake08-input.md`](../../docs/runtime/pico-e32-fake08
 make -C test/playtest/fake08-sim            # -> libfake08sim.so
 ```
 
+**Host-side tests** (fast, deterministic — run standalone with exit 0/1, or under pytest):
+```sh
+python3 test/playtest/test_trace.py         # Trace mask<->keys round-trip + save/load + version guard (pure Python)
+python3 test/playtest/test_sim_smoke.py     # VM builds+boots Celeste, room-0 plan clears, frame count +2/game-frame
+```
+`test_sim_smoke.py` needs the sim built (it SKIPs cleanly otherwise).
+
 **Replay a solved trace** — the same file on both sides:
 ```sh
 python3 test/playtest/celeste/celeste_playtest.py <board> --trace=solution.trace.json   # device
