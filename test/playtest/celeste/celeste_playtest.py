@@ -119,7 +119,31 @@ def segments_from_trace(path):
     return segs, tr.steps_per_frame
 
 
+def _replay_sim():
+    """Replay a trace on the SIM (mirror of the device path). Usage: celeste_playtest.py --sim --trace=<file>."""
+    tf = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--trace=")), None)
+    if not tf:
+        print("--sim needs --trace=<file>"); return 2
+    here = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, os.path.join(here, ".."))
+    sys.path.insert(0, os.path.join(here, "..", "fake08-sim"))
+    import render as R, fake08sim as VM
+    from trace import Trace
+    tr = Trace.load(tf)
+    repo = os.path.abspath(os.path.join(here, "..", "..", ".."))
+    res = R.replay(os.path.join(repo, "assets", "celeste.p8"), tr,
+                   reset=lambda seg: VM.spawn(int(seg.meta['rx']), int(seg.meta['ry'])),
+                   stop_on_clear=lambda st, seg: (st['rx'], st['ry']) != (int(seg.meta['rx']), int(seg.meta['ry'])))
+    n = sum(1 for _, c, _ in res if c); total = len(res)
+    for name, c, st in res:
+        print(f"{'CLEARED' if c else 'FAILED'} {name}" + (f" -> room ({st['rx']},{st['ry']})" if st else ""))
+    print(f"{'PASS' if n >= total else 'FAIL'}: {n}/{total} rooms on the sim")
+    return 0 if n >= total else 1
+
+
 def main():
+    if "--sim" in sys.argv:                        # replay a trace on the sim instead of the device
+        return _replay_sim()
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     port = args[0] if args else "/dev/ttyUSB0"
     segments, spf = SEGMENTS, 2

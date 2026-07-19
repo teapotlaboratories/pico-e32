@@ -255,17 +255,23 @@ python3 test/playtest/test_sim_smoke.py     # VM builds+boots Celeste, room-0 pl
 ```
 `test_sim_smoke.py` needs the sim built (it SKIPs cleanly otherwise).
 
-**Replay a solved trace** — the same file on both sides:
+**Replay a solved trace** — the *same file* on both sides (each prints `CLEARED …` per segment then
+`PASS`/`FAIL`; the device run also prints the fps summary):
 ```sh
-python3 test/playtest/celeste/celeste_playtest.py <board> --trace=solution.trace.json   # device
-# sim: spawn each segment, step its masks, check the outcome (see fake08sim.step_mask / trace.py)
+# device: deliver the trace frame-synced over serial (identify <board> = CP2104) and measure fps
+python3 test/playtest/celeste/celeste_playtest.py <board> --trace=test/playtest/celeste/solution.trace.json
+
+# sim: replay the same trace on the exact VM (fast, no hardware)
+python3 test/playtest/celeste/celeste_playtest.py --sim --trace=test/playtest/celeste/solution.trace.json
 ```
 
-**Solve a cart** (spawned solver agent, once M4/M5 land): a per-cart solver agent is given the gym and the
-cart, and produces `solution.trace.json`. **Render / record video:**
+**Solve a cart** — a spawned solver agent, given the gym + the cart, produces a verified
+`test/playtest/<cart>/solution.trace.json` (done for Celeste — see `celeste/README.md`).
+
+**Render / record video** of a trace:
 ```sh
-python3 test/playtest/celeste/render_run.py sim_run.mp4                                          # sim
-tools/record_video.sh -o device.mp4 -- python3 test/playtest/celeste/celeste_playtest.py <board> # device
+python3 test/playtest/celeste/render_run.py sim_run.mp4 [trace.json]                              # sim -> mp4
+tools/record_video.sh -o device.mp4 -- python3 test/playtest/celeste/celeste_playtest.py <board> --trace=…  # device
 ```
 
 ---
