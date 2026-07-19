@@ -83,6 +83,7 @@
       <li><a href="#s5">eris savestates — parked (dead-end)</a></li>
       <li><a href="#s6">Search engine — built, then demoted (M3)</a></li>
       <li><a href="#s7">Pivot: the harness is a <em>gym</em></a></li>
+      <li><a href="#s8">Review + M4 — the gym's eyes</a></li>
       <li><a href="#state">State at end of session</a></li>
     </ol>
   </nav>
@@ -352,12 +353,68 @@
      primitive); <b>M5</b> — spawn a Celeste solver agent against it and check its trace against the known-good
      reference.</p>
 
+  <h2 id="s8">8. Review + M4 — the gym's eyes</h2>
+  <p>Opened <b>PR #13</b> for the arc above and self-reviewed it with the local <code>/review</code>:</p>
+  <ul>
+    <li>hardened <code>search.py</code>'s CLI to <code>argparse</code>;</li>
+    <li>added a <code>trace.py</code> <b>format-version guard</b>;</li>
+    <li>added host-side tests — <code>test_trace.py</code> <b class="ok">4/4</b>, <code>test_sim_smoke.py</code>
+       <b class="ok">1/1</b>;</li>
+    <li>made <code>search.py</code> genuinely <b>cart-agnostic</b> (below).</li>
+  </ul>
+  <p><b>Search as a cart-agnostic engine.</b> The engine now takes callables
+     (<code>reset</code> / <code>observe</code> / <code>is_win</code> / <code>is_dead</code> /
+     <code>score</code> / <code>signature</code>) instead of hard-coding Celeste, and the Celeste adapter moved
+     to the conventional <code>celeste/solve.py</code>. Behaviour is preserved — the same deterministic room-0
+     climb <code>96→53</code>.</p>
+  <p><b>M4 (done) — the gym's eyes.</b> A solver agent solves by <em>looking</em> at the screen, so
+     <code>gym.py</code> gives it one:</p>
+  <ul>
+    <li><code>snapshot(path)</code> — renders the current VM frame to a PNG;</li>
+    <li><code>run_filmstrip(masks, path, every=, reset=, label=)</code> — replays an input run and montages
+       sampled, labelled frames into <b>one contact-sheet PNG</b> the agent Reads in a single look (and returns
+       the captured <code>read()</code> states);</li>
+    <li><code>fake08sim.draw()</code> — new binding for <code>sim_draw</code>.</li>
+  </ul>
+  <p>Verified on <b>Celeste room 0</b>: the filmstrip shows the whole run at a glance, the climb reading
+     <code>y = 96</code> (spawn) → <code>y = 4</code> (top exit) across the tiles — so the agent perceives
+     motion / progress, not just a still.</p>
+
+  <div class="diag">
+    <h3><code>run_filmstrip</code> — one contact sheet, the whole run at a glance</h3>
+    <p class="sub">The gym's eyes: sampled, labelled frames montaged into a single PNG the agent Reads in one
+       look. On Celeste room 0 the climb reads <code>y = 96</code> (spawn) → <code>y = 4</code> (top exit) end
+       to end — motion, not a still.</p>
+    <div class="frames">
+      <div class="fr"><div class="box idle">spawn</div><div class="fno">frame 0</div><div class="pos">y = 96</div></div>
+      <div class="fr"><div class="box mv">climb</div><div class="fno">sampled</div><div class="pos">↑</div></div>
+      <div class="fr"><div class="box mv">climb</div><div class="fno">sampled</div><div class="pos">↑</div></div>
+      <div class="fr"><div class="box mv">climb</div><div class="fno">sampled</div><div class="pos">↑</div></div>
+      <div class="fr"><div class="box mv">climb</div><div class="fno">sampled</div><div class="pos">↑</div></div>
+      <div class="fr"><div class="box mv">top exit</div><div class="fno">last</div><div class="pos">y = 4</div></div>
+    </div>
+    <p class="legend"><code>run_filmstrip</code> samples every <code>N</code>th frame; end to end the player
+       climbs from spawn (<code>y = 96</code>) to the top exit (<code>y = 4</code>). The endpoint <code>y</code>
+       values are the readings from the run; the intermediate tiles mark the sampling cadence, not measured
+       coordinates.</p>
+  </div>
+
+  <div class="tldr">
+    <b class="ok">M4 done —</b> <code>gym.py</code> gives the spawned solver agent <b>eyes</b>
+    (<code>snapshot</code> + <code>run_filmstrip</code>, plus <code>fake08sim.draw()</code>), the search engine
+    is cart-agnostic (<code>celeste/solve.py</code>), and the arc shipped as <b>PR #13</b> (branch
+    <code>playtest-agent-gym</code>, self-reviewed via <code>/review</code>). <b>Next:</b> M5 — spawn a Celeste
+    solver agent that drives the gym.
+  </div>
+
   <h2 id="state">State at end of session</h2>
   <ul>
     <li><b>Done:</b> M0 (reorg), M1 (replay-from-root), M2 (Trace + dual replay + frame-count sync), M3 (search
-       as a tool). <b>Next:</b> M4 (agent gym), M5 (spawned solver on Celeste). Then M6 fps (unify
-       <code>MEASURE_FPS</code> + <code>TELEMETRY</code>, achieved + headroom), M7 video, M8 orchestrator, M9 a
-       non-platformer cart.</li>
+       as a cart-agnostic engine + <code>celeste/solve.py</code>), <b>M4 (agent gym — the eyes,
+       <code>gym.py</code>)</b>. Committed as <b>PR #13</b> (branch <code>playtest-agent-gym</code>,
+       self-reviewed via <code>/review</code>). <b>Next:</b> M5 (spawn a Celeste solver agent that drives the
+       gym). Then M6 fps (unify <code>MEASURE_FPS</code> + <code>TELEMETRY</code>, achieved + headroom), M7
+       video, M8 orchestrator, M9 a non-platformer cart.</li>
     <li><b>Board:</b> left flashed with the play-test build (<code>CELESTE + INPUT_BACKEND=serial +
        INPUT_HOLD_FRAMES=1 + FORCE_FLASH_CART + SHOW_FPS + TELEMETRY + CENTER_GAME</code>), idle at room 2 — a
        known-good dev build.</li>

@@ -121,11 +121,28 @@ So the genericity cannot live in a fixed solver — it lives in the *environment
 Next: **M4** — the gym's "eyes" (frame + filmstrip rendering, a `run(inputs)→observe` primitive); **M5** —
 spawn a Celeste solver agent against it and check its trace against the known-good reference.
 
+## 8. Review + M4 — the gym's eyes
+
+Opened PR #13 for the arc above and self-reviewed it with the local `/review`: hardened `search.py`'s CLI to
+`argparse`, added a `trace.py` format-version guard, added host-side tests (`test_trace.py` 4/4,
+`test_sim_smoke.py` 1/1), and made `search.py` genuinely cart-agnostic — the engine now takes callables
+(`reset/observe/is_win/is_dead/score/signature`) and the Celeste adapter moved to the conventional
+`celeste/solve.py` (behaviour preserved: same room-0 climb 96→53).
+
+**M4 (done) — the gym's eyes.** A solver agent solves by *looking* at the screen, so `gym.py` gives it one:
+`snapshot(path)` renders the current VM frame to a PNG; `run_filmstrip(masks, path, every=/reset=/label=)`
+replays an input run and montages sampled, labelled frames into one contact-sheet PNG the agent Reads in a
+single look (and returns the captured `read()` states). Added `fake08sim.draw()` (binds `sim_draw`). Verified
+on Celeste room 0 — the filmstrip shows the whole run at a glance, the climb reading **y96 → y4** across the
+tiles, so the agent perceives motion/progress, not just a still.
+
 ## State at end of session
 
 - **Done:** M0 (reorg), M1 (replay-from-root), M2 (Trace + dual replay + frame-count sync), M3 (search as a
-  tool). **Next:** M4 (agent gym), M5 (spawned solver on Celeste). Then M6 fps (unify `MEASURE_FPS` +
-  `TELEMETRY`, achieved + headroom), M7 video, M8 orchestrator, M9 a non-platformer cart.
+  cart-agnostic engine + `celeste/solve.py`), **M4 (agent gym — the eyes, `gym.py`)**. Committed as PR #13
+  (branch `playtest-agent-gym`, self-reviewed via `/review`). **Next:** M5 (spawn a Celeste solver agent that
+  drives the gym). Then M6 fps (unify `MEASURE_FPS` + `TELEMETRY`, achieved + headroom), M7 video, M8
+  orchestrator, M9 a non-platformer cart.
 - **Board:** left flashed with the play-test build (`CELESTE + INPUT_BACKEND=serial + INPUT_HOLD_FRAMES=1 +
   FORCE_FLASH_CART + SHOW_FPS + TELEMETRY + CENTER_GAME`), idle at room 2 — a known-good dev build.
 - **Fork:** the eris experiment is reverted; `components/fake08/fake08` is clean (no gitlink change).
