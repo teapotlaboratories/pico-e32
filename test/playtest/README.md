@@ -46,7 +46,8 @@ test/playtest/
 ├─ harness.py         generic DEVICE driver: frame-synced input delivery + verification over serial,
 │                     clocked by the firmware's telemetry frame counter. Cart-agnostic.
 ├─ gym.py             the agent's EYES: snapshot() + run_filmstrip() -> viewable PNGs of a run. Cart-agnostic.
-├─ render.py          render a Trace playing on the sim -> mp4 (cart-agnostic; device video = tools/record_video.sh).
+├─ render.py          render a Trace playing on the sim -> mp4 + replay() (cart-agnostic; device video = tools/record_video.sh).
+├─ orchestrate.py     the ONE-CALL report core (cart-agnostic): sim replay+render + device replay+fps+record -> report.json.
 ├─ fake08-sim/        the SHARED native VM — the exact device VM (same components/fake08 + z8lua), headless.
 │  ├─ sim.cpp         The agent's GYM: run the real cart, step inputs, read RAM / run Lua, capture frames.
 │  ├─ host_sim.cpp    C API + headless Host (scripted input, captured framebuffer, no display/audio).
@@ -60,7 +61,8 @@ test/playtest/
    ├─ solve.py              Celeste's solver: the callables + macros for the shared search.py; emits a Trace.
    ├─ celeste_playtest.py   DEVICE driver: replays the embedded solution, or --trace=<file>.
    ├─ celeste_solver/       the Celeste physics twin + beam search (produced the reference plans).
-   └─ render_run.py         thin adapter: render Celeste's solution Trace to mp4 (via ../render.py).
+   ├─ render_run.py         thin adapter: render Celeste's solution Trace to mp4 (via ../render.py).
+   └─ orchestrate_run.py    thin adapter: one-call sim+device report for Celeste (via ../orchestrate.py).
 ```
 
 **Cart-agnostic core** (`trace.py`, `harness.py`, `fake08-sim/`) + **agent-generated per-cart work** (a
@@ -172,6 +174,7 @@ test/playtest/<cart>/
                                                             ──►  report { fps min/max/avg (achieved+headroom),
                                                                           sim.mp4, device.mp4, pass/fail }
 ```
+The right-hand side (everything after the Trace) is exactly `orchestrate.py` — one call, one `report.json`.
 
 ---
 
@@ -187,7 +190,7 @@ test/playtest/<cart>/
 | M5 | **Spawned solver-agent flow**: agent read the cart, drove the gym, wrote its own scripts **isolated under `celeste/`**, and emitted a verified `Trace` — **proven on Celeste** (independent sim replay + device replay 2/2 on the board) | ✅ done |
 | M6 | Unified fps telemetry (achieved **and** headroom) + harness aggregation → min/avg/max — **on the board** | ✅ done |
 | M7 | Generalize video capture — shared `render.py` (Trace → sim mp4, cart-agnostic) + Celeste adapter; device via `record_video.sh` | ✅ done |
-| M8 | One-call orchestrator: `playtest <cart>` → spawn solver → sim + device → emit the report | 📋 todo |
+| M8 | One-call orchestrator — shared `orchestrate.py` + Celeste `orchestrate_run.py`: sim replay+render **and** device replay+fps+camera → one `report.json` (+ sim.mp4/device.mp4) — **verified on the board** | ✅ done |
 | M9 | Second cart (non-platformer) — proves the agent+gym is genuinely genre-agnostic | 📋 todo |
 | — | **Parked:** eris VM savestates (O(1) restore) — diagnosed, ASAN harness in place; off the critical path | 🅿️ parked |
 
@@ -220,8 +223,13 @@ test/playtest/<cart>/
   [`tools/record_video.sh`](../../tools/record_video.sh) (`--` a `celeste_playtest.py --trace=<file>`; SVGA,
   see the bench-camera doc) — cart-agnostic (records whatever plays). Verified: rendered the M5
   `solution.trace.json` (257 frames / 8.6 s) and filmed the same trace on the board.
-- **M8 — orchestrator.** One entry: spawn the solver → sim replay+render → device flash+replay+fps+camera →
-  write the report `{fps stats, sim.mp4, device.mp4, pass/fail}`.
+- **M8 — orchestrator. ✅ done.** `orchestrate.py` (shared, cart-agnostic) folds a solved `Trace` through
+  both sides in one call: sim `replay()` (verify) + `render()` (sim.mp4), then the device replay (verify +
+  fps, via a cart hook) + a bench-camera video (`record_video.sh`), and writes `report.json`
+  `{cart, segments, frames, sim{cleared,total,video,per-segment}, device{cleared,total,fps{achieved,headroom},video}, pass}`.
+  A cart supplies only its sim `reset`/`stop` callables + device replay/record hooks; `celeste/orchestrate_run.py`
+  is the thin Celeste entry (`--sim-only` to skip the board). Verified on the board: sim 2/2 + device 2/2,
+  achieved 9.2/29.9/30.0, headroom 9.2/64.0/112.1 over 507 game-frames, sim.mp4 (8.6 s) + device.mp4 (22.6 s).
 - **M9 — 2nd cart.** A non-platformer cart to validate that the gym + agent approach isn't Celeste-shaped:
   the agent should read the new cart and produce a trace with no framework changes.
 
@@ -251,9 +259,11 @@ make -C test/playtest/fake08-sim            # -> libfake08sim.so
 **Host-side tests** (fast, deterministic — run standalone with exit 0/1, or under pytest):
 ```sh
 python3 test/playtest/test_trace.py         # Trace mask<->keys round-trip + save/load + version guard (pure Python)
+python3 test/playtest/test_fps.py           # FpsMeter grouping + achieved/headroom stats (pure Python)
 python3 test/playtest/test_sim_smoke.py     # VM builds+boots Celeste, room-0 plan clears, frame count +2/game-frame
+python3 test/playtest/test_orchestrate.py   # orchestrate() sim path: both rooms clear, report.json well-formed, sim.mp4 written
 ```
-`test_sim_smoke.py` needs the sim built (it SKIPs cleanly otherwise).
+`test_sim_smoke.py` / `test_orchestrate.py` need the sim built (they SKIP cleanly otherwise).
 
 **Replay a solved trace** — the *same file* on both sides (each prints `CLEARED …` per segment then
 `PASS`/`FAIL`; the device run also prints the fps summary):
@@ -272,6 +282,13 @@ python3 test/playtest/celeste/celeste_playtest.py --sim --trace=test/playtest/ce
 ```sh
 python3 test/playtest/celeste/render_run.py sim_run.mp4 [trace.json]                              # sim -> mp4
 tools/record_video.sh -o device.mp4 -- python3 test/playtest/celeste/celeste_playtest.py <board> --trace=…  # device
+```
+
+**One-call orchestrator** — run the whole play-test (sim replay+render **and** device replay+fps+camera) and
+fold it into one `report.json` (+ `sim.mp4`, `device.mp4`) under `--out` (default `/tmp/celeste-playtest`):
+```sh
+python3 test/playtest/celeste/orchestrate_run.py <board> [--trace=<file>] [--out=<dir>]   # sim + device + report
+python3 test/playtest/celeste/orchestrate_run.py --sim-only                               # sim half only (no board)
 ```
 
 ---
