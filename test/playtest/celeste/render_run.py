@@ -1,46 +1,32 @@
 #!/usr/bin/env python3
-"""Render the sim playing the two solved rooms (100 M -> 200 M -> 300 M) to an mp4 — the pixel-perfect
-device VM, for side-by-side comparison with the bench-camera video. Usage: python3 render_run.py <out.mp4>"""
-import sys, os, re, ast, ctypes, subprocess
+"""Render Celeste's solution Trace on the sim to an mp4 (pixel-perfect) — a thin adapter over the shared
+`../render.py`. Celeste's segment reset = `spawn(rx, ry)`; a room clears when `(rx, ry)` advances.
+
+    python3 test/playtest/celeste/render_run.py [out.mp4] [trace.json]   # default trace: solution.trace.json
+"""
+import sys, os
+
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "fake08-sim"))   # the shared VM lives one level up
-import fake08sim as S
-S._lib.sim_draw.argtypes = []
-REPO = os.path.abspath(os.path.join(HERE, "..", "..", ".."))  # test/playtest/celeste -> repo root
+sys.path.insert(0, os.path.join(HERE, ".."))                 # render.py, trace.py
+sys.path.insert(0, os.path.join(HERE, "..", "fake08-sim"))   # fake08sim
+import fake08sim as VM
+import render as R
+from trace import Trace
 
-src = open(os.path.join(HERE, "celeste_playtest.py")).read()  # the driver is this dir's sibling
-def emb(n): return ast.literal_eval("[" + re.search(n + r" = \[(.*?)\n\]", src, re.S).group(1) + "]")
-ROOMS = [((0, 0), emb("PLAN_100M")), ((1, 0), emb("PLAN_200M"))]
+REPO = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 
-out = sys.argv[1] if len(sys.argv) > 1 else "sim_run.mp4"
-frames_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vframes")
-os.makedirs(frames_dir, exist_ok=True)
-for f in os.listdir(frames_dir):
-    os.remove(os.path.join(frames_dir, f))
 
-S.init(os.path.join(REPO, "assets", "celeste.p8"))
-fi = 0
-def dump():
-    global fi
-    S._lib.sim_draw()
-    open(os.path.join(frames_dir, "f.ppm"), "wb").write(b"P6\n128 128\n255\n" + S.frame_rgb())
-    subprocess.run(["convert", os.path.join(frames_dir, "f.ppm"), "-scale", "512x512",
-                    os.path.join(frames_dir, f"{fi:05d}.png")], check=True)
-    fi += 1
+def main():
+    out = sys.argv[1] if len(sys.argv) > 1 else "sim_run.mp4"
+    tracefile = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, "solution.trace.json")
+    tr = Trace.load(tracefile)
+    path, n = R.render(
+        os.path.join(REPO, "assets", "celeste.p8"), tr,
+        reset=lambda seg: VM.spawn(int(seg.meta['rx']), int(seg.meta['ry'])),
+        out=out,
+        stop_on_clear=lambda st, seg: (st['rx'], st['ry']) != (int(seg.meta['rx']), int(seg.meta['ry'])))
+    print(f"wrote {path} ({n} frames)")
 
-for (rx, ry), plan in ROOMS:
-    st = S.spawn(rx, ry)                     # wait for the player at this room's spawn
-    for _ in range(8):                       # brief hold at spawn
-        S.step(''); dump()
-    for keys in plan:
-        S.step(keys); dump()
-        r = S.read()
-        if (r['rx'], r['ry']) != (rx, ry):
-            break
-    for _ in range(6):                       # brief hold after clearing
-        S.step(''); dump()
 
-subprocess.run(["ffmpeg", "-y", "-framerate", "30", "-i", os.path.join(frames_dir, "%05d.png"),
-                "-r", "30", "-pix_fmt", "yuv420p", "-movflags", "+faststart", out],
-               check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-print(f"wrote {out} ({fi} frames)")
+if __name__ == "__main__":
+    sys.exit(main())

@@ -46,6 +46,7 @@ test/playtest/
 ├─ harness.py         generic DEVICE driver: frame-synced input delivery + verification over serial,
 │                     clocked by the firmware's telemetry frame counter. Cart-agnostic.
 ├─ gym.py             the agent's EYES: snapshot() + run_filmstrip() -> viewable PNGs of a run. Cart-agnostic.
+├─ render.py          render a Trace playing on the sim -> mp4 (cart-agnostic; device video = tools/record_video.sh).
 ├─ fake08-sim/        the SHARED native VM — the exact device VM (same components/fake08 + z8lua), headless.
 │  ├─ sim.cpp         The agent's GYM: run the real cart, step inputs, read RAM / run Lua, capture frames.
 │  ├─ host_sim.cpp    C API + headless Host (scripted input, captured framebuffer, no display/audio).
@@ -59,7 +60,7 @@ test/playtest/
    ├─ solve.py              Celeste's solver: the callables + macros for the shared search.py; emits a Trace.
    ├─ celeste_playtest.py   DEVICE driver: replays the embedded solution, or --trace=<file>.
    ├─ celeste_solver/       the Celeste physics twin + beam search (produced the reference plans).
-   └─ render_run.py         render a pixel-perfect sim run to mp4.
+   └─ render_run.py         thin adapter: render Celeste's solution Trace to mp4 (via ../render.py).
 ```
 
 **Cart-agnostic core** (`trace.py`, `harness.py`, `fake08-sim/`) + **agent-generated per-cart work** (a
@@ -185,7 +186,7 @@ test/playtest/<cart>/
 | M4 | **Agent-facing gym** — the eyes: `gym.snapshot` + `gym.run_filmstrip` render viewable frame/filmstrip PNGs of a run (verified on Celeste room 0) | ✅ done |
 | M5 | **Spawned solver-agent flow**: agent read the cart, drove the gym, wrote its own scripts **isolated under `celeste/`**, and emitted a verified `Trace` — **proven on Celeste** (independent sim replay + device replay 2/2 on the board) | ✅ done |
 | M6 | Unified fps telemetry (achieved **and** headroom) + harness aggregation → min/avg/max — **on the board** | ✅ done |
-| M7 | Generalize video capture (sim `render_run` → any cart+trace; device `record_video.sh` already generic) | 📋 todo |
+| M7 | Generalize video capture — shared `render.py` (Trace → sim mp4, cart-agnostic) + Celeste adapter; device via `record_video.sh` | ✅ done |
 | M8 | One-call orchestrator: `playtest <cart>` → spawn solver → sim + device → emit the report | 📋 todo |
 | M9 | Second cart (non-platformer) — proves the agent+gym is genuinely genre-agnostic | 📋 todo |
 | — | **Parked:** eris VM savestates (O(1) restore) — diagnosed, ASAN harness in place; off the critical path | 🅿️ parked |
@@ -213,8 +214,12 @@ test/playtest/<cart>/
   **headroom** (`1e6/compute` — the uncapped ceiling); `harness.run(fps_out=…)` returns the stats. Measured on
   the board while clearing Celeste: achieved 9.2/29.9/30.0, headroom 9.2/64.1/112.6 over 510 game-frames.
   (Fold into the trace `meta` + a report at M8.)
-- **M7 — video.** Generalize `celeste/render_run.py` to `(cart, trace) → sim.mp4`. Device video already works
-  via [`tools/record_video.sh`](../../tools/record_video.sh) (SVGA; see the bench-camera doc).
+- **M7 — video. ✅ done.** `render.py` (shared, cart-agnostic) plays a `Trace` on the sim → mp4, driven by
+  cart callables (`reset(seg)`, `stop_on_clear(state, seg)`); `celeste/render_run.py` is now a thin adapter
+  (`spawn(rx,ry)` + room-advance). Device video already works via
+  [`tools/record_video.sh`](../../tools/record_video.sh) (`--` a `celeste_playtest.py --trace=<file>`; SVGA,
+  see the bench-camera doc) — cart-agnostic (records whatever plays). Verified: rendered the M5
+  `solution.trace.json` (257 frames / 8.6 s) and filmed the same trace on the board.
 - **M8 — orchestrator.** One entry: spawn the solver → sim replay+render → device flash+replay+fps+camera →
   write the report `{fps stats, sim.mp4, device.mp4, pass/fail}`.
 - **M9 — 2nd cart.** A non-platformer cart to validate that the gym + agent approach isn't Celeste-shaped:
