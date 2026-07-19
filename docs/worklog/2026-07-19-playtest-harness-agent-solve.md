@@ -136,13 +136,40 @@ single look (and returns the captured `read()` states). Added `fake08sim.draw()`
 on Celeste room 0 — the filmstrip shows the whole run at a glance, the climb reading **y96 → y4** across the
 tiles, so the agent perceives motion/progress, not just a still.
 
+## 9. M5 — a spawned agent solves Celeste through the gym
+
+The payoff. Spawned a **Celeste solver agent** scoped to `test/playtest/celeste/` with the gym as its toolset
+(`fake08sim`, `gym.py`, `trace.py`, the twin), and gave it the isolation contract + the **Collaborate**
+affordance (it may share a `gym` image and ask the owner a question mid-solve — routed via `SendMessage` to
+`main`). It:
+
+- **Inspected** the cart with `gym.snapshot` — booted Celeste, Read the title + room frames, and confirmed
+  the win condition (room `(rx,ry)` advances) by eye against the on-screen "100 M"/"200 M"/"300 M" labels.
+- **Derived** each room's input by re-running the twin's `beam_solve_fast`, then **VM-gated every route on the
+  exact device VM** — a route is accepted only if the *real VM* clears on it.
+- **Emitted** `celeste/solution.trace.json` (2 segments, **207 game-frames**: 100 M = 94, 200 M = 113), plus
+  `make_solution.py` (re-runnable producer), `verify_solution.py`, and `README.md` — all **isolated in
+  `celeste/`, shared core untouched** (0 files modified outside).
+
+**The finding that made the gate matter:** the twin is a *model*, the VM is *ground truth*. For room (0,0)
+the twin's top route also "won" in the twin but **failed on the VM one pixel short**; the next candidate
+cleared (a fresh 94-frame route, distinct from the 97-frame reference). For room (1,0), **all 25** fresh
+twin-"win" shortcuts stalled on the VM at ~halfway (min_y 63–78 — the dash-heavy routes diverge there), while
+the twin's canonical wall-climb route — which the twin even mislabels as *not* a win — is the one the real VM
+clears. So without the VM-gate the agent would have shipped broken traces.
+
+**Independently verified (not the agent's word):** my own sim replay clears both rooms (94/94, 113/113); a
+`gym.run_filmstrip` of room 0's fresh route, Read by eye, climbs y96 → −3 and exits the top; and **device
+replay of the agent's `solution.trace.json` on the real board cleared 2/2** (`CLEARED 100 M → 200 M → 300 M`,
+t≈12 s / 17 s). Committed to PR #13 (`1c189b6`).
+
 ## State at end of session
 
 - **Done:** M0 (reorg), M1 (replay-from-root), M2 (Trace + dual replay + frame-count sync), M3 (search as a
-  cart-agnostic engine + `celeste/solve.py`), **M4 (agent gym — the eyes, `gym.py`)**. Committed as PR #13
-  (branch `playtest-agent-gym`, self-reviewed via `/review`). **Next:** M5 (spawn a Celeste solver agent that
-  drives the gym). Then M6 fps (unify `MEASURE_FPS` + `TELEMETRY`, achieved + headroom), M7 video, M8
-  orchestrator, M9 a non-platformer cart.
+  cart-agnostic engine + `celeste/solve.py`), M4 (agent gym — the eyes, `gym.py`), **M5 (spawned solver agent
+  solved Celeste through the gym, verified on the board)**. All on PR #13 (branch `playtest-agent-gym`,
+  self-reviewed via `/review`). **Next:** M6 fps (unify `MEASURE_FPS` + `TELEMETRY`, achieved + headroom),
+  M7 video, M8 orchestrator, M9 a non-platformer cart (proves genre-agnosticism).
 - **Board:** left flashed with the play-test build (`CELESTE + INPUT_BACKEND=serial + INPUT_HOLD_FRAMES=1 +
   FORCE_FLASH_CART + SHOW_FPS + TELEMETRY + CENTER_GAME`), idle at room 2 — a known-good dev build.
 - **Fork:** the eris experiment is reverted; `components/fake08/fake08` is clean (no gitlink change).
