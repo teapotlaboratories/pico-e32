@@ -45,10 +45,11 @@ test/playtest/
 │                     replay-able artifact both sides consume. Cart-agnostic (opaque per-segment `meta`).
 ├─ harness.py         generic DEVICE driver: frame-synced input delivery + verification over serial,
 │                     clocked by the firmware's telemetry frame counter. Cart-agnostic.
+├─ gym.py             the agent's EYES: snapshot() + run_filmstrip() -> viewable PNGs of a run. Cart-agnostic.
 ├─ fake08-sim/        the SHARED native VM — the exact device VM (same components/fake08 + z8lua), headless.
 │  ├─ sim.cpp         The agent's GYM: run the real cart, step inputs, read RAM / run Lua, capture frames.
 │  ├─ host_sim.cpp    C API + headless Host (scripted input, captured framebuffer, no display/audio).
-│  ├─ fake08sim.py    ctypes binding: init / spawn / step / step_mask / steps / read / frame_rgb / exec / peek.
+│  ├─ fake08sim.py    ctypes binding: init / spawn / step / step_mask / steps / read / frame_count / draw / frame_rgb / exec / peek.
 │  ├─ Makefile        native g++ build -> libfake08sim.so  (EXTRA_CXXFLAGS/LDFLAGS hook for sanitizers).
 │  └─ README.md
 ├─ search.py          OPTIONAL tool (a LIBRARY): the cart-agnostic replay-from-root beam engine — takes a
@@ -122,8 +123,9 @@ test/playtest/<cart>/
 
 ### The solver-agent toolbox (what the gym exposes)
 
-- **See** — `frame_rgb()` → the current 128×128 frame; **(planned)** render a candidate run to a *filmstrip*
-  image (a grid of sampled frames) so the agent perceives motion in one look.
+- **See** (`gym.py`) — `gym.snapshot(path)` renders the current frame to a PNG; `gym.run_filmstrip(masks,
+  path, ...)` replays a run and montages sampled, labelled frames into one contact-sheet PNG the agent Reads
+  in a single look (motion/progress, not just a still). Raw `frame_rgb()` / `draw()` underneath.
 - **Act** — `step(keys)` / `step_mask(mask)` / `steps(masks)` (batch, fast, no read).
 - **Observe/instrument** — `read()` (Celeste convenience; also returns `fc`, the frame count), `frame_count()`
   (the VM clock == device telemetry frame — sync solutions to it), `sim_exec(lua)` + `sim_peek(addr)` to run
@@ -176,7 +178,7 @@ test/playtest/<cart>/
 | M1 | Replay-from-root backend validated (deterministic; reproduces the clear) | ✅ done |
 | M2 | Portable `Trace` + dual replay proven — same file clears on sim **and** device | ✅ done |
 | M3 | Beam search tool — cart-agnostic engine `search.py` + Celeste adapter `celeste/solve.py`; climbs a room on the exact VM | ✅ done (optional tool) |
-| M4 | **Agent-facing gym**: filmstrip/frame rendering + clean run/branch/verify primitives an agent can drive | ⏳ next |
+| M4 | **Agent-facing gym** — the eyes: `gym.snapshot` + `gym.run_filmstrip` render viewable frame/filmstrip PNGs of a run (verified on Celeste room 0) | ✅ done |
 | M5 | **Spawned solver-agent flow**: agent reads the cart, drives the gym, writes its own scripts/instrumentation **standalone & isolated under `<cart>/`**, emits a verified `Trace` — **proven on Celeste** | ⏳ next |
 | M6 | Unified fps telemetry (achieved **and** headroom) + harness aggregation → min/max/avg | 📋 todo |
 | M7 | Generalize video capture (sim `render_run` → any cart+trace; device `record_video.sh` already generic) | 📋 todo |
@@ -188,9 +190,10 @@ test/playtest/<cart>/
 
 ## TODO / backlog (detail)
 
-- **M4 — agent-facing gym.** Add a **filmstrip** renderer (`frame_rgb` of sampled frames → a labeled grid
-  PNG the agent can view in one look) and a `run(inputs) → {final frame, filmstrip, instrumented state}`
-  primitive, so a solver agent can experiment and *observe* efficiently. Keep everything deterministic.
+- **M4 — agent-facing gym. ✅ done.** `gym.py`: `snapshot(path)` renders the current frame, and
+  `run_filmstrip(masks, path, every=, reset=, label=)` replays a run and montages sampled, labelled frames
+  into one contact-sheet PNG (returns the captured `read()` states too) — so a solver agent experiments and
+  *observes* in one look. Deterministic. Verified on Celeste room 0 (the climb reads y96 → y4 across the strip).
 - **M5 — solver-agent flow.** Spawn a per-cart solver agent with the gym as its toolset, scoped to
   `test/playtest/<cart>/` per the **standalone & isolated contract** above: it reads the cart's Lua, writes
   its own scripts/state-reader *there*, iterates to a `Trace`, self-verifies via sim replay, and touches no

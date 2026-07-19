@@ -37,6 +37,7 @@ def steps(masks):       _lib.sim_steps(bytes(m & 0xff for m in masks), len(masks
 def save():             _lib.sim_save()
 def restore():          _lib.sim_restore()
 def frame_count():      return _lib.sim_frame_count()   # the VM's per-Step clock (== device telemetry frame)
+def draw():             _lib.sim_draw()                 # render the current frame into the capture buffer (before frame_rgb)
 
 def spawn(rx, ry, maxsteps=80):
     """begin_game() + load_room(rx,ry), then step until the player_spawn animation finishes and the real
