@@ -64,14 +64,20 @@ START_SENDS = [(4.0, b'z'), (4.6, b'z'), (5.2, b'z')]   # title -> begin_game (j
 
 
 def parse_line(line):
-    """Celeste TELEMETRY line: `T <frame> <x> <y> <room.x> <room.y> <spd.x> <spd.y> <djump>`."""
+    """Celeste TELEMETRY line: `T <frame> <step_us> <draw_us> <x> <y> <room.x> <room.y> <spd.x> <spd.y> <djump>`.
+    The `<frame> <step_us> <draw_us>` prefix is generic (frame clock + this Step's compute, for fps); the rest
+    is the Celeste player/room, read via ExecuteLua."""
     p = line.split()
-    if len(p) < 6 or p[0] != b'T':
+    if len(p) < 8 or p[0] != b'T':
         return None
     def num(s):
         try: return float(s)
         except Exception: return None
-    return dict(fc=int(p[1]), x=num(p[2]), y=num(p[3]), rx=num(p[4]), ry=num(p[5]))
+    def integer(s):
+        try: return int(s)
+        except Exception: return None
+    return dict(fc=int(p[1]), step=integer(p[2]), draw=integer(p[3]),
+                x=num(p[4]), y=num(p[5]), rx=num(p[6]), ry=num(p[7]))
 
 
 def _nextroom(rx, ry):

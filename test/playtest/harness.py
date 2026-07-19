@@ -33,8 +33,52 @@ class Segment:
         self.describe = describe or (lambda st: name)
 
 
+class FpsMeter:
+    """Aggregate the telemetry's per-Step `(step_us, draw_us)` timing into game-frame fps. A game-frame is
+    `steps_per_frame` host Steps; its compute is the sum of step+draw over those Steps. Given the cart's target
+    fps, report min/avg/max of ACHIEVED (`min(target, ceiling)` — does the device hold the target rate?) and
+    HEADROOM (the uncapped compute ceiling `1e6/compute`). The firmware times only the cart's Step+draw (not
+    the telemetry poke), so headroom is unperturbed and achieved is derived from compute vs the frame budget —
+    no wall-clock, so per-frame telemetry overhead doesn't skew the numbers."""
+    def __init__(self, steps_per_frame=2, target_fps=30):
+        self.spf = steps_per_frame
+        self.target = target_fps
+        self.gf = {}                        # game-frame idx -> [compute_us_sum, step_count]
+
+    def add(self, fc, step_us, draw_us):
+        if step_us is None or draw_us is None:
+            return
+        g = fc // self.spf
+        c = self.gf.get(g)
+        if c is None:
+            self.gf[g] = [step_us + draw_us, 1]
+        else:
+            c[0] += step_us + draw_us; c[1] += 1
+
+    def stats(self, drop=3):
+        # complete game-frames only (all spf Steps arrived), dropping the first `drop` (boot/spawn spikes)
+        comps = [c for _, (c, n) in sorted(self.gf.items()) if n == self.spf and c > 0][drop:]
+        if not comps:
+            return None
+        head = [1e6 / c for c in comps]                     # headroom fps (uncapped ceiling)
+        ach = [min(self.target, h) for h in head]           # achieved (held at target when compute fits)
+        avg = lambda xs: sum(xs) / len(xs)
+        return dict(frames=len(comps), target=self.target,
+                    achieved=dict(min=min(ach), max=max(ach), avg=avg(ach)),
+                    headroom=dict(min=min(head), max=max(head), avg=avg(head)))
+
+    def summary(self):
+        s = self.stats()
+        if not s:
+            return "fps: (no timing telemetry)"
+        a, h = s['achieved'], s['headroom']
+        return (f"fps over {s['frames']} game-frames (target {s['target']}): "
+                f"achieved min/avg/max = {a['min']:.1f}/{a['avg']:.1f}/{a['max']:.1f}  |  "
+                f"headroom min/avg/max = {h['min']:.1f}/{h['avg']:.1f}/{h['max']:.1f}")
+
+
 def run(port, parse_line, segments, *, settle=8, lead=2, steps_per_frame=2,
-        start_sends=(), timeout=42.0, done_grace=2.0, verbose=True):
+        start_sends=(), timeout=42.0, done_grace=2.0, target_fps=None, fps_out=None, verbose=True):
     """Drive `segments` over the serial `port`; return the number cleared.
 
     parse_line(line: bytes) -> dict | None
@@ -53,6 +97,7 @@ def run(port, parse_line, segments, *, settle=8, lead=2, steps_per_frame=2,
     time.sleep(0.15); p.reset_input_buffer(); p.rts = False
 
     step = steps_per_frame
+    meter = FpsMeter(steps_per_frame, target_fps if target_fps else max(1, round(60 / steps_per_frame)))
     start_sends = list(start_sends)
     t0 = time.monotonic()
     si = 0
@@ -80,6 +125,7 @@ def run(port, parse_line, segments, *, settle=8, lead=2, steps_per_frame=2,
             if st is None:
                 continue
             latest = st
+            meter.add(st['fc'], st.get('step'), st.get('draw'))
             if cur >= len(segments):
                 continue
             seg = segments[cur]
@@ -105,4 +151,9 @@ def run(port, parse_line, segments, *, settle=8, lead=2, steps_per_frame=2,
                     sent.add(f)
             p.flush()
     p.close()
+    s = meter.stats()
+    if fps_out is not None and s:
+        fps_out.update(s)
+    if verbose:
+        print(meter.summary())
     return cleared

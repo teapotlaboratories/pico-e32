@@ -184,7 +184,7 @@ test/playtest/<cart>/
 | M3 | Beam search tool — cart-agnostic engine `search.py` + Celeste adapter `celeste/solve.py`; climbs a room on the exact VM | ✅ done (optional tool) |
 | M4 | **Agent-facing gym** — the eyes: `gym.snapshot` + `gym.run_filmstrip` render viewable frame/filmstrip PNGs of a run (verified on Celeste room 0) | ✅ done |
 | M5 | **Spawned solver-agent flow**: agent read the cart, drove the gym, wrote its own scripts **isolated under `celeste/`**, and emitted a verified `Trace` — **proven on Celeste** (independent sim replay + device replay 2/2 on the board) | ✅ done |
-| M6 | Unified fps telemetry (achieved **and** headroom) + harness aggregation → min/max/avg | 📋 todo |
+| M6 | Unified fps telemetry (achieved **and** headroom) + harness aggregation → min/avg/max — **on the board** | ✅ done |
 | M7 | Generalize video capture (sim `render_run` → any cart+trace; device `record_video.sh` already generic) | 📋 todo |
 | M8 | One-call orchestrator: `playtest <cart>` → spawn solver → sim + device → emit the report | 📋 todo |
 | M9 | Second cart (non-platformer) — proves the agent+gym is genuinely genre-agnostic | 📋 todo |
@@ -206,9 +206,13 @@ test/playtest/<cart>/
   shared code touched. Independently verified: sim replay clears both rooms, a filmstrip eye-check, and
   **device replay 2/2 on the board**. Solver agents may also **share images + ask the owner questions** while
   solving (the Collaborate affordance).
-- **M6 — fps.** `MEASURE_FPS` and `TELEMETRY` are today mutually-exclusive loops in
-  `firmware/pico-e32-fake08/main/main.cpp`. Unify: one loop streaming `T <fc> <step_us> <draw_us> …`. Harness
-  records the per-frame series → min/max/avg **achieved** + **headroom**. Fold into the trace `meta` + report.
+- **M6 — fps. ✅ done.** The `TELEMETRY` loop (`firmware/pico-e32-fake08/main/main.cpp`) now times
+  `vm->Step()` + `host->drawFrame()` and streams `T <fc> <step_us> <draw_us> <cart-state…>` (the ExecuteLua
+  poke is not timed, so it's the cart's real compute). `harness.FpsMeter` groups the per-Step timing into
+  game-frames and reports min/avg/max **achieved** (`min(target, ceiling)` — does it hold the rate?) and
+  **headroom** (`1e6/compute` — the uncapped ceiling); `harness.run(fps_out=…)` returns the stats. Measured on
+  the board while clearing Celeste: achieved 9.2/29.9/30.0, headroom 9.2/64.1/112.6 over 510 game-frames.
+  (Fold into the trace `meta` + a report at M8.)
 - **M7 — video.** Generalize `celeste/render_run.py` to `(cart, trace) → sim.mp4`. Device video already works
   via [`tools/record_video.sh`](../../tools/record_video.sh) (SVGA; see the bench-camera doc).
 - **M8 — orchestrator.** One entry: spawn the solver → sim replay+render → device flash+replay+fps+camera →
