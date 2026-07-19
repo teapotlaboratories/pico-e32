@@ -34,8 +34,9 @@ in it. Critically:
 - **The agent writes any cart-specific instrumentation itself.** Being a coding agent, it reads the cart's
   `.p8` Lua, finds the win condition / player variables, and writes a targeted state-reader for *that* cart
   (the way Celeste's `READ_LUA` was hand-written). We ship no per-cart adapters; the agent generates them.
-- **Algorithmic solvers are optional tools, not the path.** `search.py` (a replay-from-root beam) is one
-  thing the agent may *invoke* for a frame-precise sub-problem — everything does not flow through it.
+- **Algorithmic solvers are optional tools, not the path.** `search.py` is a cart-agnostic replay-from-root
+  beam *engine* (a library); a cart wires it up with its own callables + macros (see `celeste/solve.py`).
+  The agent may invoke it for a frame-precise sub-problem — everything does not flow through it.
 
 ```
 test/playtest/
@@ -50,10 +51,11 @@ test/playtest/
 │  ├─ fake08sim.py    ctypes binding: init / spawn / step / step_mask / steps / read / frame_rgb / exec / peek.
 │  ├─ Makefile        native g++ build -> libfake08sim.so  (EXTRA_CXXFLAGS/LDFLAGS hook for sanitizers).
 │  └─ README.md
-├─ search.py          OPTIONAL tool: replay-from-root beam search (a platformer-traversal solver the agent
-│                     may invoke for precise sub-problems). NOT the generic path.
+├─ search.py          OPTIONAL tool (a LIBRARY): the cart-agnostic replay-from-root beam engine — takes a
+│                     cart's callables (reset/observe/win/dead/score/signature) + macros. NOT the generic path.
 └─ celeste/           per-cart area — a solver agent's ISOLATED workspace + standalone solution package
    │                  (Celeste is the first proof cart). Shared core imported read-only; nothing leaks out.
+   ├─ solve.py              Celeste's solver: the callables + macros for the shared search.py; emits a Trace.
    ├─ celeste_playtest.py   DEVICE driver: replays the embedded solution, or --trace=<file>.
    ├─ celeste_solver/       the Celeste physics twin + beam search (produced the reference plans).
    └─ render_run.py         render a pixel-perfect sim run to mp4.
@@ -173,7 +175,7 @@ test/playtest/<cart>/
 | M0 | Reorg into `test/playtest/` (shared VM + per-cart dirs) | ✅ done |
 | M1 | Replay-from-root backend validated (deterministic; reproduces the clear) | ✅ done |
 | M2 | Portable `Trace` + dual replay proven — same file clears on sim **and** device | ✅ done |
-| M3 | Beam search tool (`search.py`) — validated it climbs a room on the exact VM | ✅ done (demoted to optional tool) |
+| M3 | Beam search tool — cart-agnostic engine `search.py` + Celeste adapter `celeste/solve.py`; climbs a room on the exact VM | ✅ done (optional tool) |
 | M4 | **Agent-facing gym**: filmstrip/frame rendering + clean run/branch/verify primitives an agent can drive | ⏳ next |
 | M5 | **Spawned solver-agent flow**: agent reads the cart, drives the gym, writes its own scripts/instrumentation **standalone & isolated under `<cart>/`**, emits a verified `Trace` — **proven on Celeste** | ⏳ next |
 | M6 | Unified fps telemetry (achieved **and** headroom) + harness aggregation → min/max/avg | 📋 todo |
@@ -192,8 +194,8 @@ test/playtest/<cart>/
 - **M5 — solver-agent flow.** Spawn a per-cart solver agent with the gym as its toolset, scoped to
   `test/playtest/<cart>/` per the **standalone & isolated contract** above: it reads the cart's Lua, writes
   its own scripts/state-reader *there*, iterates to a `Trace`, self-verifies via sim replay, and touches no
-  shared code. Prove it on Celeste (compare against the known-good reference trace). May invoke `search.py`
-  for frame-precise bits.
+  shared code. Prove it on Celeste (compare against the known-good reference trace). May invoke the shared
+  beam engine `search.py`, wired per-cart like `celeste/solve.py`.
 - **M6 — fps.** `MEASURE_FPS` and `TELEMETRY` are today mutually-exclusive loops in
   `firmware/pico-e32-fake08/main/main.cpp`. Unify: one loop streaming `T <fc> <step_us> <draw_us> …`. Harness
   records the per-frame series → min/max/avg **achieved** + **headroom**. Fold into the trace `meta` + report.
