@@ -78,11 +78,16 @@ by [`test/playtest/celeste/celeste_playtest.py`](../../test/playtest/celeste/cel
 unchanged).
 
 - **`-D TELEMETRY=1`** (app: `firmware/pico-e32-fake08/main.cpp`) — a `GameLoop` variant that prints, each
-  frame, `T <frame> <x> <y> <room.x> <room.y> <spd.x> <spd.y> <djump>` over UART. It reads the running
-  cart's `player`/`room` via the public `Vm::ExecuteLua` (runs in the cart sandbox), so it needs **no cart
-  edit and no change to vendored fake-08**. This gives the driver ground-truth position (verify a clear via
-  the `room.x/y` change) *and* a frame clock to sync input to. TX (telemetry) and RX (input) share UART0
-  cleanly.
+  Step, `T <frame> <step_us> <draw_us> <x> <y> <room.x> <room.y> <spd.x> <spd.y> <djump>` over UART. The
+  `<frame> <step_us> <draw_us>` prefix is **generic** (frame clock + this Step's compute — `step_us` times
+  `vm->Step()`, `draw_us` times `host->drawFrame()`; the telemetry `ExecuteLua` poke is *not* counted, so
+  they're the cart's real per-frame compute). The player/room tail is Celeste-read via the public
+  `Vm::ExecuteLua` (cart sandbox), so it needs **no cart edit and no change to vendored fake-08**. This gives
+  the driver ground-truth position (verify a clear via the `room.x/y` change), a frame clock to sync input to,
+  **and per-frame timing** — `harness.FpsMeter` aggregates it into min/avg/max *achieved* (`min(target,
+  ceiling)`) + *headroom* (`1e6/compute`) fps, so a play-test measures its own frame rate on the board (this
+  unifies the old standalone `MEASURE_FPS` timing into the telemetry stream). TX (telemetry) and RX (input)
+  share UART0 cleanly.
 - **`-D INPUT_HOLD_FRAMES=1`** (this backend) — overrides the default 6-frame auto-release so each byte is
   held **exactly one frame**. Re-send every frame to hold; frame-exact control for an automated,
   frame-synced driver. (6 stays the default for a human typing single keys.)
