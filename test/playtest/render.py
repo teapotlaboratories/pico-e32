@@ -17,6 +17,22 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "fak
 import fake08sim as VM
 
 
+def replay(cart_path, trace, reset, stop_on_clear=None):
+    """Replay `trace` on the sim with no video — return [(segment_name, cleared, final_state)]. Same cart
+    callables as render(): reset(seg) reaches a segment's start; stop_on_clear(state, seg) marks the clear.
+    Fast verification (the device counterpart is celeste_playtest.py --trace)."""
+    VM.init(cart_path)
+    out = []
+    for seg in trace.segments:
+        reset(seg); cleared = False; st = None
+        for m in seg.frames:
+            VM.step_mask(m); st = VM.read()
+            if stop_on_clear and stop_on_clear(st, seg):
+                cleared = True; break
+        out.append((seg.name, cleared, st))
+    return out
+
+
 def render(cart_path, trace, reset, out, *, scale=4, fps=None, hold=(15, 10), stop_on_clear=None):
     """Init `cart_path`, play `trace` on the sim, write `out` (mp4). Returns (out, frame_count). Callables
     are cart-supplied:
