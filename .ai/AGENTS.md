@@ -75,16 +75,15 @@ When unsure whether a change counts as "doc-only," treat it as code and branch.
 
 ### Merging pull requests
 
-**Run a code review before every merge.** Run `/code-review` at least once on the branch or PR being
-merged — `/code-review ultra <PR#>` for a GitHub PR, or `/code-review ultra` for the local branch — and
-resolve what it surfaces before merging. It is **user-triggered and billed, so the agent cannot launch it**:
-the agent must **not merge — and should remind the owner to run the review first** — until a code review has
-been run on the branch/PR being merged.
+**Run a code review before every merge — the built-in `/review` is sufficient.** Run `/review <PR#>` (or
+`/review` on the local branch) at least once on the branch/PR being merged and resolve what it surfaces
+before merging. It is the lightweight, in-session review: **not** billed and **not** owner-only, so the agent
+runs it itself — no need to wait on the owner. **The merge gate is satisfied once `/review` has run and its
+findings are addressed**; the agent must not merge before then.
 
-**The local `/review` is fine for the agent to run — and encouraged.** `/review <PR#>` (or `/review` on the
-local branch) is the lightweight, in-session review: **not** billed and **not** owner-only, so the agent may
-run it on its own initiative to self-check a branch/PR and apply the fixes before handing off. It is separate
-from the billed `/code-review`/`ultra` above (the deeper cloud review), which stays owner-triggered.
+**`/code-review ultra` is an optional deeper pass, not required.** `/code-review ultra <PR#>` (a GitHub PR)
+or `/code-review ultra` (the local branch) is the billed cloud review — **user-triggered, so the agent cannot
+launch it**. Worth asking the owner for on larger or riskier changes, but a merge does not wait on it.
 
 **Default merge strategy: rebase + merge** (`gh pr merge --rebase`). Replay the
 branch's commits onto the base so `main` stays linear — no merge bubbles. Prefer

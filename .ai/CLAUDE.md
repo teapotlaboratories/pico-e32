@@ -27,11 +27,12 @@ Most important rules:
   [AGENTS.md → Attribution](AGENTS.md#attribution--no-ai-self-reference-anywhere).
 - **Code/feature changes → branch + PR; doc-only changes → may push to `main`.**
   See [AGENTS.md → Branching & pull requests](AGENTS.md#branching--pull-requests).
-- **Run `/code-review` at least once before any merge** — it's user-triggered +
-  billed (the agent can't launch it), so the agent must not merge until it's been
-  run. Then **merge with rebase + merge by default** (`gh pr merge --rebase`); keep
-  `main` linear. The local **`/review`** (not billed) is fine for the agent to run
-  on its own to self-check a branch/PR — separate from the billed `/code-review`. See
+- **Run a review before any merge — the built-in `/review` is sufficient** and the
+  agent runs it itself (not billed, not owner-only); the merge gate is met once it's
+  run and its findings addressed. `/code-review ultra` is an optional deeper, billed
+  cloud review the agent can't launch — ask the owner for it on larger/riskier
+  changes. Then **merge with rebase + merge by default** (`gh pr merge --rebase`);
+  keep `main` linear. See
   [AGENTS.md → Merging pull requests](AGENTS.md#merging-pull-requests).
 - **No mis-linking `#N` in PR/commit text** — a bare `#N` auto-links to a
   *same-repo* issue/PR, so cross-repo refs must be qualified as `owner/repo#N` and
