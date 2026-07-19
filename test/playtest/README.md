@@ -133,6 +133,10 @@ test/playtest/<cart>/
 - **Branch/verify** — reset via `spawn` + replay-from-root (savestates are parked); "replay this Trace →
   outcome".
 - **Trace** — `trace.py`: accumulate / edit / save / load / verify; the hand-off artifact.
+- **Collaborate** — solving is not blind. While it works, the agent may **share the current image** (a
+  `gym.snapshot` / `run_filmstrip` PNG) with the owner and **ask a question** — when it's stuck, hits an
+  ambiguity, or needs a decision — rather than guessing. It surfaces the image + question through its run so
+  the owner can look and answer, then continues.
 
 ---
 
