@@ -114,8 +114,8 @@ still legible). 30 fps needs ≤ VGA; **1080p tops out ~5 fps** (~10 at throwawa
 unreachable at 30 on this cam — see the fps investigation in
 [`2026-07-18` worklog](../worklog/2026-07-18-celeste-playtest-clear.md). Raising XCLK past 20 MHz does
 **not** help (it's bandwidth-bound, and 24 MHz corrupts every frame — tested, reverted). `record_video.sh`
-rotates 90° CW (the mount) and brightens for the dark cart, like a judged still; its knobs (size, crop,
-brightness, fps) are env vars in its header. Video is a throwaway diagnostic → `/tmp` unless you pass
+de-distorts the lens, rotates 90° CW (the mount) and brightens for the dark cart, like a judged still; its
+knobs (size, lens, crop, brightness, fps) are env vars in its header. Video is a throwaway diagnostic → `/tmp` unless you pass
 `-o` or `CAPTURE_DIR=`.
 
 ## The loop (display changes)
@@ -174,8 +174,15 @@ red=TL, green=TR, blue=BL, yellow=BR, stub pointing right.
 
 ### The rig's own geometry is part of the measurement
 
-- **The camera is mounted at 90°: the LEFT of the frame is the TOP of the panel.** Captures must be
-  rotated 90° CW before judging anything. Forgetting this made a correctly-rendering panel look like
+- **The camera is mounted at 90° (LEFT of frame = TOP of panel) and its wide lens barrels straight edges.**
+  `capture_frame.sh` and `record_video.sh` now **auto-correct both**: they de-distort the lens (via
+  `tools/undistort.py`/OpenCV for stills, ffmpeg `lenscorrection` for video) and rotate 90° CW upright, so a
+  capture already reads head-on — **do NOT rotate it again** (that was the old manual step; double-rotating is
+  now the mistake). Set `BENCH_CAM_UNDISTORT=0` (stills) / `VIDEO_LENS=`,`VIDEO_ROTATE=` (video) to get the
+  raw sensor frame. The tuned coeffs (k1≈-0.36 OpenCV / -0.22 ffmpeg, coarse rotate=cw + a 4.0° CW fine level)
+  live in the tools + are overridable in `tools/bench_cam.env` — re-tune k1 against the panel's straight edges,
+  and `*_FINE_ROTATE` against its level, if the mount changes.
+  Historical note: before auto-rotation, forgetting the 90° CW turn made a correctly-rendering panel look like
   an orientation bug — and the correct fix (nothing) was nearly applied to working code.
 - **⚠ The camera also HORIZONTALLY-MIRRORED, and that masked a real display bug for two days.** The
   OV3660 output was left-right mirrored, which silently *cancelled* the panel's own X-flip — so a mirrored

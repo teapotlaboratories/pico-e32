@@ -52,4 +52,17 @@ fi
 if [ "$(head -c2 "$out" | xxd -p)" != "ffd8" ]; then
   echo "warning: $out does not look like a JPEG" >&2
 fi
+
+# De-distort the wide lens (barrel/fisheye) + rotate upright, so the still reads like a head-on screenshot
+# instead of a curved, sideways photo (the camera is mounted 90° rotated). tools/undistort.py (OpenCV) owns
+# the coefficients. Set BENCH_CAM_UNDISTORT=0 to keep the raw sensor frame; on any failure the raw is kept.
+if [ "${BENCH_CAM_UNDISTORT:-1}" = "1" ] && command -v python3 >/dev/null 2>&1; then
+  und="${out%.jpg}.undist.jpg"   # keep a .jpg extension — OpenCV imwrite picks the codec from it
+  if python3 "$ROOT/tools/undistort.py" "$out" "$und" && [ -s "$und" ]; then
+    mv "$und" "$out"
+  else
+    rm -f "$und"
+    echo "warning: undistort skipped (needs python3 + opencv-python + numpy); kept the raw frame" >&2
+  fi
+fi
 printf '%s\n' "$out"
