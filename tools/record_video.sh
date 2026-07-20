@@ -13,10 +13,16 @@
 # e.g. film the hands-free Celeste play-test end to end:
 #   tools/record_video.sh -o /tmp/celeste.mp4 -- python3 test/playtest/celeste/celeste_playtest.py /dev/ttyUSB0
 #
-# Host from BENCH_CAM_HOST or tools/bench_cam.env (BENCH_CAM_HOST=<ip>). Tunables (env; set empty to
-# disable): VIDEO_SIZE=svga  VIDEO_ROTATE=1 (transpose)  VIDEO_CROP=WxH+X+Y (default none — whole frame)
-#   VIDEO_EQ=brightness=0.05:saturation=1.3:contrast=1.08   VIDEO_SCALE=480:-2   VIDEO_FPS=20
-#   VIDEO_TUNE='awb=0&exp=1200&gain=0&sat=2' (locked once so the stream meters the dark panel)
+# The frame is de-distorted (the wide lens's barrel/fisheye bow), rotated 90° upright for the mount, and
+# fine-rotated a few degrees CW to level the residual tilt — so the video reads head-on like a screenshot,
+# matching tools/capture_frame.sh (which uses tools/undistort.py/OpenCV; ffmpeg's lenscorrection here is
+# tuned to the same look, k1≈-0.22 ~ OpenCV's k1=-0.36, different parameterizations).
+#
+# Host from BENCH_CAM_HOST or tools/bench_cam.env (BENCH_CAM_HOST=<ip>). Tunables (env; set empty to disable):
+#   VIDEO_SIZE=svga  VIDEO_LENS=cx=0.5:cy=0.5:k1=-0.22:k2=0 (de-distort)  VIDEO_ROTATE=1 (90° transpose)
+#   VIDEO_FINE_ROTATE=4.0 (extra CW degrees, level)  VIDEO_CROP=WxH+X+Y (default none — whole frame)
+#   VIDEO_EQ=brightness=0.05:saturation=1.3:contrast=1.08  VIDEO_SCALE=480:-2  VIDEO_FPS=20
+#   VIDEO_TUNE='awb=0&exp=1200&gain=0&sat=2' (meter the dark panel)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -31,7 +37,9 @@ if [ -z "$HOST" ]; then
 fi
 
 VIDEO_SIZE="${VIDEO_SIZE:-svga}"
-VIDEO_ROTATE="${VIDEO_ROTATE-1}"                                   # single-dash: VIDEO_ROTATE= disables
+VIDEO_LENS="${VIDEO_LENS-cx=0.5:cy=0.5:k1=-0.22:k2=0}"            # de-distort barrel; VIDEO_LENS= disables
+VIDEO_ROTATE="${VIDEO_ROTATE-1}"                                   # transpose=1 = 90° CW mount; VIDEO_ROTATE= disables
+VIDEO_FINE_ROTATE="${VIDEO_FINE_ROTATE-4.0}"                       # extra CW degrees to level the tilt; = disables
 VIDEO_CROP="${VIDEO_CROP-}"
 VIDEO_EQ="${VIDEO_EQ-brightness=0.05:saturation=1.3:contrast=1.08}"
 VIDEO_SCALE="${VIDEO_SCALE:-480:-2}"
@@ -57,9 +65,13 @@ ts="$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$(dirname "$out")"
 log="$(mktemp)"
 
-# Build the filter chain (rotate -> crop -> brighten -> scale), skipping any the user cleared.
+# Build the filter chain (de-distort -> rotate -> crop -> brighten -> scale), skipping any the user cleared.
+# lenscorrection comes first, in the camera's native orientation (radial about the frame centre), before the
+# 90° transpose — same order tools/undistort.py uses for the stills.
 filters=()
-[ -n "$VIDEO_ROTATE" ] && filters+=("transpose=${VIDEO_ROTATE}")
+[ -n "$VIDEO_LENS" ]        && filters+=("lenscorrection=${VIDEO_LENS}")
+[ -n "$VIDEO_ROTATE" ]      && filters+=("transpose=${VIDEO_ROTATE}")
+[ -n "$VIDEO_FINE_ROTATE" ] && filters+=("rotate=${VIDEO_FINE_ROTATE}*PI/180:c=black")  # CW level (ffmpeg +=CW)
 [ -n "$VIDEO_CROP" ]   && filters+=("crop=${VIDEO_CROP}")
 [ -n "$VIDEO_EQ" ]     && filters+=("eq=${VIDEO_EQ}")
 filters+=("scale=${VIDEO_SCALE}")
