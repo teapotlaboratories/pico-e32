@@ -12,7 +12,7 @@ input is solved offline, then delivered locked to the frame counter the firmware
 firmware built with `-D TELEMETRY=1` (per-frame `T <frame> ...` over UART) and `-D INPUT_HOLD_FRAMES=1`
 (each serial byte held exactly one frame). See docs/runtime/pico-e32-fake08-input.md.
 """
-import serial, time
+import serial, time, re
 
 
 class Segment:
@@ -77,8 +77,45 @@ class FpsMeter:
                 f"headroom min/avg/max = {h['min']:.1f}/{h['avg']:.1f}/{h['max']:.1f}")
 
 
+def send_telemetry_config(p, config, timeout=6.0):
+    """Runtime telemetry-tail handshake (for firmware built `-D TELEMETRY_HOST_CFG=1`): wait for the board's
+    `CFG?` prompt after boot, then send `TT<config>\\n` — `config` is the cart's telemetry-TAIL Lua expression
+    (what to stream after the generic `T <fc> <step> <draw> ` prefix). No-op if `config` is falsy. This is how
+    a cart tells a cart-AGNOSTIC firmware what to stream, so no per-cart firmware edit is needed. Returns True
+    if the tail was sent (the board fell back to its default otherwise)."""
+    if not config:
+        return False
+    t0 = time.monotonic(); buf = b""
+    while time.monotonic() - t0 < timeout:
+        chunk = p.read(p.in_waiting or 1)
+        if chunk:
+            buf += chunk
+        if b"CFG?" in buf:
+            p.write(b"TT" + config.encode() + b"\n"); p.flush()
+            _maybe_switch_baud(p)          # firmware (TELEMETRY_BAUD) may announce a higher run baud
+            return True
+    return False
+
+
+def _maybe_switch_baud(p, timeout=2.0):
+    """If the board announces `BAUD <n>` after the tail (TELEMETRY_BAUD firmware), switch the host serial to
+    match it for the run. No-op if no announce arrives. Returns the new baud or None."""
+    t0 = time.monotonic(); buf = b""
+    while time.monotonic() - t0 < timeout:
+        chunk = p.read(p.in_waiting or 1)
+        if chunk:
+            buf += chunk
+        m = re.search(rb"BAUD (\d+)\r?\n", buf)
+        if m:
+            time.sleep(0.06)               # let the board finish switching first (it waits 40 ms, then flips)
+            p.baudrate = int(m.group(1)); p.reset_input_buffer()
+            return int(m.group(1))
+    return None
+
+
 def run(port, parse_line, segments, *, settle=8, lead=2, steps_per_frame=2,
-        start_sends=(), timeout=42.0, done_grace=2.0, target_fps=None, fps_out=None, verbose=True):
+        start_sends=(), timeout=42.0, done_grace=2.0, target_fps=None, fps_out=None,
+        telemetry_config=None, verbose=True):
     """Drive `segments` over the serial `port`; return the number cleared.
 
     parse_line(line: bytes) -> dict | None
@@ -98,6 +135,8 @@ def run(port, parse_line, segments, *, settle=8, lead=2, steps_per_frame=2,
         # reset into a normal boot: RTS=EN pulse low->high, DTR=GPIO0 held high
         p.dtr = False; p.rts = True
         time.sleep(0.15); p.reset_input_buffer(); p.rts = False
+
+        send_telemetry_config(p, telemetry_config)   # if the firmware asks (CFG?), tell it what to stream
 
         start_sends = list(start_sends)
         t0 = time.monotonic()

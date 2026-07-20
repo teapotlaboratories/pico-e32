@@ -1,0 +1,73 @@
+# 2026-07-19 — M9: a spawned agent solves a *racer*, and `.p8.png` support
+
+Follows the M0–M8 play-test harness ([2026-07-19-playtest-harness-agent-solve](2026-07-19-playtest-harness-agent-solve.md), PR #13, merged). M9 is the genre-agnostic proof: a **non-platformer** cart solved by a spawned agent on the same gym, with no framework changes. Cart: **Pico Racer** by kometbomb (`assets/Pico Racer.p8.png`), a pseudo-3D arcade racer.
+
+## 1. `.p8.png` loads with no code
+
+The user added `assets/Pico Racer.p8.png` (and `Celeste.p8.png`, an `assets/roms/` library). Since the runtime is a port of fake-08, **`.p8.png` already works**: both `Cart` constructors detect the `\x89PNG` magic (`cart.cpp:405` buffer, `:522` filename) and decode via `loadCartFromPng`. Every entry point already routes through it — the sim's `LoadCart(buffer)`, the device SD path's `LoadCart(filename)` (+ `listcarts`/`isCartFile` accept `.png`), and the flash path's `LoadCart(bytes)`.
+
+- **Sim:** `VM.init("assets/Pico Racer.p8.png")` renders full graphics (road/pyramids/HUD). Verified.
+- **Device SD:** the ESP32 can WRITE to its own mounted SD (RW) — so no physical card access needed (that's how July's `hello.p8` was seeded). A throwaway `-D SEED_SD=1` build wrote the PNG to `/sdcard/racer.p8.png` and `LoadCart("/sdcard/racer.p8.png")` decoded it; the bench camera confirmed the racer title on the panel. (An earlier "needs physical access" claim was wrong — the firmware writes the card.)
+
+Two build gotchas cost a cycle each: `make build` reuses **cached** CMake defines (needs `fullclean` to drop old `FORCE_FLASH_CART`/`CELESTE`/`TELEMETRY`); and a `-D FOO=1` define only reaches the compiler if `CMakeLists.txt` forwards it with `target_compile_definitions` (like `CELESTE` does).
+
+## 2. The cart & objective — genuinely un-Celeste
+
+- **Continuous control**, not a puzzle-clear. 30 fps (`_update`, no `_update60`) → `steps_per_frame=2`.
+- Accelerate = UP/X, brake = DOWN/O, steer = LEFT/RIGHT. `starttimer` = 90-frame countdown; `clock` ≈ 1379 counts down (~46 s), **game over at 0** — the objective is **max distance** (`tpos`, 1..141), not a room advance.
+- Stay on road = keep `abs(px) < 20`; curves push `px`; `resetpos` = crash. **Goal gates** add +32 s clock just by being reached (banking them is what lets a run go far). `rnd()`-driven **traffic** slows you on contact.
+- No player/room objects → the shared Celeste `read()` is useless; racer globals are read via `sim_exec`+`sim_peek` into scratch RAM `0x4300..`.
+
+## 3. Spawned agent solve (sim) — verified
+
+A general-purpose agent, scoped to `test/playtest/pico_racer/` and given the gym + the cart, wrote its own state reader + a closed-loop controller (`solve.py`: steer-to-lane cancelling the curve push, per-curve speed cap, car-dodge + ramp-seek for rivers) and emitted `solution.trace.json` (one segment, **4420 per-game-frame masks**). **Result: tpos 63/141, 0 crashes, 0 off-road** — ~4× the tpos-15 bang-bang baseline, banking 3 goal gates.
+
+**Independently verified:** the agent's `verify_solution.py` (fresh process, open-loop) reproduces tpos 63; the filmstrip shows the car centred through 4 stages (desert → night → ice), jumping rivers, banking gates (TIME jumps 07→44→36→31). No shared code touched.
+
+**Determinism finding:** fake-08 seeds `rnd()` from wall-clock at cart load (`vm.cpp` `api_srand(...now...)`), and the cart spawns traffic with `rnd()`. Pinned via **`srand(SEED)`** (a PICO-8 API) right after init — seed 39 (chosen by a sweep), baked into the Trace meta. Also: re-`init` in one process leaks prior VM state, so only the first init is canonical → verification runs as its own process, with a prepended neutral frame for a clean start-button edge.
+
+## 4. On the device — closed-loop, because open-loop replay is fragile here
+
+Firmware additions (`main.cpp`/`CMakeLists.txt`): a cart-agnostic **`RACER` telemetry tail** (`T <fc> <step_us> <draw_us> <tpos> <px> <speed> <clock> <starttimer>`), an **`RND_SEED` PRNG pin** (60 boot Steps then `ExecuteLua("srand(N)")`, matching the sim's canonical setup), and a **`RACER` flash-cart branch** (embeds the gitignored `pico_racer_p8.h`, mirroring `CELESTE`).
+
+First replay attempt (open-loop trace, frame-synced like Celeste) exposed two things:
+- **Continuous holds need `INPUT_HOLD_FRAMES=2`.** The serial backend decrements a key's hold once per Step; a 30 fps cart is 2 Steps/game-frame, so `=1` holds a *continuously-held* key only one of the two Steps → the car barely accelerates. The sim holds each game-frame's input across both Steps (`sim_step` sets it once for two `Step()`s), so `=2` is the exact match. (Diagnosed by manually spamming `x`: speed climbed 0→1.79, so the mapping was fine — the *hold* wasn't.)
+- **Open-loop replay is fragile for long continuous control.** Even with accelerate fixed + the seed pinned, the recorded steering (a *closed-loop* controller's output) diverged on hardware — `px` ran away to 486 (road is ±20). The Trace only reproduces if the device matches the sim's state frame-for-frame for all 4420 frames; a 1-step boot offset / an fps dip (device ran 13–30 fps, not steady 30) / one mismatched car makes the recorded steering wrong for the *actual* `px`, and with **no feedback the error compounds**. Celeste replayed fine because its rooms are short, tap-based, and self-checking; a 49-second continuous-steering run has no such slack.
+
+So the racer's device driver is **closed-loop**: read `px`/`speed` telemetry each frame, steer live in response. Feedback self-corrects, so rnd/fps/timing differences don't matter. **On the board it held `px` within ±3** the whole run and drove centred through the desert stage to clock-out at **tpos 14** (filmed, 88 s). `--replay` keeps the open-loop path (documented fragile).
+
+Generalized into a shared **`live.py`** (cart-agnostic `drive_sim` + `drive_device`): the agent writes ONE `policy(state) -> mask` (using only fields the telemetry streams) and it drives BOTH the sim (state off the VM) and the board (state off serial, buttons sent live) — the **closed-loop counterpart to the open-loop Trace**, now a documented first-class solution shape (playtest README → "Two solution shapes"). Verified: the racer's `policy` reaches tpos 14 on the sim (`--sim`, `test_live.py`) and drives the board identically. `render.py` also produced a sim video of the open-loop tpos-63 solution (148 s) to pair with the device closed-loop drive (both systems).
+
+## 5. Cart-agnostic telemetry — the host tells the firmware what to stream
+
+The last device-side leak of per-cart specifics was the telemetry TAIL: it was a compile-time `#ifdef` in `main.cpp` (Celeste vs `RACER`), so a new cart needed a firmware edit. Fixed: the firmware now emits `T <fc> <step_us> <draw_us> <tail>` where `<tail>` is a Lua expression the **host sends at startup** — a tiny handshake (board prompts `CFG?`, driver replies `TT<expr>`), read before the game loop consumes input. Gated by `-D TELEMETRY_HOST_CFG=1` (dev/HITL-only; production defines no `TELEMETRY`, so the whole "backend serial command" compiles out). The runners send it (`harness.run`/`live.drive_device` gained `telemetry_config=`); the racer's `RACER_TAIL` lives in its driver. A NEW cart is now genuinely drop-in — its driver owns both *what* to stream and *how* to read it, zero firmware change.
+
+Gotchas fixed: (1) my startup UART read installed the RX driver, then the serial input backend's own install returned `ESP_FAIL` (not `INVALID_STATE`) and disabled input → made `input_init` check `uart_is_driver_installed` first. (2) A first cut made the DEFAULT tail an IIFE (a per-frame closure) — I suspected it broke Celeste's room 2, but bisecting showed Celeste room 2 is **inherently flaky** (~1/3 fail; a GC spike at the 200M→300M load, min fps ~9.6, sometimes eats the frame-precise dash) — unrelated to the telemetry change. Kept the plain-`TELEMETRY` build on the exact original inline Celeste telemetry (no closure) so its timing is byte-for-byte unchanged; the host-config path is the racer/new-cart path. Verified: racer drives via the CFG handshake (cart-agnostic firmware); Celeste still clears 2/2 when its marginal room-2 timing lands.
+
+## 6. Dodging traffic on the board — one gap (control latency), two levers
+
+The tpos-14 drive above was a *steer-only* policy (hold the lane, clock out early). To actually score, the controller has to **dodge cars and seek jump-ramps** — which needs richer state. So the telemetry TAIL grew (still host-sent, still cart-agnostic): it now scans the cart's object queue in Lua and streams the two nearest cars (type 3), the nearest ramp (type 12) + river (type 6), the worst curve over the next N segments, plus `gamemode`/`resetpos`. `choose_mask` (the SAME policy on both targets) uses all of it: cancel the curve, steer to a lane clear of the cars' collision band, dive for a ramp before a river, ease speed through un-holdable bends. **On the sim this reaches tpos 62.**
+
+On the board the same policy dodged, but under-scored — and the cause is **control latency, not the policy**. The device is ~1 game-frame behind: it reacts to frame *N*'s telemetry, and the key lands on *N+1* (serial round-trip + the input pipeline). The racer's dodge is brutally latency-sensitive — injecting a clean 1-frame delay into the *sim* drops it 62 → 27 (3 frames → 14). Crucially, the **rnd car layout matches sim↔device** (same `RND_SEED` + `srand`), so tpos 62 is genuinely reachable on hardware; the whole shortfall is the reaction lag and its *jitter*.
+
+Two levers close most of it, both now **on by default** for the racer (firmware DEFS in `racer_playtest.py`'s docstring):
+
+- **React-earlier margin** (`DEVICE_LATENCY_BUMP`): bump the dodge trigger distance so the controller commits a frame sooner, cancelling the pipeline lag. At 115200 this did *nothing* (tpos 32) — the board's latency is too *jittery* for a fixed lead to help.
+- **Higher telemetry baud** (`-D TELEMETRY_BAUD=921600`, runtime-switched after the CFG handshake): tightening serialization time cut that jitter, and *then* the react-earlier margin worked — **tpos 32 → 43**. This was the real lever.
+- **Binary telemetry** (`-D TELEMETRY_BINARY=1`): the host tail becomes a `poke` writing the observation as int16s into `0x4300..`; the firmware ships them **raw + sync-framed** (`0xAA 0x55` + fc/step/draw + fields) via `uart_write_bytes` instead of an ASCII line — no `fix32`→string / GC per frame. Correct and clean (host decodes with the *same* `solve._FIELDS` scaling the sim reader uses, so device precision matches the sim exactly), but the measured gain was **tpos 43 → 44 — within run-to-run noise**. Once the baud already cut serialization time, there weren't enough bytes-on-the-wire left for binary to recover; the residual gap to 62 is latency/jitter, which encoding can't touch. Kept as the default anyway (it's strictly cheaper on the wire and the precision-match is a nice property), but honestly labelled: **baud was the win, binary was marginal.**
+
+One framing bug worth recording: the poke-tail is multi-line Lua, but the `CFG?` handshake is newline-terminated — sent as-is, only the tail's first line was read and the rest leaked into the input backend as key-presses (no packets arrived). Fix: the driver flattens `_state_lua` to one line (`replace("\n"," ")`) before sending. The int16 field layout now lives **once** in `solve._FIELDS`, decoded identically by the sim reader (`make_reader`) and the device (`decode_binary`); `live.drive_device` gained a generic `binary=(sync, len, unpack)` reader (the `unpack` stays cart-specific, exactly like `parse_line`).
+
+## 7. On-screen fps HUD — moved to the top, and made honest
+
+The `SHOW_FPS` HUD (a green readout in a letterbox, drawn by `ESP32Host::waitForTargetFps`) was repositioned from the thin right margin to the **top letterbox, centred over the game frame** (`board_lcd_draw_fps`, `board.cpp`), and colour-coded to the 30 fps target (green ≥28 / amber ≥18 / red). That surfaced a semantics bug: the generic meter times **coroutine resumes**, and a 30 fps PICO-8 cart (`_update`) is resumed ~2 (measured ~2.2) times per drawn frame, so it read **~37** on the panel while the game truly animates at **~22** — a green "above 30" that lied about the performance and contradicted the telemetry meter. Ground truth (measured off binary telemetry): `GetFrameCount()` advances ~55/s while the cart's own `clock` (one tick per game-frame) drops ~25/s.
+
+Fix: the TELEMETRY loop (`main.cpp`) **takes over** the HUD and draws the SAME figure the host `FpsMeter` reports — per-game-frame compute = `step_us+draw_us` over its 2 resumes, `achieved = min(30, 1e6/compute)`, rolling mean — which is bounded by the target and matches the tool (~22, dipping to ~14, ~30 at the light title). A shared `g_hud_owned_by_app` flag makes `ESP32Host`'s generic meter stand down so the two don't fight. Two build gotchas cost a cycle each: an `extern "C"` linkage-spec is illegal **inside a function** (must be file scope), and `SHOW_FPS` was forwarded to the fake08 component but **not** to `main` — so all the app-side HUD code silently compiled out until `main/CMakeLists.txt` forwarded it too (confirmed by `nm` on `main.cpp.obj`). Lesson: a `-D` only reaches a translation unit whose component CMakeLists forwards it — verify with `nm`, not by assuming.
+
+## State at end
+
+- **M9 done:** sim solve (agent, tpos 62–63, verified) + device closed-loop drive that **dodges traffic to tpos 44/141** (up from the steer-only tpos 14; the sim ceiling is 62). The gym took **zero framework changes** — the genre-agnostic claim holds. All under `test/playtest/pico_racer/` + the firmware `RACER`/`RND_SEED`/`TELEMETRY_*` opt-ins. Branch `playtest-m9-racer`.
+- **Device scoreboard:** 115200 ASCII = tpos 32 → +baud 921600 = 43 → +binary = 44 (sim = 62). The gap is control-loop latency/jitter, confirmed by the sim's 1-frame-delay experiment (62 → 27) and by the rnd layout matching sim↔device.
+- **Verification:** sim replay reproduces tpos 62–63 (fresh process); device closed-loop drive verified live on the board (px bounded, clean clock-out, camera video). Open-loop device replay is documented as fragile (not a regression — a genre limit).
+- **Third-party carts** (`Pico Racer.p8.png`, `pico_racer_p8.h`) are untracked/gitignored, like `celeste.p8`.
+- **Lesson for the harness:** open-loop trace replay fits discrete/short/self-checking tasks; continuous control wants closed-loop. For latency-sensitive control over serial, cutting serialization *jitter* (baud) beats cutting serialization *size* (binary) once the wire isn't the bottleneck.
