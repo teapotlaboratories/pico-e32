@@ -44,9 +44,13 @@ static int key_to_bit(unsigned char c) {
 }
 
 esp_err_t input_init(void) {
-    /* The console may already own UART0. Install the RX driver if it isn't; ESP_ERR_INVALID_STATE means
-     * it is already installed (and still readable), which is fine. */
-    esp_err_t r = uart_driver_install(IN_UART, IN_RX_BUF, 0, 0, NULL, 0);
+    /* The console — or the app's dev-only TELEMETRY_HOST_CFG startup read — may already own the UART0 RX
+     * driver. Install it only if it isn't already: a second install can return ESP_FAIL (not just
+     * ESP_ERR_INVALID_STATE), which would wrongly disable input. If it's up, just use it. */
+    esp_err_t r = ESP_OK;
+    if (!uart_is_driver_installed(IN_UART)) {
+        r = uart_driver_install(IN_UART, IN_RX_BUF, 0, 0, NULL, 0);
+    }
     if (r != ESP_OK && r != ESP_ERR_INVALID_STATE) {
         ESP_LOGW(TAG, "uart_driver_install: %s - serial input unavailable", esp_err_to_name(r));
         s_ok = false;

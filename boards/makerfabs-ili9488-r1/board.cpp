@@ -34,6 +34,7 @@
  */
 #include "board.h"
 #include <string.h>
+#include <stdio.h>                 /* snprintf (fps HUD) */
 
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
@@ -300,20 +301,32 @@ extern "C" void board_draw_touch_deck(void) {
     ESP_LOGI(TAG, "touch control deck drawn");
 }
 
-/* Dev HUD: draw `fps` in the right letterbox (x 288..319). The centred game blit is x 32..287, so this
- * strip is never overwritten — the readout persists and only needs repainting when the value changes. */
+/* Dev HUD: draw `fps` centred at the TOP of the game frame. The centred game blit is x 32..287, y 112..367
+ * (CENTER_GAME); this readout sits in the black top letterbox just above the game's top edge, so the game blit
+ * (which never touches y<112) never overwrites it — it persists and only needs repainting when the integer
+ * value changes. Colour-coded to the 30 fps target so a dip is visible at a glance: green = at rate, amber =
+ * dipping, red = struggling. (In the touch-deck build, OY=0 puts the game flush to the top and there is no top
+ * letterbox — but the play-test builds that stream fps use CENTER_GAME, so the strip above the game is clear.) */
+/* HUD ownership: ESP32Host's generic meter times the render loop (one tick per coroutine resume). For a
+ * 30 fps PICO-8 cart that is ~2x the drawn-frame rate, so a play-test loop that knows the true game-frame
+ * count sets this flag to take over the HUD (drawing the motion fps) and make the generic meter stand down. */
+extern "C" { volatile int g_hud_owned_by_app = 0; }
+
 extern "C" void board_lcd_draw_fps(int fps) {
     if (!s_lcd) return;
     if (fps < 0) fps = 0;
     if (fps > 999) fps = 999;
     auto &g = *s_lcd;
+    const int cx = 160, y = 80;                                 /* game centre x=160; y in the top letterbox */
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%d FPS", fps);
+    uint32_t col = fps >= 28 ? g.color888(0x7f, 0xe0, 0x9a)     /* at the 30 fps target */
+                 : fps >= 18 ? g.color888(0xf2, 0xc9, 0x60)     /* dipping */
+                             : g.color888(0xe8, 0x6f, 0x6f);     /* struggling */
     g.startWrite();
-    g.fillRect(288, 0, 32, 30, g.color888(0x0d, 0x11, 0x17));   /* clear the strip */
-    g.setTextSize(2);
-    g.setTextColor(g.color888(0x7f, 0xe0, 0x9a));               /* green: loop is healthy */
-    g.drawNumber(fps, 291, 2);
-    g.setTextSize(1);
-    g.setTextColor(g.color888(0x6a, 0x76, 0x86));
-    g.drawString("fps", 293, 20);
+    g.fillRect(cx - 88, y - 6, 176, 34, g.color888(0x0d, 0x11, 0x17));  /* fixed-width clear box (fits "999 FPS") */
+    g.setTextSize(3);
+    g.setTextColor(col);
+    g.drawString(buf, cx - g.textWidth(buf) / 2, y);            /* manual centre — digit-count-proof */
     g.endWrite();
 }

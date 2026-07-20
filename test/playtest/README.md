@@ -48,6 +48,8 @@ test/playtest/
 ├─ gym.py             the agent's EYES: snapshot() + run_filmstrip() -> viewable PNGs of a run. Cart-agnostic.
 ├─ render.py          render a Trace playing on the sim -> mp4 + replay() (cart-agnostic; device video = tools/record_video.sh).
 ├─ orchestrate.py     the ONE-CALL report core (cart-agnostic): sim replay+render + device replay+fps+record -> report.json.
+├─ live.py            LIVE closed-loop runner (cart-agnostic): run a `policy(state)->mask` on the sim (drive_sim)
+│                     or the device over serial (drive_device). The feedback counterpart to the open-loop Trace.
 ├─ fake08-sim/        the SHARED native VM — the exact device VM (same components/fake08 + z8lua), headless.
 │  ├─ sim.cpp         The agent's GYM: run the real cart, step inputs, read RAM / run Lua, capture frames.
 │  ├─ host_sim.cpp    C API + headless Host (scripted input, captured framebuffer, no display/audio).
@@ -56,13 +58,18 @@ test/playtest/
 │  └─ README.md
 ├─ search.py          OPTIONAL tool (a LIBRARY): the cart-agnostic replay-from-root beam engine — takes a
 │                     cart's callables (reset/observe/win/dead/score/signature) + macros. NOT the generic path.
-└─ celeste/           per-cart area — a solver agent's ISOLATED workspace + standalone solution package
-   │                  (Celeste is the first proof cart). Shared core imported read-only; nothing leaks out.
-   ├─ solve.py              Celeste's solver: the callables + macros for the shared search.py; emits a Trace.
-   ├─ celeste_playtest.py   DEVICE driver: replays the embedded solution, or --trace=<file>.
-   ├─ celeste_solver/       the Celeste physics twin + beam search (produced the reference plans).
-   ├─ render_run.py         thin adapter: render Celeste's solution Trace to mp4 (via ../render.py).
-   └─ orchestrate_run.py    thin adapter: one-call sim+device report for Celeste (via ../orchestrate.py).
+├─ celeste/           per-cart area (OPEN-LOOP Trace solution) — a solver agent's ISOLATED workspace.
+│  │                  Shared core imported read-only; nothing leaks out.
+│  ├─ solve.py              Celeste's solver: the callables + macros for the shared search.py; emits a Trace.
+│  ├─ celeste_playtest.py   DEVICE driver: replays the embedded solution, or --trace=<file>.
+│  ├─ celeste_solver/       the Celeste physics twin + beam search (produced the reference plans).
+│  ├─ render_run.py         thin adapter: render Celeste's solution Trace to mp4 (via ../render.py).
+│  └─ orchestrate_run.py    thin adapter: one-call sim+device report for Celeste (via ../orchestrate.py).
+└─ pico_racer/        per-cart area (LIVE CLOSED-LOOP solution — a continuous-control racer, M9).
+   ├─ solve.py              runs the controller on the sim + emits an open-loop Trace (the sim solution).
+   ├─ racer_playtest.py     the `policy(state)->mask` + a sim/device state reader; drives via ../live.py.
+   ├─ verify_solution.py    fresh-process open-loop sim replay + filmstrip.
+   └─ solution.trace.json   the recorded Trace (open-loop; replays on the sim, closed-loop on the device).
 ```
 
 **Cart-agnostic core** (`trace.py`, `harness.py`, `fake08-sim/`) + **agent-generated per-cart work** (a
@@ -77,6 +84,51 @@ state-reader, a plan, verification — whatever the solver agent produces under 
 
 The VM is deterministic and the sim *is* the device's VM, so a trace that clears on the sim clears on the
 device (same code + same inputs → same result). Confirmed on Celeste (100 M → 200 M → 300 M).
+
+### Two solution shapes — an open-loop Trace, or a live closed-loop policy
+
+The agent's final deliverable can be **either shape**, whichever fits the cart — and **both run on the sim AND
+the device** (the harness is dual-target either way):
+
+| shape | what it is | runs via | best for |
+|---|---|---|---|
+| **open-loop Trace** | a fixed per-frame mask list (`trace.py`) | sim: `render.replay`/`render.render`; device: `harness.run` (frame-synced) | SHORT / DISCRETE / self-checking tasks — Celeste rooms |
+| **live closed-loop policy** | a `policy(state) -> mask` that reads the state each frame and reacts | `live.py`: `drive_sim` (state off the VM) + `drive_device` (**reads telemetry off serial, sends buttons live**) | CONTINUOUS control — racing, balancing |
+
+A Trace replays byte-exact on both sides. But an open-loop replay of a LONG continuous-control run is fragile on
+hardware: with no feedback, any small divergence (a boot-step offset, an fps dip, one `rnd()`-different
+obstacle) makes the recorded input wrong for the *actual* state, and the error **compounds** until it fails. A
+**policy closes the loop** — it reads the live state (`px`, `speed`, …) and corrects every frame, so
+rnd/fps/timing drift is absorbed. The agent writes ONE `policy(state) -> mask` (using only fields the device
+telemetry streams — the device is the constraint) plus a state reader per side; the *same* policy then drives
+both the sim and the board. See `pico_racer/` (closed-loop) vs `celeste/` (open-loop).
+
+Tip: running a policy on the sim with `live.drive_sim(..., record=True)` also RECORDS the masks it emits — so a
+closed-loop controller can *also* produce an open-loop Trace when a cart wants both (that is what a `solve.py`
+does).
+
+### The device is cart-agnostic — the host tells it *what* to stream
+
+The firmware carries **no per-cart telemetry**. Each frame it emits `T <fc> <step_us> <draw_us> <tail>`: the
+prefix is generic (frame clock + compute, for sync + fps); the **tail** is a Lua expression, read out of the
+cart's globals via `ExecuteLua`, that the cart's driver **sends over serial at startup** — not compiled in. The
+handshake: the board prompts `CFG?`, the driver replies `TT<expr>`. So a new cart is drop-in: its driver
+defines both `parse_line` (how to read the tail) and the tail expression (what to stream), and nothing in the
+firmware changes. The runners send it for you — `harness.run(telemetry_config=…)` /
+`live.drive_device(telemetry_config=…)`; see `pico_racer/racer_playtest.py`'s `RACER_TAIL`. Built with
+`-D TELEMETRY=1 -D TELEMETRY_HOST_CFG=1`; the whole host-command path is **dev/HITL-only and compiles out of
+production** (which defines no `TELEMETRY`). A plain `-D TELEMETRY=1` build (no HOST_CFG) keeps the inline
+Celeste tail as a convenience default — Celeste's frame-precise timing then uses the exact original code path.
+
+**Faster / lower-jitter telemetry (optional, for latency-sensitive control).** Two further dev-only flags cut
+the serial cost of streaming state every frame: `-D TELEMETRY_BAUD=921600` runtime-switches the console UART up
+after the CFG handshake (less serialization *jitter*), and `-D TELEMETRY_BINARY=1 -D TELEMETRY_BINARY_BYTES=N`
+makes the tail a `poke` that writes the observation as int16s into scratch RAM, which the firmware then ships
+**raw + sync-framed** (`0xAA 0x55` + fc/step/draw + N bytes) instead of an ASCII line — no `fix32`→string / GC
+per frame. The driver reads it via `live.drive_device(binary=(sync, packet_len, unpack))`, where `unpack` stays
+cart-specific (the binary twin of `parse_line`). The racer uses both by default; on that cart the **baud** was
+the real win (control jitter), while **binary** was within noise — cheaper on the wire, but the bottleneck was
+latency, not bytes. See `pico_racer/racer_playtest.py` (`RACER_TAIL_BIN`, `unpack_binary`) and the M9 worklog.
 
 ---
 
@@ -99,6 +151,9 @@ score, credits, a level count — it decides by looking), and how to instrument 
 harness supplies the deterministic, observable environment and the trace contract. Spawn one agent per cart to
 scale across many carts.
 
+For a **continuous-control** cart the loop ends differently: instead of accumulating a fixed Trace, the agent
+tunes a **`policy(state) -> mask`** and hands off a *live* controller (see [Two solution shapes](#two-solution-shapes--an-open-loop-trace-or-a-live-closed-loop-policy)). It still develops + verifies on the sim (`live.drive_sim`, which can also record a Trace); the device runs the same policy live (`live.drive_device`).
+
 ### Standalone & isolated — the per-cart contract
 
 A solver agent is free to **use tools and write whatever scripts it needs** to crack a cart — but its entire
@@ -107,9 +162,9 @@ output must be **standalone and isolated in that cart's directory**, `test/playt
 - **Everything the agent creates lives under `<cart>/`** — its solver scripts, any cart-specific
   instrumentation (e.g. a state-reader it wrote after reading the cart's Lua), notes, and the solution trace.
 - **The shared core is read-only.** The agent *imports* the gym and contract as libraries
-  (`fake08-sim/fake08sim.py`, `trace.py`, `harness.py`, optional `search.py`) but must not modify them or any
-  other cart. A new shared capability is a framework change decided outside the solve — not something a solver
-  agent does ad hoc.
+  (`fake08-sim/fake08sim.py`, `trace.py`, `harness.py`, `live.py`, optional `search.py`) but must not modify
+  them or any other cart. A new shared capability is a framework change decided outside the solve — not
+  something a solver agent does ad hoc.
 - **The result is a self-contained solution package.** Dropping `<cart>/` gives the full recipe for that cart
   and nothing else: reproducible (run its scripts), auditable (read them), and unable to affect other carts or
   the framework.
@@ -191,7 +246,7 @@ The right-hand side (everything after the Trace) is exactly `orchestrate.py` —
 | M6 | Unified fps telemetry (achieved **and** headroom) + harness aggregation → min/avg/max — **on the board** | ✅ done |
 | M7 | Generalize video capture — shared `render.py` (Trace → sim mp4, cart-agnostic) + Celeste adapter; device via `record_video.sh` | ✅ done |
 | M8 | One-call orchestrator — shared `orchestrate.py` + Celeste `orchestrate_run.py`: sim replay+render **and** device replay+fps+camera → one `report.json` (+ sim.mp4/device.mp4) — **verified on the board** | ✅ done |
-| M9 | Second cart (non-platformer) — proves the agent+gym is genuinely genre-agnostic | 📋 todo |
+| M9 | Second cart (non-platformer) — a spawned agent solved **Pico Racer** (a score-max racer, `rnd()`-driven) on the gym with NO framework changes → verified Trace (tpos 63/141); drives on the board (closed-loop, `pico_racer/`) | ✅ done |
 | — | **Parked:** eris VM savestates (O(1) restore) — diagnosed, ASAN harness in place; off the critical path | 🅿️ parked |
 
 ---
@@ -230,8 +285,17 @@ The right-hand side (everything after the Trace) is exactly `orchestrate.py` —
   A cart supplies only its sim `reset`/`stop` callables + device replay/record hooks; `celeste/orchestrate_run.py`
   is the thin Celeste entry (`--sim-only` to skip the board). Verified on the board: sim 2/2 + device 2/2,
   achieved 9.2/29.9/30.0, headroom 9.2/64.0/112.1 over 507 game-frames, sim.mp4 (8.6 s) + device.mp4 (22.6 s).
-- **M9 — 2nd cart.** A non-platformer cart to validate that the gym + agent approach isn't Celeste-shaped:
-  the agent should read the new cart and produce a trace with no framework changes.
+- **M9 — 2nd cart. ✅ done.** A spawned solver agent solved **Pico Racer** (`assets/Pico Racer.p8.png`, a
+  pseudo-3D score-max racer by kometbomb) on the gym with **zero framework changes** — proving the approach
+  isn't Celeste-shaped. It's a genuinely different genre: continuous control (not a puzzle-clear), objective =
+  max distance (`tpos`) before a `clock` times out (not a room advance), and `rnd()`-driven traffic. The
+  agent wrote its own state reader + controller under `pico_racer/`, pinned `rnd()` with `srand(seed)` for
+  determinism, and emitted a verified Trace (**tpos 63/141**, 0 crashes; open-loop replay reproduces it).
+  Two findings surfaced that fed back into the shared stack: (1) `.p8.png` carts load with no code (fake-08
+  auto-decodes PNG — see M8-era notes); (2) **open-loop trace replay is fragile for long continuous-control
+  runs** on hardware (errors compound with no feedback) — so the racer's DEVICE driver (`racer_playtest.py`)
+  is **closed-loop** (read `px`/`speed` telemetry, steer live), which drives the car robustly on the board
+  (filmed). Firmware gained a cart-agnostic `RACER` telemetry tail + an `RND_SEED` PRNG pin.
 
 ---
 
@@ -273,6 +337,27 @@ python3 test/playtest/celeste/celeste_playtest.py <board> --trace=test/playtest/
 
 # sim: replay the same trace on the exact VM (fast, no hardware)
 python3 test/playtest/celeste/celeste_playtest.py --sim --trace=test/playtest/celeste/solution.trace.json
+```
+
+**Run a continuous-control cart (Pico Racer) — closed-loop live, or open-loop replay.** The racer's primary
+solution is a live **closed-loop policy** (read telemetry, steer each frame); the same `policy(state)->mask`
+drives the sim and the board. The open-loop trace path is kept for comparison (fragile on hardware — see
+[Two solution shapes](#two-solution-shapes--an-open-loop-trace-or-a-live-closed-loop-policy)).
+```sh
+# CLOSED-LOOP (default, robust) — the SAME policy on each target:
+python3 test/playtest/pico_racer/racer_playtest.py <board>   # device: read telemetry + steer live (dodges traffic)
+python3 test/playtest/pico_racer/racer_playtest.py --sim      # sim: identical policy, no board needed
+
+# OPEN-LOOP trace replay (frame-synced; fragile on hardware, for comparison):
+python3 test/playtest/pico_racer/racer_playtest.py <board> --replay
+```
+The device path needs the racer firmware (binary telemetry + higher baud are the DEFAULT — they tighten the
+latency-sensitive dodge; see the racer README + M9 worklog):
+```sh
+make flash APP=pico-e32-fake08 BOARD=makerfabs-ili9488-r1 PORT=<board> \
+  DEFS='-D FORCE_FLASH_CART=1 -D RACER=1 -D TELEMETRY=1 -D TELEMETRY_HOST_CFG=1 \
+        -D TELEMETRY_BAUD=921600 -D TELEMETRY_BINARY=1 -D TELEMETRY_BINARY_BYTES=40 -D RND_SEED=39 \
+        -D INPUT_BACKEND=serial -D INPUT_HOLD_FRAMES=2 -D SHOW_FPS=1 -D CENTER_GAME=1'
 ```
 
 **Solve a cart** — a spawned solver agent, given the gym + the cart, produces a verified

@@ -32,3 +32,4 @@ assets/celeste_p8.h
 # downloaded ROM/cart archives + in-progress downloads (user-local game content, not repo source)
 /assets/roms/
 *.part
+assets/pico_racer_p8.h
