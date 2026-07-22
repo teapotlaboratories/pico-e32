@@ -30,6 +30,11 @@ esp_err_t input_init(void);
 /* The currently-held button mask (INPUT_* bits). Called once per frame. Never blocks. */
 uint8_t input_poll(void);
 
+/* Hand the backend the frame clock (the telemetry `fc` this frame will emit), called by main.cpp before each
+ * Step. Only the `scheduled` backend uses it (to apply fc-tagged commands on their exact frame); every other
+ * backend implements it as a no-op so the seam stays complete and main.cpp can call it unconditionally. */
+void input_set_frame(uint32_t fc);
+
 /* The compiled backend's name, for the boot log. */
 const char *input_backend_name(void);
 

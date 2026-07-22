@@ -3,7 +3,7 @@
 idf_component_register(
     SRCS "main.cpp" "${BOARD_DIR}/board.cpp"
     INCLUDE_DIRS "." "${BOARD_DIR}" "${CMAKE_CURRENT_LIST_DIR}/../../../assets"
-    REQUIRES fake08 z8lua LovyanGFX driver esp_timer sdcard_spi
+    REQUIRES fake08 z8lua LovyanGFX driver esp_timer sdcard_spi input
 )
 # SD-over-SPI is now the board-agnostic components/sdcard_spi (fatfs/sdmmc/sdspi are its private
 # concern); esp_driver_spi reaches board.cpp transitively via sdcard_spi's public REQUIRES.
@@ -12,6 +12,13 @@ idf_component_register(
 # Celeste .p8 (the gitignored assets/celeste_p8.h) instead of the test cart. Off by default.
 if(DEFINED CELESTE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE CELESTE=${CELESTE})
+endif()
+
+# Opt-in dev/HITL autostart (`... DEFS='-D CELESTE=1 -D CELESTE_START=1'`): begin_game() + load_room(0,0) at
+# boot so the play-test spawns straight into room (0,0), skipping the title (the fc-scheduled input backend
+# takes only fc-tagged commands, not the raw title-start key). See main.cpp. Off by default.
+if(DEFINED CELESTE_START)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE CELESTE_START=${CELESTE_START})
 endif()
 
 # Opt-in fps measurement: `... DEFS='-D CELESTE=1 -D MEASURE_FPS=1'` runs an instrumented loop that
