@@ -21,3 +21,18 @@ CONFIG_FREERTOS_HZ=1000
 CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_MAX_LFN=255
 CONFIG_FATFS_API_ENCODING_UTF_8=y
+
+# Assertions OFF (release/perf) — pairs with COMPILER_OPTIMIZATION_PERF above. A fresh sdkconfig defaults
+# compiler assertions ON (level 2), and on this esp-idf/newlib the FIRST printh at boot (fwrite -> the newlib
+# recursive stdio lock, __retarget_lock_acquire_recursive) trips FreeRTOS' configASSERT (= plain assert()) on
+# an otherwise-working stdio path, boot-looping any ASCII-telemetry (printh) build. This pins the config the
+# board was actually validated under (cleared Celeste deterministically + measured fps). The underlying strict
+# stdio-lock check is benign here; see docs/worklog/2026-07-20-celeste-closed-loop-fc-scheduled.md.
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_DISABLE=y
+
+# UART-only console. This board talks over its CP2104 UART, NOT USB-Serial-JTAG, but a fresh sdkconfig defaults
+# the ESP32-S3 SECONDARY console to USB-Serial-JTAG — which adds a second stdout path whose recursive stdio lock
+# is what tripped the boot assert above, and (with the assert masked) corrupts the cart's first printh so the
+# Lua coroutine dies (fc frozen at 1, no player spawns). Pin the console to UART-only, matching the validated
+# config the board was actually developed + demoed under.
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
