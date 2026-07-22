@@ -91,3 +91,90 @@ python3 test/playtest/celeste/make_solution.py            # genuine search + VM-
 python3 test/playtest/celeste/make_solution.py --shipped  # fast VM-verified path (no search, seconds)
 python3 test/playtest/celeste/verify_solution.py <dir>    # sim replay both segments + write filmstrips to <dir>
 ```
+
+---
+
+# Solving a room CLOSED-LOOP + running it on the board (the workflow)
+
+The trace above is **open-loop** (pre-recorded masks). The richer path is a reactive **`policy(state)->mask`**
+per room (like the Pico Racer) that reads the live state each frame and reacts, run on real hardware over the
+**fc-scheduled input backend**. Rooms **100 M / 200 M / 300 M** are solved this way (sim + device). **400 M** is
+solved too (sim + device) but as a **raw-mask replay** rather than a reactive policy — its route is a
+pixel-precise wall-jump chain that doesn't reduce to state predicates; see *"400 M — the raw-mask exception"*
+after step 6. The per-room recipe — follow it for the next room:
+
+**1. See the room.** Dump geometry + hazards + objects so you know the layout before authoring anything:
+- collision grid: `for ty,tx: fget(mget(rx*16+tx, ty), 1)` → a 16×16 solid map (note: spikes are NOT flag-1).
+- objects: iterate `all(objects)`, read `o.spr` (**18=spring, 26=fruit/berry, 17=up-spike tile**) + `o.x/o.y`.
+- render: `gym._rgb_to_png(VM.frame_rgb(), path, 4)` after `VM.spawn(rx,ry)`; `gym.run_filmstrip(masks, ...)` for a
+  maneuver. Read the PNG by eye.
+
+**2. Get a reference maneuver (what actually clears the room).**
+- If an open-loop trace covers it (`solution.trace.json` has 100 M/200 M), decode its per-frame masks — it shows
+  the dash/jump/spring sequence and the launch positions.
+- Else **search**. The `celeste_solver` twin (`beam_solve_fast`) is fast but models terrain+spikes only, **NOT
+  springs** — so its "wins" won't VM-verify for a spring room (they all failed for 300 M). For spring/hazard rooms,
+  beam-search on the **REAL VM** (full physics; pattern in a scratch `beam300.py`): small beam (`VM.spawn` is
+  ~15 ms and savestates are broken → replay-from-root), fitness = min-y **steered toward the exit column when
+  high** (pure min-y stalls below a spike field).
+- Replay the reference with the rich obs (`closed_loop.read`'s Lua TAIL) and log the state at each jump/dash →
+  those are your launch predicates.
+
+**3. Author a reactive `ClimberNNN`** in `closed_loop.py`: an ordered phase machine where each dash/jump/spring/
+wall-jump fires on a **STATE predicate** (grounded / rising into a launch band / dash-available / wall-contact /
+just-bounced), never a frame index — robust to drift. Add a `spawned` gate (hold neutral until grounded at the
+spawn) so it survives the room-entry transition when chained. Thresholds live in a `PARAMSNNN` dict, tuned on the
+sim (grid-search / eyeball the filmstrip).
+
+**4. Register + verify on the sim.** Add `(rx,ry): (name, spawn, ClimberNNN, deathy)` to the `ROOMS` registry.
+Verify deterministically: `drive_sim_room((rx,ry))` (isolation) **and** `drive_sim_chain(((0,0),…,(rx,ry)))` (the
+whole chain — the board reaches room N only by clearing N-1, so the device always plays from 100 M).
+
+**5. Run it on the board (fc-scheduled).** Firmware (already flashed):
+`-D CELESTE=1 -D INPUT_BACKEND=scheduled -D TELEMETRY=1 -D FORCE_FLASH_CART=1 -D SHOW_FPS=1 -D CENTER_GAME=1`
+(the driver skips the title with jump commands; no `CELESTE_START`). Two delivery shapes in `fc_device.py`:
+- `--predictive` — twin-in-the-loop, rebases on divergence. Clears the forgiving rooms (100 M/200 M).
+- `--openloop --to300` / `--to400` — blind fc-scheduled replay of the pre-solved masks. Clears **all** rooms incl.
+  the frame-precise 300 M and 400 M (`--to400`: 100→200→300→400 M, CLEAR at fc=1454, 723 game-frames, fps
+  7.3/28.4/30.0). **Key finding: on a deterministic board, open-loop > twin-in-the-loop for frame-precise rooms**
+  — the rebase re-plans on a dash's transient (>6px) divergence and can't recover a missed pixel-dash, so blind
+  replay just works. (Diagnosis: `fc = _picoFrameCount`, exactly 2/game-frame incl. dash freezes; board and twin
+  hit each spawn at the same game-frame; a ~1-frame fc offset from the room-transition flash is fatal only to
+  300 M under the predictive path.)
+
+**6. Video.** `render_compare.py <name>` (or `all`) records the device open-loop over the bench camera, renders
+the sim **synced to the device's per-room spawn times** (the sim freezes at each spawn until the board arrives),
+and writes a side-by-side `videos/<name>.mp4`.
+
+### 400 M — the raw-mask exception
+
+Not every room reduces to a reactive `ClimberNNN`. **400 M** (the fall-floor room) is a **pixel-precise
+wall-jump chain**, so it ships as a **raw mask list** replayed by `ReplayClimber` (in `closed_loop.py`, same
+`spawned` gate as the Climbers). Two VM-verified routes in `routes/` — both climb the right-side fall-floor
+staircase (B→E→F→C) with **jumps only** (the dash is saved for the exit), then reach the top:
+
+- `room400_route.json` (143 f) — wall-jump off D, dash onto the "1" block, dash out.
+- `room400_altroute_viaD.json` (189 f, **the shipped one**) — wall-jump off D, then **wall-jump off the block
+  back onto D** (lands *on* D, matching the hand-drawn route), then onto the block and out.
+
+Three physics facts that room turns on, none obvious from the tile map: fall-floors **crumble the instant you
+leave** (the climb is continuous jumps, no dawdling); the top-right block **D is solid from *below*** so a
+straight-up dash bonks its underside — you mount it with a **wall-jump off its side wall** (`is_solid` misses
+fall-floor *objects*, so the telemetry `wall` flag reads 0 — test the wall-jump empirically, it fires: spy→−2);
+and the exit only opens through **cols 5-7**, gated by a solid ceiling over cols 8-15, so the launch *must* come
+off the "1" block top. Routes were found by a jump-only landing-beam over the staircase + a placement-seeded
+search of the top (scratch tools, throwaway). Registered as `ROOMS[(3,0)]` via `make_replay(ROUTE_400, spawn)`;
+verify with `drive_sim_chain(((0,0),(1,0),(2,0),(3,0)))` and run with `--openloop --to400`.
+
+### Closed-loop files
+
+| file | what |
+|---|---|
+| `closed_loop.py` | reactive policies (`Climber`=100 M, `Climber200`=200 M, `Climber300`=300 M) + **`ReplayClimber`/`make_replay`** (raw-mask rooms, e.g. 400 M) + `PARAMS*` + the `ROOMS` registry + `Chain` + `drive_sim_room` / `drive_sim_chain` + the rich-obs `read` TAIL. |
+| `routes/` | VM-verified raw-mask routes for non-reactive rooms (`room400_route.json`, `room400_altroute_viaD.json`). |
+| `fc_device.py` | board drivers: `drive_device_chain` (open-loop, `--openloop [--to300|--to400]`) + `predictive` (twin-in-the-loop) + the title-skip `_celeste_warmup` + `_celeste_twin`. |
+| `render_compare.py` | the synced SIM \| DEVICE comparison-video tool (`all` / `<name>` / `--sim-only`; `400m` included). |
+| `../live.py` | cart-agnostic runners: `drive_sim`, `drive_device`, `drive_device_predictive`. |
+| `../pico_racer/` | the racer — the other genre (continuous), where LIVE closed-loop + rebase *do* work. |
+
+Full narrative + the fc/freeze/game-frame diagnosis: `docs/worklog/2026-07-20-celeste-closed-loop-fc-scheduled.md`.

@@ -48,8 +48,10 @@ test/playtest/
 ├─ gym.py             the agent's EYES: snapshot() + run_filmstrip() -> viewable PNGs of a run. Cart-agnostic.
 ├─ render.py          render a Trace playing on the sim -> mp4 + replay() (cart-agnostic; device video = tools/record_video.sh).
 ├─ orchestrate.py     the ONE-CALL report core (cart-agnostic): sim replay+render + device replay+fps+record -> report.json.
-├─ live.py            LIVE closed-loop runner (cart-agnostic): run a `policy(state)->mask` on the sim (drive_sim)
-│                     or the device over serial (drive_device). The feedback counterpart to the open-loop Trace.
+├─ live.py            CLOSED-LOOP runners (cart-agnostic): a `policy(state)->mask` on the sim (drive_sim), LIVE
+│                     over serial (drive_device), or TWIN-in-the-loop frame-exact (drive_device_predictive).
+├─ fc_sched.py        the fc-SCHEDULED command protocol (encode_cmd) + DeviceScheduler — frame-exact input for the
+│                     TWIN shape (the Python twin of firmware components/input/input_scheduled.c). Cart-agnostic.
 ├─ fake08-sim/        the SHARED native VM — the exact device VM (same components/fake08 + z8lua), headless.
 │  ├─ sim.cpp         The agent's GYM: run the real cart, step inputs, read RAM / run Lua, capture frames.
 │  ├─ host_sim.cpp    C API + headless Host (scripted input, captured framebuffer, no display/audio).
@@ -58,16 +60,19 @@ test/playtest/
 │  └─ README.md
 ├─ search.py          OPTIONAL tool (a LIBRARY): the cart-agnostic replay-from-root beam engine — takes a
 │                     cart's callables (reset/observe/win/dead/score/signature) + macros. NOT the generic path.
-├─ celeste/           per-cart area (OPEN-LOOP Trace solution) — a solver agent's ISOLATED workspace.
-│  │                  Shared core imported read-only; nothing leaks out.
+├─ celeste/           per-cart area (OPEN-LOOP Trace + closed-loop TWIN — a frame-precise cart) — ISOLATED.
 │  ├─ solve.py              Celeste's solver: the callables + macros for the shared search.py; emits a Trace.
-│  ├─ celeste_playtest.py   DEVICE driver: replays the embedded solution, or --trace=<file>.
+│  ├─ celeste_playtest.py   OPEN-LOOP device driver: replays the embedded solution, or --trace=<file>.
+│  ├─ closed_loop.py        CLOSED-LOOP reactive policies (Climber = 100 M, Climber200 = 200 M) + Chain + obs tail.
+│  ├─ fc_device.py          TWIN device driver: room 0,0 closed-loop on the board via fc-scheduled input.
+│  ├─ fc_latency.py         the latency-wall + fc-scheduled jitter sweep (why LIVE fails, why TWIN works).
 │  ├─ celeste_solver/       the Celeste physics twin + beam search (produced the reference plans).
 │  ├─ render_run.py         thin adapter: render Celeste's solution Trace to mp4 (via ../render.py).
 │  └─ orchestrate_run.py    thin adapter: one-call sim+device report for Celeste (via ../orchestrate.py).
-└─ pico_racer/        per-cart area (LIVE CLOSED-LOOP solution — a continuous-control racer, M9).
+└─ pico_racer/        per-cart area (continuous racer — closed-loop LIVE + TWIN, M9).
    ├─ solve.py              runs the controller on the sim + emits an open-loop Trace (the sim solution).
-   ├─ racer_playtest.py     the `policy(state)->mask` + a sim/device state reader; drives via ../live.py.
+   ├─ racer_playtest.py     LIVE: the `policy(state)->mask` + sim/device state reader; drives via ../live.py.
+   ├─ racer_fc_device.py    TWIN: the same policy via drive_device_predictive (recovers a big miss on-board).
    ├─ verify_solution.py    fresh-process open-loop sim replay + filmstrip.
    └─ solution.trace.json   the recorded Trace (open-loop; replays on the sim, closed-loop on the device).
 ```
@@ -85,27 +90,39 @@ state-reader, a plan, verification — whatever the solver agent produces under 
 The VM is deterministic and the sim *is* the device's VM, so a trace that clears on the sim clears on the
 device (same code + same inputs → same result). Confirmed on Celeste (100 M → 200 M → 300 M).
 
-### Two solution shapes — an open-loop Trace, or a live closed-loop policy
+### Three playtest shapes — open-loop, closed-loop LIVE, or closed-loop TWIN
 
-The agent's final deliverable can be **either shape**, whichever fits the cart — and **both run on the sim AND
-the device** (the harness is dual-target either way):
+A cart's playtest can take **any of three shapes**, whichever fits the cart — and **all three run on the sim AND
+the device, and all three report on-device fps + record video where possible** (the fps is the cart's real
+`Step`+`draw` compute — see [The pipeline](#the-pipeline-per-cart) — so it is the SAME number a human playing
+would see, independent of how the input is delivered; video = sim mp4 via `render.py` + device mp4 via
+`tools/record_video.sh`):
 
-| shape | what it is | runs via | best for |
-|---|---|---|---|
-| **open-loop Trace** | a fixed per-frame mask list (`trace.py`) | sim: `render.replay`/`render.render`; device: `harness.run` (frame-synced) | SHORT / DISCRETE / self-checking tasks — Celeste rooms |
-| **live closed-loop policy** | a `policy(state) -> mask` that reads the state each frame and reacts | `live.py`: `drive_sim` (state off the VM) + `drive_device` (**reads telemetry off serial, sends buttons live**) | CONTINUOUS control — racing, balancing |
+| shape | what it is | sim runner | device runner | best for |
+|---|---|---|---|---|
+| **open-loop Trace** | a fixed per-frame mask list (`trace.py`) | `render.replay` / `render.render` | `harness.run` (frame-synced) | SHORT / DISCRETE / self-checking — a Celeste room |
+| **closed-loop LIVE** | `policy(state)->mask` — reads the live state each frame and reacts | `live.drive_sim` | `live.drive_device` — reads telemetry off serial, sends buttons **live** | CONTINUOUS control — racing (jitter-tolerant) |
+| **closed-loop TWIN** | the SAME `policy` on a lockstep **twin**, delivered FRAME-EXACT + rebased on drift | `live.drive_sim` | `live.drive_device_predictive` — the **fc-scheduled** input backend | FRAME-PRECISE — Celeste dashes (LIVE fails here) |
 
-A Trace replays byte-exact on both sides. But an open-loop replay of a LONG continuous-control run is fragile on
-hardware: with no feedback, any small divergence (a boot-step offset, an fps dip, one `rnd()`-different
-obstacle) makes the recorded input wrong for the *actual* state, and the error **compounds** until it fails. A
-**policy closes the loop** — it reads the live state (`px`, `speed`, …) and corrects every frame, so
-rnd/fps/timing drift is absorbed. The agent writes ONE `policy(state) -> mask` (using only fields the device
-telemetry streams — the device is the constraint) plus a state reader per side; the *same* policy then drives
-both the sim and the board. See `pico_racer/` (closed-loop) vs `celeste/` (open-loop).
+**open-loop** replays byte-exact, but a long continuous run drifts on hardware (no feedback → any boot/fps/`rnd`
+divergence compounds until it fails). **closed-loop LIVE** closes the loop over serial — reads `px`/`speed`/… and
+corrects every frame, absorbing that drift — great for CONTINUOUS control but **fatal for frame-precise carts**:
+the ~1-frame serial JITTER launches a pixel-exact Celeste dash from the wrong frame → death. **closed-loop TWIN**
+is the fix: the policy solves on a deterministic TWIN of the cart (the sim VM), and its per-frame decisions are
+delivered **frame-exact** by the fc-scheduled input backend (`INPUT_BACKEND=scheduled` — each command carries a
+target frame the device applies it on, so transport jitter can't move the apply instant); the twin is kept in
+sync with the board and **rebased** on any divergence. That is what makes closed-loop clear Celeste on the board
+(`celeste/fc_device.py`), where LIVE can't. See `docs/runtime/pico-e32-fake08-input.md` (IN-5) + the
+[worklog](../../docs/worklog/2026-07-20-celeste-closed-loop-fc-scheduled.md).
 
-Tip: running a policy on the sim with `live.drive_sim(..., record=True)` also RECORDS the masks it emits — so a
-closed-loop controller can *also* produce an open-loop Trace when a cart wants both (that is what a `solve.py`
-does).
+**Right strategy per genre** (both proven on the board): FRAME-PRECISE carts use TWIN and **avoid** misses
+(recovery from a missed pixel-dash is futile — feedback can't rescue a frame already gone); CONTINUOUS carts use
+LIVE (simplest) or TWIN (whose rebase recovers even a big miss — a car knocked off-line steers back). One driver
+serves both; only the *reliance* differs. See `celeste/` (TWIN: `closed_loop.py` + `fc_device.py`) and
+`pico_racer/` (LIVE: `racer_playtest.py`; TWIN: `racer_fc_device.py`).
+
+Tip: `live.drive_sim(..., record=True)` also RECORDS the masks a policy emits — so a closed-loop controller can
+*also* produce an open-loop Trace when a cart wants both (that is what a `solve.py` does).
 
 ### The device is cart-agnostic — the host tells it *what* to stream
 
@@ -152,7 +169,7 @@ harness supplies the deterministic, observable environment and the trace contrac
 scale across many carts.
 
 For a **continuous-control** cart the loop ends differently: instead of accumulating a fixed Trace, the agent
-tunes a **`policy(state) -> mask`** and hands off a *live* controller (see [Two solution shapes](#two-solution-shapes--an-open-loop-trace-or-a-live-closed-loop-policy)). It still develops + verifies on the sim (`live.drive_sim`, which can also record a Trace); the device runs the same policy live (`live.drive_device`).
+tunes a **`policy(state) -> mask`** and hands off a *live* controller (see [Three playtest shapes](#three-playtest-shapes--open-loop-closed-loop-live-or-closed-loop-twin)). It still develops + verifies on the sim (`live.drive_sim`, which can also record a Trace); the device runs the same policy live (`live.drive_device`).
 
 ### Standalone & isolated — the per-cart contract
 
@@ -246,8 +263,9 @@ The right-hand side (everything after the Trace) is exactly `orchestrate.py` —
 | M6 | Unified fps telemetry (achieved **and** headroom) + harness aggregation → min/avg/max — **on the board** | ✅ done |
 | M7 | Generalize video capture — shared `render.py` (Trace → sim mp4, cart-agnostic) + Celeste adapter; device via `record_video.sh` | ✅ done |
 | M8 | One-call orchestrator — shared `orchestrate.py` + Celeste `orchestrate_run.py`: sim replay+render **and** device replay+fps+camera → one `report.json` (+ sim.mp4/device.mp4) — **verified on the board** | ✅ done |
-| M9 | Second cart (non-platformer) — a spawned agent solved **Pico Racer** (a score-max racer, `rnd()`-driven) on the gym with NO framework changes → verified Trace (tpos 63/141); drives on the board (closed-loop, `pico_racer/`) | ✅ done |
-| — | **Parked:** eris VM savestates (O(1) restore) — diagnosed, ASAN harness in place; off the critical path | 🅿️ parked |
+| M9 | Second cart (non-platformer) — a spawned agent solved **Pico Racer** (a score-max racer, `rnd()`-driven) on the gym with NO framework changes → verified Trace (tpos 63/141); drives on the board (closed-loop LIVE, `pico_racer/`) | ✅ done |
+| M10 | **Third playtest shape: closed-loop TWIN** — frame-exact input on the board via the **fc-scheduled** backend (`components/input/input_scheduled.c`) + `live.drive_device_predictive`. Makes closed-loop clear **Celeste on the board** (deterministic), where LIVE is jitter-fatal; the same driver drives the racer + recovers a big miss. Right strategy per genre (TWIN avoids misses for frame-precise; LIVE/rebase for continuous) — both proven on hardware. The driver skips the title itself over the same backend (jump commands, no `CELESTE_START` autostart) and plays room-to-room as a **chain** (100 M → 200 M cleared closed-loop on-board, 260 commands, 0 divergences, fps 9.6/29.8/30.0 — = the open-loop number; fps is input-shape-independent). See [worklog](../../docs/worklog/2026-07-20-celeste-closed-loop-fc-scheduled.md) + [IN-5](../../docs/runtime/pico-e32-fake08-input.md) | ✅ done |
+| — | **Parked:** eris VM savestates (O(1) restore) — diagnosed, ASAN harness in place; off the critical path (would make the TWIN rebase O(1) instead of replay-from-root) | 🅿️ parked |
 
 ---
 
@@ -342,7 +360,7 @@ python3 test/playtest/celeste/celeste_playtest.py --sim --trace=test/playtest/ce
 **Run a continuous-control cart (Pico Racer) — closed-loop live, or open-loop replay.** The racer's primary
 solution is a live **closed-loop policy** (read telemetry, steer each frame); the same `policy(state)->mask`
 drives the sim and the board. The open-loop trace path is kept for comparison (fragile on hardware — see
-[Two solution shapes](#two-solution-shapes--an-open-loop-trace-or-a-live-closed-loop-policy)).
+[Three playtest shapes](#three-playtest-shapes--open-loop-closed-loop-live-or-closed-loop-twin)).
 ```sh
 # CLOSED-LOOP (default, robust) — the SAME policy on each target:
 python3 test/playtest/pico_racer/racer_playtest.py <board>   # device: read telemetry + steer live (dodges traffic)
@@ -358,6 +376,26 @@ make flash APP=pico-e32-fake08 BOARD=makerfabs-ili9488-r1 PORT=<board> \
   DEFS='-D FORCE_FLASH_CART=1 -D RACER=1 -D TELEMETRY=1 -D TELEMETRY_HOST_CFG=1 \
         -D TELEMETRY_BAUD=921600 -D TELEMETRY_BINARY=1 -D TELEMETRY_BINARY_BYTES=40 -D RND_SEED=39 \
         -D INPUT_BACKEND=serial -D INPUT_HOLD_FRAMES=2 -D SHOW_FPS=1 -D CENTER_GAME=1'
+```
+
+**Run a frame-precise cart closed-loop on the board — the TWIN shape (fc-scheduled).** LIVE closed-loop is
+jitter-fatal for a pixel-exact dash, so the policy solves on a lockstep twin and is delivered FRAME-EXACT via the
+fc-scheduled input backend. Celeste clears on the board, deterministically, as a CHAIN — 100 M → 200 M → 300 M
+(the board reaches room N only by clearing N-1, so the whole run is played through). Two delivery shapes over the
+same backend: **twin-in-the-loop** (rebase on divergence) clears 100 M/200 M; **open-loop** (blind fc-scheduled
+replay) clears all three including the frame-precise 300 M — the rebase is counterproductive there (it re-plans on
+a dash's transient divergence and can't recover a missed pixel-dash), so blind replay on the deterministic board
+wins:
+```sh
+# firmware: the fc-scheduled input backend + Celeste (the driver skips the title itself, via jump commands)
+make flash APP=pico-e32-fake08 BOARD=makerfabs-ili9488-r1 PORT=<board> \
+  DEFS='-D CELESTE=1 -D FORCE_FLASH_CART=1 -D INPUT_BACKEND=scheduled \
+        -D TELEMETRY=1 -D SHOW_FPS=1 -D CENTER_GAME=1'
+python3 test/playtest/celeste/fc_device.py <board> --openloop --to300  # 100→200→300 OPEN-LOOP (clears 300 M, deterministic)
+python3 test/playtest/celeste/fc_device.py <board> --predictive        # twin-in-the-loop, 100 M -> 200 M, rebase on divergence
+python3 test/playtest/celeste/fc_device.py <board> --predictive --room0 # just 100 M
+python3 test/playtest/celeste/render_compare.py 300m                    # sim | device (open-loop) side-by-side video
+python3 test/playtest/pico_racer/racer_fc_device.py <board>            # the racer through the SAME predictive driver
 ```
 
 **Solve a cart** — a spawned solver agent, given the gym + the cart, produces a verified

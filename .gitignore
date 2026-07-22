@@ -20,6 +20,8 @@ firmware/pico-e32-luabench/host/bench
 # Regenerate locally with assets/gen_celeste_cart.py
 assets/celeste.p8
 assets/celeste_cart.h
+# PNG-encoded carts (same third-party game code as the .p8 above, just PNG-wrapped) — do NOT commit
+assets/*.p8.png
 
 # editor / OS cruft
 .DS_Store
@@ -28,6 +30,8 @@ assets/celeste_cart.h
 tools/bench_cam.env
 captures/
 assets/celeste_p8.h
+# rendered sim|device comparison videos (regenerable via test/playtest/celeste/render_compare.py)
+test/playtest/celeste/videos/
 
 # downloaded ROM/cart archives + in-progress downloads (user-local game content, not repo source)
 /assets/roms/
