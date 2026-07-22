@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fc-scheduled deadline miss-rate readout — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8;
+        --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  :root[data-theme="light"]{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;--ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  :root[data-theme="dark"]{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;--border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)} .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;font-family:var(--mono)}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:9px;padding:.9rem 1.05rem;overflow-x:auto;font-size:.82rem;line-height:1.5;font-family:var(--mono)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left}
+  th{background:var(--codebg);font-family:var(--mono);font-size:.82rem}
+  td.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .bad{color:var(--bad);font-weight:600} .ok{color:var(--ok);font-weight:600} .warn{color:var(--warn);font-weight:600}
+  .bars{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.2rem 1.3rem;margin:1.3rem 0}
+  .bars h3{margin:.1rem 0 1rem;font-size:.95rem}
+  .bar{display:grid;grid-template-columns:150px 1fr;align-items:center;gap:.8rem;margin:.55rem 0}
+  .bar .lab{font:600 .8rem/1.2 var(--mono);color:var(--muted)}
+  .bar .track{position:relative;background:var(--codebg);border-radius:7px;height:30px;overflow:hidden}
+  .bar .fill{position:absolute;inset:0 auto 0 0;border-radius:7px;display:flex;align-items:center;justify-content:flex-end;padding-right:.55rem;font:700 .8rem/1 var(--mono);color:#fff;white-space:nowrap}
+  .fill.b{background:linear-gradient(90deg,#c0392b,#e0563f)}
+  .fill.a{background:linear-gradient(90deg,#1a7f4b,#2faa68)}
+  .diag{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.3rem;margin:1.3rem 0}
+  .diag h3{margin:.1rem 0 .4rem;font-size:.95rem}
+  .diag .sub{color:var(--muted);font-size:.82rem;margin:0 0 1rem}
+  .legend{font-size:.78rem;color:var(--muted);margin-top:.7rem}
+  .foot{margin-top:2.6rem;padding-top:1rem;border-top:1px solid var(--border);color:var(--muted);font-size:.85rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <h1>fc-scheduled deadline miss-rate readout</h1>
+  <p class="date">2026-07-22 · the last quantitative number — get the on-device miss-rate off the board · fake-08 port / fc-scheduled input</p>
+
+  <div class="tldr">
+    The fc-scheduled closed-loop clears prove misses are ~0 at lead k=2, but <b>the count never left the
+    board</b>: <code>input_sched_stats()</code> existed in the firmware yet was <b>declared nowhere and called
+    nowhere</b>. This wires it end to end — a periodic <code>TS &lt;fed&gt; &lt;miss&gt; &lt;applied&gt;</code>
+    telemetry line the host drivers parse and report as <code>miss/fed</code> per lead k. On hardware:
+    <b class="ok">0 / 600 deadline misses (0.0%) at k=2</b> across a 600-command, 4-room, 723-frame run — the
+    one number the sim cannot give. Backlog: IN-5 in <code>docs/runtime/pico-e32-fake08-input.md</code>.
+  </div>
+
+  <nav aria-label="Contents" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:.85rem 1.1rem;margin:1.4rem 0">
+    <div style="font:600 .74rem/1 var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:.55rem">On this page</div>
+    <ol style="margin:0;padding-left:1.2rem;columns:2;column-gap:2rem;font-size:.92rem">
+      <li><a href="#s1">What the readout is</a></li>
+      <li><a href="#s2">Firmware — seam + emit</a></li>
+      <li><a href="#s3">The <code>applied</code>-count bug</a></li>
+      <li><a href="#s4">Host — parse + report</a></li>
+      <li><a href="#s5">Verified (host + hardware)</a></li>
+      <li><a href="#s6">Open / next</a></li>
+    </ol>
+  </nav>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:.8rem;margin:1.6rem 0">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--ok);font-variant-numeric:tabular-nums">0 / 600</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35"><b>deadline misses</b> at k=2 on the board — <b>0.0%</b> across the 100→400 M chain</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">TS f m a</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">the wire: a periodic <code>TS &lt;fed&gt; &lt;miss&gt; &lt;applied&gt;</code> line, ~1×/s, scheduled-only</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">9 / 9</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">host protocol tests — <code>parse_stats</code> decodes + rejects <code>T</code>/log/junk</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">fc=1454</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">100→400 M clears deterministic (bit-identical to the recorded run)</div>
+    </div>
+  </div>
+
+  <h2 id="s1">1. What the readout is</h2>
+  <p><code>input_sched_stats(fed, miss, applied)</code> on the scheduled backend already accumulated:</p>
+  <ul>
+    <li><b>fed</b> — valid fc-commands the board saw (incl. ring-drops that never made the table);</li>
+    <li><b>miss</b> — commands that arrived <em>after</em> their target frame (a deadline miss) + ring-drops +
+       table overflow — everything that failed to apply on time;</li>
+    <li><b>applied</b> — commands that reached their active window.</li>
+  </ul>
+  <p><code>miss/fed</code> is the deadline miss-rate the whole fc-scheduled design turns on. This change makes it
+     <b>leave the board</b> and get reported by the host drivers.</p>
+
+  <h2 id="s2">2. Firmware — the seam + the emit</h2>
+  <ul>
+    <li><b>Seam (<code>input.h</code>):</b> declared <code>input_sched_stats(...)</code> (it was a definition
+       with no declaration). Following the seam's own convention (each backend no-op's
+       <code>input_set_frame</code>), the other four backends (stub / serial / touch / i2c) get a <b>no-op stub
+       that writes zeros</b>, so <code>main.cpp</code> can call it for any compiled backend.</li>
+    <li><b>Emit (<code>main.cpp</code>):</b> a periodic ASCII line <code>TS &lt;fed&gt; &lt;miss&gt;
+       &lt;applied&gt;</code>, ~1×/s (every 60 Steps), <b>gated to the scheduled backend</b> and placed
+       <em>outside</em> the <code>step_us</code>/<code>draw_us</code> timing window — so it perturbs neither the
+       fps numbers nor any other build.</li>
+    <li><b>Distinct prefix <code>TS</code></b> (not <code>T</code>) so the host's telemetry parser skips it; and
+       an ASCII line never contains <code>0xAA</code>, so the <em>binary</em> telemetry reader's sync-scan skips
+       it too — safe to interleave on either stream.</li>
+  </ul>
+
+  <h2 id="s3">3. The <code>applied</code>-count bug — caught on the first board run</h2>
+  <p>The first on-board run reported <code>applied = 180 &gt; fed = 111</code> — nonsensical. Root cause:
+     <code>input_poll</code> runs <b>more than once per frame-clock value</b> (the fake-08 tick polls input ~2×
+     per emitted <code>fc</code> on a 30 fps cart), and <code>s_applied</code> was <code>++</code>'d at every
+     <code>fc==G</code> poll — so a hold=1 command counted twice. <b><code>fed</code>/<code>miss</code> are
+     counted once per ring-drain, so the miss-rate was already correct</b> — only the redundant
+     <code>applied</code> field doubled. Fixed with a per-command <code>counted</code> flag (tally once, at the
+     first active frame; robust to poll frequency).</p>
+
+  <div class="bars">
+    <h3>On-board <code>applied</code> for the room-(0,0) run — before vs after the fix</h3>
+    <div class="bar"><div class="lab">before · fc==G</div><div class="track"><div class="fill b" style="width:100%">applied = 180</div></div></div>
+    <div class="bar"><div class="lab">after · counted flag</div><div class="track"><div class="fill a" style="width:61.7%">applied = 111 = fed</div></div></div>
+    <p class="legend">To scale (before = full track): the double-poll inflated <code>applied</code> to
+       <b>180 ≈ 2× the 90 room commands</b>; the <code>counted</code> flag brings it to <b>111</b>, equal to
+       <code>fed</code> (90 room + ~21 title-skip warmup). The host-test is unchanged (<code>applied=7</code> —
+       it polls once/frame, so old and new agree there).</p>
+  </div>
+
+  <h2 id="s4">4. Host — parse + report (cart-agnostic)</h2>
+  <p><code>fc_sched.py</code> (the single source of the wire protocol) gains <code>parse_stats(line)</code> →
+     <code>{fed, miss, applied, miss_rate}</code> (or <code>None</code>), symmetric with <code>encode_cmd</code>.
+     The three device drivers (<code>fc_device.drive_device</code> / <code>drive_device_chain</code>,
+     <code>live.drive_device_predictive</code>) capture the latest <code>TS</code> line and print:</p>
+  <pre>fc-scheduled miss-rate: 0/600 cmds missed the deadline (0.0%), 600 applied on time  [lead k=2]</pre>
+  <p>The periodic readout lags the final tally by ≤1 s — immaterial when misses are ~0.</p>
+
+  <h2 id="s5">5. Verified — host, then hardware</h2>
+  <ul>
+    <li><b>Host protocol tests 9/9</b> (+2 new): <code>parse_stats</code> decodes <code>TS</code> (incl. a
+       trailing <code>\r</code> and <code>0/0/0</code> without divide-by-zero) and <b>rejects</b> a <code>T</code>
+       frame, an ESP log line, and malformed input — so it never misfires on the shared stream.</li>
+    <li><b>Input gcc host-test</b>: <code>input_scheduled.c</code> still matches the Python twin
+       (<code>fed=8 miss=1 applied=7</code>).</li>
+    <li><b>Full ESP32-S3 build</b> exit 0.</li>
+  </ul>
+  <p><b>On hardware</b> (Makerfabs ESP32-S3, CP2104; board identified read-only via
+     <code>/dev/serial/by-id/</code> so the bench camera's tuning was untouched):</p>
+  <pre>open-loop 100 M:            CLEAR at fc=464   · 0/111 (0.0%), 111 applied  [k=2]
+100 M -> 200 M -> 300 M -> 400 M:  CLEAR at fc=1454  · 0/600 (0.0%), 600 applied  [k=2]
+                                   fps over 723 game-frames: 7.6/28.5/30.0</pre>
+  <div class="tldr">
+    <b class="ok">0 deadline misses across a 600-command, 4-room, 723-frame run at k=2 —</b> the design's core
+    prediction, now <em>measured</em> on the board. <code>applied == fed</code> after the count fix;
+    <code>fc=1454</code> is bit-identical to the recorded 400 M clear (deterministic).
+  </div>
+
+  <h2 id="s6">6. Open / next</h2>
+  <p><b>Sweep the reported miss-rate vs lead k</b> (1/2/3) and host <code>low_latency</code> on/off to confirm it
+     <em>moves</em> as the sim's jitter model predicts — the quantitative half of IN-5's acceptance. At k=2 on
+     this tuned path it reads a flat 0%; the interesting data is where it starts to climb (expect k=1 to show
+     non-zero on a loose host). The number is now exposed on the board, so this is a straight experiment.</p>
+
+  <div class="foot">pico-e32 · worklog 2026-07-22 · fc-scheduled miss-rate readout · <a href="index.html">← index</a></div>
+</div>
+</body>
+</html>

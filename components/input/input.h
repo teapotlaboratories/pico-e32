@@ -38,6 +38,13 @@ void input_set_frame(uint32_t fc);
 /* The compiled backend's name, for the boot log. */
 const char *input_backend_name(void);
 
+/* Deadline-miss accounting for the `scheduled` backend (dev/HITL telemetry): fed = valid fc-commands seen,
+ * miss = commands that arrived after their target frame — a deadline miss, incl. ring/table drops — and
+ * applied = commands that reached their active window. miss/fed is the on-device number the fc-scheduled
+ * design turns on (streamed as a periodic `TS <fed> <miss> <applied>` telemetry line by main.cpp). Every
+ * other backend fills zeros, so main.cpp can stream it unconditionally. Any pointer argument may be NULL. */
+void input_sched_stats(uint32_t *fed, uint32_t *miss, uint32_t *applied);
+
 #ifdef __cplusplus
 }
 #endif

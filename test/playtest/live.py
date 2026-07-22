@@ -160,6 +160,7 @@ def drive_device_predictive(port, make_policy, twin, parse_line, at_start, is_do
     """
     import serial
     from harness import send_telemetry_config, FpsMeter
+    from fc_sched import parse_stats        # the board's periodic `TS fed miss applied` deadline-miss readout
     if has_state is None:                  # "this telemetry frame carries a live entity" (cart-specific; the
         has_state = lambda bs: bs.get("fc") is not None   # default accepts any parsed frame — racer has no pre-spawn gap)
     meter = FpsMeter(step, max(1, round(60 / step)))   # the cart's real Step+draw compute -> fps (input-shape-independent)
@@ -199,7 +200,7 @@ def drive_device_predictive(port, make_policy, twin, parse_line, at_start, is_do
             sent.discard(g)                     # `sent` so the delivery loop re-sends the CORRECTED masks
 
     plan_fc0 = None; sent = set(); latest = None; buf = b""
-    cleared = False; clear_fc = None; divergences = 0; resyncs = 0; final = None
+    cleared = False; clear_fc = None; divergences = 0; resyncs = 0; final = None; sched_stats = None
     t0 = time.monotonic()
     try:
         while time.monotonic() - t0 < timeout:
@@ -208,6 +209,10 @@ def drive_device_predictive(port, make_policy, twin, parse_line, at_start, is_do
                 buf += chunk
             while b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
+                ss = parse_stats(line)             # capture the periodic on-device deadline-miss readout
+                if ss is not None:
+                    sched_stats = ss
+                    continue
                 bs = parse_line(line)
                 if bs is None:
                     continue
@@ -252,9 +257,12 @@ def drive_device_predictive(port, make_policy, twin, parse_line, at_start, is_do
     if verbose:
         print(f"predictive: delivered {len(sent)} fc-commands, {divergences} divergence(s), {resyncs} rebase(s)")
         print(f"-> {'CLEAR at fc=' + str(clear_fc) if cleared else 'NO CLEAR'}")
+        if sched_stats:
+            print(f"fc-scheduled miss-rate: {sched_stats['miss']}/{sched_stats['fed']} cmds missed the deadline "
+                  f"({100 * sched_stats['miss_rate']:.1f}%), {sched_stats['applied']} applied on time  [lead k={k}]")
         print(meter.summary())
     return dict(cleared=cleared, clear_fc=clear_fc, delivered=len(sent),
-                divergences=divergences, resyncs=resyncs, final=final, fps=stats)
+                divergences=divergences, resyncs=resyncs, final=final, fps=stats, sched_stats=sched_stats)
 
 
 def _has_state(bs):

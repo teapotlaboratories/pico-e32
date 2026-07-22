@@ -83,3 +83,8 @@ uint8_t input_poll(void) {
 
 void        input_set_frame(uint32_t fc) { (void)fc; }   /* no-op: only the scheduled backend uses the fc */
 const char *input_backend_name(void) { return "serial"; }
+
+/* no-op: only the scheduled backend tracks deadline misses (report zeros so main.cpp can stream unconditionally) */
+void input_sched_stats(uint32_t *fed, uint32_t *miss, uint32_t *applied) {
+    if (fed) *fed = 0; if (miss) *miss = 0; if (applied) *applied = 0;
+}

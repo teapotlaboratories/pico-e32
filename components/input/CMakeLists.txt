@@ -1,7 +1,7 @@
 # Compile-time-selectable input source for the fake-08 Host (ESP32Host::scanInput). Exactly ONE backend
 # is compiled, chosen by INPUT_BACKEND (default: stub, so a FRESH build is unchanged — note the value
 # persists in CMakeCache once set via -D, so re-pass it or `make fullclean` to switch). Switch it with:
-#   make build APP=pico-e32-fake08 ... DEFS='-D INPUT_BACKEND=serial'   # stub | serial | touch | i2c
+#   make build APP=pico-e32-fake08 ... DEFS='-D INPUT_BACKEND=serial'   # stub | serial | touch | i2c | scheduled
 # See docs/runtime/pico-e32-fake08-input.md. Auto-discovered via the app's EXTRA_COMPONENT_DIRS.
 if(NOT DEFINED INPUT_BACKEND OR "${INPUT_BACKEND}" STREQUAL "")
     set(INPUT_BACKEND "stub")
@@ -9,7 +9,7 @@ endif()
 
 set(_input_src "input_${INPUT_BACKEND}.c")
 if(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/${_input_src}")
-    message(FATAL_ERROR "input: unknown INPUT_BACKEND='${INPUT_BACKEND}' (no ${_input_src}); use stub|serial|touch|i2c")
+    message(FATAL_ERROR "input: unknown INPUT_BACKEND='${INPUT_BACKEND}' (no ${_input_src}); use stub|serial|touch|i2c|scheduled")
 endif()
 
 # REQUIRES esp_driver_uart: the serial + scheduled backends include driver/uart.h. ESP-IDF v6 split the

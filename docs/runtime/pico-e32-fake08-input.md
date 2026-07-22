@@ -163,8 +163,10 @@ See [`docs/worklog/2026-07-18-celeste-playtest-clear.md`](../worklog/2026-07-18-
   steady 30 fps with ~6 ms of work (10 ms headroom). Needs `CONFIG_FREERTOS_HZ=1000`. See the
   [fps-resume worklog](../worklog/2026-07-18-fake08-celeste-fps-resume.md). Remaining for Gate #4: **audio**.
 
-- **IN-5 — `fc`-scheduled input backend (frame-exact closed-loop over telemetry). 📐 designed + sim-validated
-  (2026-07-20); firmware not yet written.** *Why:* a live host-driven closed loop (`live.drive_device`)
+- **IN-5 — `fc`-scheduled input backend (frame-exact closed-loop over telemetry). ✅ DONE — written,
+  hardware-validated, merged (PR #14, 2026-07-22).** Celeste clears rooms 100→400 M closed-loop on the
+  physical board via this backend; the on-device deadline **miss-rate readout** is now wired too (see
+  *Acceptance* below). *Why:* a live host-driven closed loop (`live.drive_device`)
   applies each button on whichever `input_poll` catches it — a **~1-frame jittery** latency that is fatal to
   frame-precise carts (measured on the sim: Celeste room (0,0) clears at 0-frame lag, dies at 1, and **any
   jitter fails** — a dash one frame late launches from the wrong pixel). Continuous-control carts (the racer)
@@ -178,14 +180,19 @@ See [`docs/worklog/2026-07-18-celeste-playtest-clear.md`](../worklog/2026-07-18-
   deterministic policy from spawn, fed the committed commands — proven bit-exact on the sim; VM savestate is
   the parked eris path, so a snapshot won't work). *Wire format* (host→device, 8 B, LE, self-delimiting):
   `0xA6 | target_fc:u32 | mask:u8 | hold:u8 | xor-csum`; hold window `[fc, fc+2·hold)`.
-  - *Files:* new backend `components/input/input_scheduled.c`; seam add `input_set_frame(uint32_t)` to
-    `input.h` (main.cpp calls it `GetFrameCount()+2` pre-Step); `CMakeLists.txt` `INPUT_BACKEND=scheduled`.
-    Host + sim twin already landed: `test/playtest/fc_sched.py` (protocol + `DeviceScheduler`),
-    `test/playtest/test_fc_sched.py` (6/6), `test/playtest/celeste/fc_latency.py` (the measurements).
+  - *Files:* backend `components/input/input_scheduled.c` (SPSC ring, core-1 `fc_rx` task, apply-by-`fc`,
+    `input_sched_stats` counters); seam `input_set_frame(uint32_t)` in `input.h` (main.cpp calls it
+    `GetFrameCount()+1` pre-Step — a Step advances the counter by 1, so the fc it emits is `before+1`);
+    `CMakeLists.txt` `INPUT_BACKEND=scheduled`. Host + sim twin: `test/playtest/fc_sched.py` (protocol +
+    `DeviceScheduler` + `parse_stats`), `test/playtest/test_fc_sched.py`, `celeste/fc_latency.py`.
   - *Sim result:* through the real protocol code, **k=2 lead + binary/921600 → 100% clear** across realistic
     host jitter (k=1 marginal, loose/ASCII needs k=3). See the
     [worklog](../worklog/2026-07-20-celeste-closed-loop-fc-scheduled.md).
-  - *Acceptance (hardware):* flash `INPUT_BACKEND=scheduled` + racer-class telemetry; room (0,0) clears
-    closed-loop on the board at k=2; the streamed on-device **miss-rate** (`g_miss_count/g_applied`) is ~0 on
-    the tuned path; toggling host `low_latency` moves it as predicted. This miss-rate is the one number the
-    sim cannot give. Dev/HITL-only — compiles out of production like the other telemetry paths.
+  - *Acceptance (hardware): ✅ clear DONE, miss-rate readout WIRED.* Room (0,0) clears closed-loop on the
+    board at k=2 (3/3 deterministic, fc=358; chain 100→400 M clears too). The on-device **miss-rate** is now
+    streamed: `input_sched_stats(fed, miss, applied)` (deadline miss = a command that arrived after its target
+    frame, incl. ring/table drops) is emitted by main.cpp as a periodic `TS <fed> <miss> <applied>` telemetry
+    line (~1×/s, scheduled-backend only), which the host drivers parse (`fc_sched.parse_stats`) and report as
+    `miss/fed` per lead k — the one number the sim cannot give. Should read ~0 on the tuned k=2 path.
+    *Still open:* sweep the reported miss-rate vs lead k and host `low_latency` to confirm it moves as
+    predicted (the clear already proves it is ~0 at k=2). Dev/HITL-only — compiles out of production.

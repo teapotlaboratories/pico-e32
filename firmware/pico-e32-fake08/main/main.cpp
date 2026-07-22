@@ -289,6 +289,15 @@ extern "C" void app_main(void) {
      * expression read at startup (TELEMETRY_HOST_CFG). Only the generic prefix + fps aggregation live here. */
     ESP_LOGI(TAG, "TELEMETRY: per-Step 'T <fc> <step_us> <draw_us> <tail>' over UART (tail: host-set or default)");
     {
+        /* fc-scheduled deadline miss-rate readout: the scheduled backend counts fed/miss/applied on the board
+         * (input_sched_stats); stream it as a periodic `TS <fed> <miss> <applied>` line (~1x/s) so the host can
+         * read the real on-device miss rate per lead k — the last quantitative number the design turns on. Only
+         * the scheduled backend tracks it (others report zeros, so this compiles + runs for any backend);
+         * computed once here so the per-frame path stays cheap. It rides the same UART as telemetry but uses a
+         * distinct `TS` prefix, so the host's `T` line parser skips it and the binary reader's 0xAA sync-scan
+         * skips it too (an ASCII line never contains 0xAA). */
+        const bool sched_backend = (strcmp(input_backend_name(), "scheduled") == 0);
+        int stat_steps = 0;
 #ifdef TELEMETRY_HOST_CFG
         bool tele_defined = false;   /* precompile the telemetry line into a Lua function once (see below) */
 #endif
@@ -378,6 +387,16 @@ extern "C" void app_main(void) {
                 fc, step_us, draw_us, fc, step_us, draw_us);
             vm->ExecuteLua(snip, "");
 #endif
+            /* Stream the fc-scheduled deadline miss-rate ~once/second (60 Steps = ~30 game-frames at 2 Steps/
+             * frame). Outside the step_us/draw_us timing window, and scheduled-backend-only, so it perturbs
+             * neither the fps numbers nor other builds. The host reads the latest `TS` line before it stops. */
+            if (sched_backend && ++stat_steps >= 60) {
+                stat_steps = 0;
+                uint32_t sfed = 0, smiss = 0, sapplied = 0;
+                input_sched_stats(&sfed, &smiss, &sapplied);
+                printf("TS %u %u %u\n", (unsigned)sfed, (unsigned)smiss, (unsigned)sapplied);
+                fflush(stdout);
+            }
         }
     }
 #else
