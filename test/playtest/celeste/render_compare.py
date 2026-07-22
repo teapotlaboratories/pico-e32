@@ -14,7 +14,7 @@ frame until the device finishes it. Result: the two are aligned at every room bo
     PORT=/dev/ttyUSB0 python3 test/playtest/celeste/render_compare.py 200m --sim-only   # skip the board
 Videos land in test/playtest/celeste/videos/<name>.mp4 (100m.mp4, 200m.mp4, 300m.mp4).
 """
-import sys, os, subprocess, tempfile, json
+import sys, os, subprocess, tempfile, json, shutil
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PT = os.path.join(HERE, "..")
@@ -82,6 +82,9 @@ def sim_video_synced(rooms, spawn_t, dev_dur, out, scale=4):
     pre = max(0.0, dev_dur - sum(T) - TAIL)                     # sim start pad = device pre-100M video time
     tmp = tempfile.mkdtemp(prefix="simframes_")
     frames, start = _sim_frames(rooms, tmp, scale); n = len(frames)
+    if any(rc not in start for rc in rooms):        # sim chain didn't enter every room -> can't sync; fall back
+        shutil.rmtree(tmp, ignore_errors=True)
+        print("  (sim chain incomplete -> unsynced sim)"); return sim_video(rooms, out, scale)
     keys = list(rooms) + [after]
     seq = [0] * round(pre * FPS)                               # freeze at spawn until the device's 100 M starts
     for k, rc in enumerate(rooms):
@@ -94,6 +97,7 @@ def sim_video_synced(rooms, spawn_t, dev_dur, out, scale=4):
     subprocess.run(["ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-framerate", str(FPS),
                     "-i", os.path.join(seqdir, "%06d.png"), "-c:v", "libx264", "-pix_fmt", "yuv420p",
                     "-crf", "18", out], check=True)
+    shutil.rmtree(tmp, ignore_errors=True)          # drop the PNG frame set + symlink tree
     return out
 
 
@@ -146,17 +150,20 @@ def room_compare(name, sim_only=False, port=None):
     os.makedirs(VIDEODIR, exist_ok=True)
     tmp = tempfile.mkdtemp(prefix="compare_")
     out = os.path.join(VIDEODIR, f"{name}.mp4")
-    if sim_only:
-        sim = sim_video(rooms, os.path.join(tmp, "sim.mp4"))
-        subprocess.run(["cp", sim, out.replace(".mp4", "-sim.mp4")], check=True)
-        print(f"wrote {out.replace('.mp4', '-sim.mp4')} (sim only)"); return
-    print(f"[{name}] recording device {list(rooms)} (open-loop) ...", flush=True)
-    dev, spawn_t = device_video(rooms, os.path.join(tmp, "dev.mp4"), port=port)
-    print(f"[{name}] rendering sim, synced to device room spawns ...", flush=True)
-    sim = sim_video_synced(rooms, spawn_t, _dur(dev), os.path.join(tmp, "sim.mp4"))
-    combine(sim, dev, out)
-    print(f"wrote {out}")
-    return out
+    try:
+        if sim_only:
+            sim = sim_video(rooms, os.path.join(tmp, "sim.mp4"))
+            subprocess.run(["cp", sim, out.replace(".mp4", "-sim.mp4")], check=True)
+            print(f"wrote {out.replace('.mp4', '-sim.mp4')} (sim only)"); return
+        print(f"[{name}] recording device {list(rooms)} (open-loop) ...", flush=True)
+        dev, spawn_t = device_video(rooms, os.path.join(tmp, "dev.mp4"), port=port)
+        print(f"[{name}] rendering sim, synced to device room spawns ...", flush=True)
+        sim = sim_video_synced(rooms, spawn_t, _dur(dev), os.path.join(tmp, "sim.mp4"))
+        combine(sim, dev, out)
+        print(f"wrote {out}")
+        return out
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)          # clean the compare_ scratch dir (sim.mp4/dev.mp4)
 
 
 def main():

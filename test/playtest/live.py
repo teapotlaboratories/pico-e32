@@ -26,6 +26,10 @@ import os, sys, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake08-sim"))
 import fake08sim as VM
 
+# Cap the predictive rebase's replay-from-root (O(gf) VM steps run inline in the serial loop): beyond this the
+# stall would risk missing fc windows. Short chains never reach it; ~1500 frames is well past any Celeste chain.
+REBASE_MAX_GF = 1500
+
 
 def drive_sim(cart, policy, read, is_done, *, reset=None, max_frames=8000, record=False):
     """Run `policy` live on the sim: init `cart`, then each game-frame read the state, stop if `is_done`, else
@@ -160,9 +164,12 @@ def drive_device_predictive(port, make_policy, twin, parse_line, at_start, is_do
         has_state = lambda bs: bs.get("fc") is not None   # default accepts any parsed frame — racer has no pre-spawn gap)
     meter = FpsMeter(step, max(1, round(60 / step)))   # the cart's real Step+draw compute -> fps (input-shape-independent)
     p = serial.Serial(port, 115200, timeout=0.02)
-    p.dtr = False; p.rts = True
-    time.sleep(0.2); p.reset_input_buffer(); p.rts = False
-    send_telemetry_config(p, telemetry_config)
+    try:                                    # close the port if setup (reset pulse / telemetry config) raises
+        p.dtr = False; p.rts = True
+        time.sleep(0.2); p.reset_input_buffer(); p.rts = False
+        send_telemetry_config(p, telemetry_config)
+    except BaseException:
+        p.close(); raise
 
     twin['reset']()
     pol = make_policy()                     # the live policy; rebuilt on a rebase to reconstruct its phase
@@ -188,6 +195,8 @@ def drive_device_predictive(port, make_policy, twin, parse_line, at_start, is_do
         pol = make_policy()                # reconstruct the policy's phase by replaying it over frames 0..gf-1
         for g in range(gf):                # (the plan the board followed up to the divergence)
             pol(tstate[g])
+        for g in [x for x in sent if x > gf]:   # future lead-window frames were just re-planned -> drop them from
+            sent.discard(g)                     # `sent` so the delivery loop re-sends the CORRECTED masks
 
     plan_fc0 = None; sent = set(); latest = None; buf = b""
     cleared = False; clear_fc = None; divergences = 0; resyncs = 0; final = None
@@ -219,7 +228,11 @@ def drive_device_predictive(port, make_policy, twin, parse_line, at_start, is_do
             F = latest["fc"]; gf = (F - plan_fc0) // step             # board game-frame (may be < 0 pre-start)
             if 0 <= gf < len(tstate) and diverged(latest, tstate[gf]):   # board drifted off the prediction
                 divergences += 1
-                if resync:
+                # rebase replays the twin from root (O(gf); no VM savestate here), running inline in this read
+                # loop -> a very late divergence would stall telemetry reads long enough to miss the next fc
+                # windows and cascade. Cap it: short chains (Celeste) never hit it; the racer's lighter path is
+                # live-reactive drive_device, not this predictive one.
+                if resync and gf <= REBASE_MAX_GF:
                     rebase(latest, gf); resyncs += 1
             grow(max(gf, 0) + k)                                      # keep the plan k frames ahead of the board
             for g in range(len(tmask)):                              # deliver each command its k-frame lead early
