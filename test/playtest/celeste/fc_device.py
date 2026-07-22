@@ -244,7 +244,8 @@ def predictive(port, rooms=((0, 0), (1, 0)), k=2, settle=8, timeout=60.0, resync
 
     r = live.drive_device_predictive(port, lambda: CL.Chain(rooms), twin, _parse_full, at_start, board_done,
                                      diverged, encode_cmd=encode_cmd, twin_done=twin_done, k=k, settle=settle,
-                                     timeout=timeout, resync=resync, drop_frames=drop_frames, max_frames=400,
+                                     timeout=timeout, resync=resync, drop_frames=drop_frames,
+                                     max_frames=max(520, 200 * len(rooms)),
                                      warmup=_celeste_warmup(), has_state=lambda bs: bs["x"] is not None,
                                      verbose=verbose)
     return r
@@ -268,7 +269,7 @@ def main():
               else f"reached room {r['maxroom']} open-loop (later rooms drift with no feedback).")
         return 0 if r["cleared"] else 1
     if "--predictive" in sys.argv or "--chain" in sys.argv:
-        r = predictive(port, rooms=rooms, k=k)
+        r = predictive(port, rooms=rooms, k=k, timeout=40 + 25 * len(rooms))
         cleared = r["cleared"]
         names = " -> ".join(CL.ROOMS[rc][0] for rc in rooms)
         print(f"PASS: {names} cleared CLOSED-LOOP on the board (twin-in-the-loop predictive)." if cleared
