@@ -3,7 +3,7 @@
 runs standalone (exit 0/1) or under pytest. Mirrors what the firmware backend input_scheduled.c must do."""
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fc_sched import encode_cmd, parse_stream, DeviceScheduler, SYNC
+from fc_sched import encode_cmd, parse_stream, parse_stats, DeviceScheduler, SYNC
 
 L, R, U, D, O, X = 1, 2, 4, 8, 16, 32
 
@@ -58,6 +58,24 @@ def test_scheduler_or_of_concurrent_commands():
     s.feed(encode_cmd(400, U, 1), cur_fc=399)
     assert s.poll(400) == (R | U)                     # both active this frame
     assert s.poll(402) == R                           # U expired, R still held
+
+
+def test_parse_stats_line():
+    s = parse_stats(b"TS 90 0 90")                    # the board's periodic deadline-miss readout
+    assert s == dict(fed=90, miss=0, applied=90, miss_rate=0.0)
+    s = parse_stats(b"TS 100 5 95\r")                 # trailing CR (ESP console) tolerated
+    assert s["fed"] == 100 and s["miss"] == 5 and abs(s["miss_rate"] - 0.05) < 1e-9
+    assert parse_stats(b"TS 0 0 0")["miss_rate"] == 0.0   # no divide-by-zero before any command
+
+
+def test_parse_stats_rejects_non_stats_lines():
+    # a telemetry frame, an ESP log line, and malformed input must all be skipped (return None), so the stats
+    # reader never misfires on the interleaved stream it shares with telemetry
+    assert parse_stats(b"T 358 2600 3600 8 96 0 0 0 0 0") is None   # a `T` telemetry line
+    assert parse_stats(b"I (1234) fake08: entering GameLoop") is None
+    assert parse_stats(b"TS 90 0") is None             # too few fields
+    assert parse_stats(b"TS 90 x 90") is None          # non-integer field
+    assert parse_stats(b"") is None
 
 
 def _main():

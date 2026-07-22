@@ -26,12 +26,20 @@ sys.path.insert(0, os.path.join(HERE, ".."))                 # fc_sched, harness
 sys.path.insert(0, os.path.join(HERE, "..", "fake08-sim"))   # fake08sim (host twin)
 sys.path.insert(0, HERE)                                     # closed_loop, celeste_playtest
 import fake08sim as VM                                       # the sim VM = the host twin
-from fc_sched import encode_cmd
+from fc_sched import encode_cmd, parse_stats
 import closed_loop as CL
 from celeste_playtest import parse_line                      # the plain Celeste ASCII telemetry parser
 
 STEP = 2                # firmware fc per game-frame (30 fps cart, 60 Hz resume)
 SPAWN = (8.0, 96.0)
+
+
+def _fmt_sched_stats(ss, k):
+    """One-line report of the on-device fc-scheduled deadline miss-rate (from the board's `TS` line)."""
+    if not ss:
+        return "fc-scheduled miss-rate: (no TS stats line seen — build lacks INPUT_BACKEND=scheduled?)"
+    return (f"fc-scheduled miss-rate: {ss['miss']}/{ss['fed']} cmds missed the deadline "
+            f"({100 * ss['miss_rate']:.1f}%), {ss['applied']} applied on time  [lead k={k}]")
 
 
 def _solve_masks():
@@ -53,13 +61,17 @@ def drive_device(port, k=2, settle=8, timeout=30.0, verbose=True):
 
     t0 = time.monotonic(); buf = b""
     plan_fc0 = None; spawn_fc = None; sent = set(); latest = None; wu_last = -999
-    cleared = False; clear_fc = None; final = None
+    cleared = False; clear_fc = None; final = None; sched_stats = None
     while time.monotonic() - t0 < timeout:
         chunk = p.read(p.in_waiting or 1)
         if chunk:
             buf += chunk
         while b"\n" in buf:
             line, buf = buf.split(b"\n", 1)
+            ss = parse_stats(line)              # the periodic `TS fed miss applied` deadline-miss readout
+            if ss is not None:
+                sched_stats = ss
+                continue
             st = parse_line(line)
             if st is None:
                 continue
@@ -92,11 +104,13 @@ def drive_device(port, k=2, settle=8, timeout=30.0, verbose=True):
             p.flush()
     p.close()
     info = dict(spawn_fc=spawn_fc, plan_fc0=plan_fc0, sent=len(sent), total=len(masks),
-                clear_fc=clear_fc, final_room=(final["rx"], final["ry"]) if final else None)
+                clear_fc=clear_fc, final_room=(final["rx"], final["ry"]) if final else None,
+                sched_stats=sched_stats)
     if verbose:
         print(f"spawn_fc={spawn_fc}  delivered {len(sent)}/{len(masks)} fc-commands (lead k={k})")
         print(f"-> {'CLEAR at fc=' + str(clear_fc) if cleared else 'NO CLEAR'}"
               f"  (final room {info['final_room']})")
+        print(_fmt_sched_stats(sched_stats, k))
     return cleared, info
 
 
@@ -116,6 +130,7 @@ def drive_device_chain(port, rooms=((0, 0), (1, 0), (2, 0)), k=2, settle=8, time
     time.sleep(0.2); p.reset_input_buffer(); p.rts = False
     t0 = time.monotonic(); buf = b""
     plan_fc0 = None; sent = set(); latest = None; cleared = False; clear_fc = None; final = None; maxroom = (0, 0)
+    sched_stats = None
     spawn_t = {}                                  # rc -> wall-clock (from recording) the player reached its spawn
     while time.monotonic() - t0 < timeout:
         chunk = p.read(p.in_waiting or 1)
@@ -123,6 +138,10 @@ def drive_device_chain(port, rooms=((0, 0), (1, 0), (2, 0)), k=2, settle=8, time
             buf += chunk
         while b"\n" in buf:
             line, buf = buf.split(b"\n", 1)
+            ss = parse_stats(line)              # the periodic `TS fed miss applied` deadline-miss readout
+            if ss is not None:
+                sched_stats = ss
+                continue
             bs = _parse_full(line)
             if bs is None:
                 continue
@@ -165,8 +184,10 @@ def drive_device_chain(port, rooms=((0, 0), (1, 0), (2, 0)), k=2, settle=8, time
     if verbose:
         print(f"open-loop {names}: delivered {len(sent)}/{len(masks)} fc-commands")
         print(f"-> {'CLEAR at fc=' + str(clear_fc) if cleared else 'NO CLEAR (reached room %s)' % (maxroom,)}")
+        print(_fmt_sched_stats(sched_stats, k))
         print(meter.summary())
-    return dict(cleared=cleared, clear_fc=clear_fc, delivered=len(sent), final=final, maxroom=maxroom, fps=stats)
+    return dict(cleared=cleared, clear_fc=clear_fc, delivered=len(sent), final=final, maxroom=maxroom,
+                fps=stats, sched_stats=sched_stats)
 
 
 # ---- TWIN-IN-THE-LOOP predictive closed loop (the board's telemetry drives the plan + rebases on drift) ----

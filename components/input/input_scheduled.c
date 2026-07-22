@@ -48,7 +48,10 @@
 
 static const char *TAG = "input.sched";
 
-typedef struct { uint32_t fc; uint8_t mask; uint8_t hold; } sched_cmd_t;
+typedef struct { uint32_t fc; uint8_t mask; uint8_t hold; uint8_t counted; } sched_cmd_t;
+/* `counted` guards the applied tally: input_poll may run more than once per frame clock value (the fake-08
+ * tick polls input more than once per emitted fc on a 30 fps cart), so counting at every `fc==G` poll would
+ * over-count applied (observed ~2x). The flag counts each command exactly once, at its first active frame. */
 
 /* --- lock-free SPSC ring: fc_rx (core 1) writes, input_poll (core 0) reads --------------------------------*/
 static sched_cmd_t     s_ring[RING_SZ];
@@ -98,6 +101,7 @@ static void feed_bytes(const uint8_t *b, int n) {
             memcpy(&c.fc, &s_acc[1], 4);                /* u32 LE (ESP32 is little-endian) */
             c.mask = s_acc[5];
             c.hold = s_acc[6];
+            c.counted = 0;                              /* not yet tallied into s_applied (see sched_cmd_t) */
             if (!ring_push(&c)) s_ring_drop++;         /* full ring -> dropped + counted (folded into stats' miss) */
             s_acclen = 0;
         } else {
@@ -173,7 +177,7 @@ uint8_t input_poll(void) {
         uint32_t end = e->fc + 2u * e->hold;
         if (e->fc <= G && G < end) {
             held |= e->mask;
-            if (e->fc == G) s_applied++;               /* count each command once, at its first active frame */
+            if (!e->counted) { s_applied++; e->counted = 1; }   /* count each command once (robust to >1 poll/fc) */
             ++i;
         } else if (G >= end) {
             s_table[i] = s_table[--s_ntab];            /* expired -> swap-remove */

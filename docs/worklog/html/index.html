@@ -43,6 +43,18 @@
           v5.4.2 too.</span>
       </li>
       <li>
+        <span class="d">2026-07-22</span>
+        <a class="t" href="2026-07-22-fc-miss-rate-readout.html">fc-scheduled deadline miss-rate readout</a>
+        <span class="s">Gets the on-device fc-scheduled <strong>deadline miss-rate</strong> off the board:
+          <code>input_sched_stats()</code> existed in the firmware but was declared and called <strong>nowhere</strong>,
+          so it's wired to a periodic <code>TS &lt;fed&gt; &lt;miss&gt; &lt;applied&gt;</code> telemetry line (distinct
+          prefix, so the <code>T</code> parser and the binary sync-scan both skip it) that the host drivers parse and
+          report as <code>miss/fed</code> per lead k. A first board run exposed an <code>applied</code>-counter double
+          (<code>input_poll</code> fires ~2×/fc on a 30 fps cart) — fixed with a per-command <code>counted</code> flag.
+          <strong>On hardware: 0/600 deadline misses (0.0%) at k=2</strong> across the 100→400 M chain — the one number
+          the sim can't give.</span>
+      </li>
+      <li>
         <span class="d">2026-07-19</span>
         <a class="t" href="2026-07-19-playtest-harness-agent-solve.html">Play-test harness → a gym for agent-solved carts + FPS measurement</a>
         <span class="s">Turned the one-off Celeste play-test into a reusable rig aimed at <strong>measuring real on-device

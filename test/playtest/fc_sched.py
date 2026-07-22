@@ -21,7 +21,11 @@ This module is the single source of the wire format, used by BOTH ends:
 Wire format (host -> device), 8 bytes, little-endian, self-delimiting + checksummed:
     0xA6 | target_fc:u32 | mask:u8 | hold:u8 | csum:u8      (csum = XOR of bytes 0..6)
 `target_fc` is in telemetry fc units (the board streams `fc`, which advances +2 per 30 fps game-frame); a
-command holds `mask` for game-frames [target_fc, target_fc + 2*hold). A one-frame dash is hold=1."""
+command holds `mask` for game-frames [target_fc, target_fc + 2*hold). A one-frame dash is hold=1.
+
+Reverse direction (device -> host), the deadline miss-rate readout: the board streams a periodic ASCII line
+`TS <fed> <miss> <applied>` (~1x/s) alongside telemetry; `parse_stats` decodes it. This is the on-device number
+the whole design turns on (miss/fed ~0 at lead k=2 on the tuned path)."""
 import struct
 
 SYNC = 0xA6
@@ -35,6 +39,27 @@ def encode_cmd(target_fc, mask, hold):
     for b in body:
         csum ^= b
     return body + bytes([csum])
+
+
+STATS_PREFIX = b"TS"
+
+
+def parse_stats(line):
+    """Device -> host: parse a periodic fc-scheduled stats line `TS <fed> <miss> <applied>` (streamed ~1x/s by
+    the scheduled backend's input_sched_stats via main.cpp). fed = valid fc-commands the board saw, miss =
+    commands that arrived after their target frame — a deadline miss, incl. ring/table drops — applied =
+    commands that reached their active window. Returns dict(fed, miss, applied, miss_rate) or None for any other
+    line (a telemetry `T ...` frame, an ESP log line, junk). miss_rate = miss/fed is the on-device number the
+    fc-scheduled design turns on: at lead k=2 on the tuned path it should be ~0. split() tolerates a trailing
+    \\r and collapses whitespace, matching the telemetry parsers."""
+    p = line.split()
+    if len(p) != 4 or p[0] != STATS_PREFIX:
+        return None
+    try:
+        fed, miss, applied = int(p[1]), int(p[2]), int(p[3])
+    except ValueError:
+        return None
+    return dict(fed=fed, miss=miss, applied=applied, miss_rate=(miss / fed if fed else 0.0))
 
 
 def parse_stream(buf):
