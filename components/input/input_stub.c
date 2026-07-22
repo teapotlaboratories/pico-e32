@@ -6,4 +6,5 @@
 
 esp_err_t   input_init(void)         { return ESP_OK; }
 uint8_t     input_poll(void)         { return 0; }
+void        input_set_frame(uint32_t fc) { (void)fc; }   /* no-op: only the scheduled backend uses the fc */
 const char *input_backend_name(void) { return "stub"; }

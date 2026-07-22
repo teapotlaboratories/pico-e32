@@ -25,6 +25,7 @@
 
 #include "sdcard_spi.h"   /* the board-agnostic SD component (components/sdcard_spi) */
 #include "driver/uart.h"  /* TELEMETRY_HOST_CFG (dev/HITL only): read a startup telemetry-tail command from UART0 */
+#include "input.h"        /* input_set_frame — hand the fc-scheduled input backend the frame clock (dev/HITL) */
 
 #include <vector>
 #include <string>
@@ -219,6 +220,15 @@ extern "C" void app_main(void) {
     ESP_LOGI(TAG, "RND_SEED=%d: PRNG pinned after 60 boot steps (deterministic rnd for trace replay)", RND_SEED);
 #endif
 
+#ifdef CELESTE_START
+    /* Skip the title for the fc-scheduled HITL play-test: begin_game() + load_room(0,0), mirroring the sim's
+     * sim_start_room (test/playtest/fake08-sim/sim.cpp). The telemetry loop's Steps then run the spawn
+     * animation, so the player appears at room (0,0)'s spawn (8,96) with no title press — the scheduled input
+     * backend takes only fc-tagged commands, not the raw title-start key. Dev/HITL only. */
+    vm->ExecuteLua("begin_game() load_room(0,0)", "");
+    ESP_LOGI(TAG, "CELESTE_START: begin_game + load_room(0,0) (skip title for fc-scheduled HITL)");
+#endif
+
 #ifdef MEASURE_FPS
     /* Opt-in fps measurement (DEFS='-D MEASURE_FPS=1'). Run our own loop, paced to the target fps, and
      * time Step() (fake-08's _update/_draw in the VM) vs drawFrame() (our unpack → RGB565 → 2× → blit)
@@ -295,6 +305,12 @@ extern "C" void app_main(void) {
 #endif
         while (true) {
             host->waitForTargetFps();
+            /* fc-scheduled input (INPUT_BACKEND=scheduled): hand the backend the fc THIS Step will emit.
+             * vm->Step() advances GetFrameCount() by ONE per Step (a 30 fps cart = 2 Steps/game-frame), and
+             * telemetry emits GetFrameCount() right after Step, so the fc this iteration emits == before+1.
+             * The backend applies fc-tagged commands when its clock reaches that fc. A no-op for every other
+             * backend. Kept out of the t0..t1 window so step_us stays the cart's. */
+            input_set_frame((uint32_t)vm->GetFrameCount() + 1u);
             int64_t t0 = esp_timer_get_time();
             vm->Step();
             int64_t t1 = esp_timer_get_time();

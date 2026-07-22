@@ -162,3 +162,30 @@ See [`docs/worklog/2026-07-18-celeste-playtest-clear.md`](../worklog/2026-07-18-
   no host-side 30-vs-60 switch — the host always resumes at 60; the cart decides. Celeste (`_update`) runs a
   steady 30 fps with ~6 ms of work (10 ms headroom). Needs `CONFIG_FREERTOS_HZ=1000`. See the
   [fps-resume worklog](../worklog/2026-07-18-fake08-celeste-fps-resume.md). Remaining for Gate #4: **audio**.
+
+- **IN-5 — `fc`-scheduled input backend (frame-exact closed-loop over telemetry). 📐 designed + sim-validated
+  (2026-07-20); firmware not yet written.** *Why:* a live host-driven closed loop (`live.drive_device`)
+  applies each button on whichever `input_poll` catches it — a **~1-frame jittery** latency that is fatal to
+  frame-precise carts (measured on the sim: Celeste room (0,0) clears at 0-frame lag, dies at 1, and **any
+  jitter fails** — a dash one frame late launches from the wrong pixel). Continuous-control carts (the racer)
+  tolerate it; discrete/pixel-precise ones do not. The jitter is the ±1-frame phase mismatch between the
+  device's fixed frame clock and the host's async loop — *not* the telemetry cost (already minimized: binary
+  + 921600). *Design:* the host tags each command with a **target frame** (the telemetry `fc` it reads, + a
+  lead k) and the device applies it when its frame clock **reaches** that `fc` — so host jitter only has to
+  **beat a deadline**, and the apply is deterministic. A **core-1 UART task** (APP_CPU is idle; the whole
+  runtime is one task on core 0) drains the wire continuously into a lock-free SPSC latch; the apply-by-`fc`
+  logic runs in `input_poll` on core 0. The host predicts the target frame with a **lockstep twin** (same
+  deterministic policy from spawn, fed the committed commands — proven bit-exact on the sim; VM savestate is
+  the parked eris path, so a snapshot won't work). *Wire format* (host→device, 8 B, LE, self-delimiting):
+  `0xA6 | target_fc:u32 | mask:u8 | hold:u8 | xor-csum`; hold window `[fc, fc+2·hold)`.
+  - *Files:* new backend `components/input/input_scheduled.c`; seam add `input_set_frame(uint32_t)` to
+    `input.h` (main.cpp calls it `GetFrameCount()+2` pre-Step); `CMakeLists.txt` `INPUT_BACKEND=scheduled`.
+    Host + sim twin already landed: `test/playtest/fc_sched.py` (protocol + `DeviceScheduler`),
+    `test/playtest/test_fc_sched.py` (6/6), `test/playtest/celeste/fc_latency.py` (the measurements).
+  - *Sim result:* through the real protocol code, **k=2 lead + binary/921600 → 100% clear** across realistic
+    host jitter (k=1 marginal, loose/ASCII needs k=3). See the
+    [worklog](../worklog/2026-07-20-celeste-closed-loop-fc-scheduled.md).
+  - *Acceptance (hardware):* flash `INPUT_BACKEND=scheduled` + racer-class telemetry; room (0,0) clears
+    closed-loop on the board at k=2; the streamed on-device **miss-rate** (`g_miss_count/g_applied`) is ~0 on
+    the tuned path; toggling host `low_latency` moves it as predicted. This miss-rate is the one number the
+    sim cannot give. Dev/HITL-only — compiles out of production like the other telemetry paths.

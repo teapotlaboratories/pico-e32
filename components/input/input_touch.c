@@ -76,4 +76,5 @@ uint8_t input_poll(void) {
     return held;
 }
 
+void        input_set_frame(uint32_t fc) { (void)fc; }   /* no-op: only the scheduled backend uses the fc */
 const char *input_backend_name(void) { return "touch"; }
