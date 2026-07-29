@@ -7,7 +7,7 @@ docs (per [`.ai/AGENTS.md`](../.ai/AGENTS.md) → *Plan first*).
 - **★ PRIMARY GOAL — port fake-08:** [`runtime/pico-e32-fake08-port.md`](runtime/pico-e32-fake08-port.md) — the runtime is a **port of fake-08** (MIT), not hand-written; replace only its `Host` layer. **Draw-only milestone is unblocked (no parts).** See plan §5.
 - **Evidence base:** [`reference/pico-e32-runtime-feasibility.md`](reference/pico-e32-runtime-feasibility.md), [`pico-e32-silicon-decision.md`](reference/pico-e32-silicon-decision.md)
 - **Hardware reference:** [`reference/pico-e32-makerfabs-boards.md`](reference/pico-e32-makerfabs-boards.md)
-- **Display path (ILI9488 + driver):** [`hardware/pico-e32-display.md`](hardware/pico-e32-display.md) — pin map/bus/orientation status + its backlog (`DP-1`…`DP-7`); **`DP-1` — the repo contradicts itself about whether `esp_lcd` was retried**
+- **Display path (ILI9488 + driver):** [`hardware/pico-e32-display.md`](hardware/pico-e32-display.md) — pin map/bus/orientation status + its backlog (`DP-1`…`DP-9`); **`DP-9` — touch orientation at `ROTATE_180=false` is unverified on hardware**
 - **Bench camera (HIL verification):** [`hardware/pico-e32-bench-camera.md`](hardware/pico-e32-bench-camera.md) — rig setup + its backlog (`BC-1`…`BC-6`); **`BC-1` done — the rig works and caught the Y-flip**
 - **Guition JC4880P443C (ESP32-P4) board:** [`hardware/pico-e32-guition-jc4880p443c-p4.md`](hardware/pico-e32-guition-jc4880p443c-p4.md) — a SECOND, **RISC-V** target alongside the S3 boards; display bring-up first, portable across S3+P4 (`GP-1`…`GP-4`). fake-08 runtime deferred.
 - **z8lua speedup research:** [`reference/z8lua-speedup-research.md`](reference/z8lua-speedup-research.md) — lever ranking; **profile before optimizing**
