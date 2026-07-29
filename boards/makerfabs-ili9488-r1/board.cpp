@@ -75,13 +75,13 @@ static const int8_t DATA_PINS[16] = { 47, 21, 14, 13, 12, 11, 10, 9,
 #define TOUCH_ADDR     0x38
 #define TOUCH_I2C_PORT I2C_NUM_0
 
-/* ORIENTATION: the glass is mounted 180° (upside-down AND left-right mirrored) on this board. The
- * original fix applied only offset_rotation=4 (Y-flip); it LOOKED correct because the bench camera has
- * its own horizontal mirror that cancelled the leftover X-flip in captures — reading the actual panel by
- * eye caught the mirrored text (2026-07-18). The correct fix is a full 180°: offset_rotation=2 (MADCTL
- * MX|MY, MV clear), which keeps 320x480 and the centred blit safe. The touch transform flips BOTH axes to
- * match. History: docs/worklog/2026-07-16-yflip-and-gate1-fps.md. */
-static const bool ROTATE_180 = true;
+/* ORIENTATION: no rotation. The panel reads upright at offset_rotation=0 for this board as mounted,
+ * confirmed by eye on the bench (2026-07-29). This flag couples the display AND the touch transform: when
+ * true it applies a full 180° (offset_rotation=2, MADCTL MX|MY, MV clear) and flips both touch axes to
+ * match; when false both pass through unrotated. History — an earlier revision ran this at 180° on the
+ * theory that the glass was mounted upside-down; note the bench camera adds its own horizontal mirror, so
+ * trust the panel by eye, not captures, when re-checking. docs/worklog/2026-07-16-yflip-and-gate1-fps.md. */
+static const bool ROTATE_180 = false;
 
 /* BYTE ORDER: this panel takes byte-SWAPPED RGB565 on LovyanGFX's swap565_t fast path. board_lcd_rgb565
  * pre-swaps and board_lcd_blit hands over swap565_t, so no per-pixel conversion pass runs. */
@@ -268,10 +268,10 @@ extern "C" int board_touch_read(int *xs, int *ys, int max) {
             ft_rd(base + 2, &yh) != ESP_OK || ft_rd(base + 3, &yl) != ESP_OK) continue;
         int rx = ((xh & 0x0F) << 8) | xl;
         int ry = ((yh & 0x0F) << 8) | yl;
-        /* Orientation: the glass is mounted 180° (see ROTATE_180 in the LCD), matching the display's 180°
-         * offset_rotation — flip BOTH axes so a touch lands where its control is drawn. */
-        xs[out] = (BOARD_LCD_H_RES - 1) - rx;
-        ys[out] = (BOARD_LCD_V_RES - 1) - ry;
+        /* Orientation: stay coupled to the display (see ROTATE_180 in the LCD). At 180° flip BOTH axes so a
+         * touch lands where its control is drawn; unrotated, pass through. */
+        xs[out] = ROTATE_180 ? (BOARD_LCD_H_RES - 1) - rx : rx;
+        ys[out] = ROTATE_180 ? (BOARD_LCD_V_RES - 1) - ry : ry;
         ++out;
     }
     return out;

@@ -37,3 +37,7 @@ test/playtest/celeste/videos/
 /assets/roms/
 *.part
 assets/pico_racer_p8.h
+
+# Python bytecode cache (from tools/)
+__pycache__/
+*.pyc
