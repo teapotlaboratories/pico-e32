@@ -100,18 +100,40 @@ def set_control(cid, val):
 PAGE = ("""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>Bench Camera</title>
 <style>
- :root{--bg:#0c0f14;--panel:#151a22;--panel2:#1c232e;--bd:#2a3340;--fg:#e6edf3;--mut:#8b97a6;
+ :root{--panel:rgba(17,22,30,.74);--panel2:rgba(255,255,255,.06);--bd:rgba(255,255,255,.11);--fg:#e6edf3;--mut:#9aa6b4;
    --acc:#4c8dff;--acc2:#3fb6a8;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
  *{box-sizing:border-box}
- body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
- header{display:flex;align-items:center;gap:.7rem;padding:.8rem 1.1rem;border-bottom:1px solid var(--bd);background:var(--panel)}
- header h1{font-size:1.02rem;margin:0;letter-spacing:-.01em}
- header .dot{width:9px;height:9px;border-radius:50%;background:var(--acc2);box-shadow:0 0 8px var(--acc2)}
- header .meta{margin-left:auto;color:var(--mut);font:12px/1 var(--mono)}
- .wrap{display:flex;gap:1rem;padding:1rem;align-items:flex-start;flex-wrap:wrap}
- .stage{flex:1 1 520px;min-width:300px;background:#000;border:1px solid var(--bd);border-radius:14px;overflow:hidden;position:relative}
- .stage img{display:block;width:100%;height:auto}
- .panel{flex:0 0 340px;max-width:100%;background:var(--panel);border:1px solid var(--bd);border-radius:14px;padding:.4rem .2rem .8rem;max-height:82vh;overflow:auto}
+ html,body{height:100%}
+ body{margin:0;background:#000;color:var(--fg);overflow:hidden;
+   font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+ /* video always fills the window */
+ #v{position:fixed;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:0}
+ /* live status pill, top-left */
+ .live{position:fixed;top:.85rem;left:.85rem;z-index:30;display:flex;align-items:center;gap:.45rem;
+   padding:.34rem .66rem;border-radius:999px;background:rgba(10,13,18,.5);backdrop-filter:blur(10px);
+   -webkit-backdrop-filter:blur(10px);border:1px solid var(--bd);font:12px/1 var(--mono);color:var(--mut)}
+ .live .dot{width:8px;height:8px;border-radius:50%;background:var(--acc2);box-shadow:0 0 8px var(--acc2);animation:pulse 2.4s infinite}
+ @keyframes pulse{50%{opacity:.35}}
+ /* floating action buttons, top-right */
+ .top{position:fixed;top:.75rem;right:.75rem;z-index:30;display:flex;gap:.5rem}
+ .fab{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;font-size:1.15rem;
+   background:rgba(17,22,30,.6);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+   color:var(--fg);border:1px solid var(--bd);cursor:pointer;transition:.15s}
+ .fab:hover{background:rgba(32,40,52,.9);border-color:var(--acc);transform:translateY(-1px)}
+ .fab:disabled{opacity:.5;cursor:default}
+ /* slide-in control overlay, right edge */
+ .panel{position:fixed;top:0;right:0;height:100%;width:min(360px,88vw);z-index:40;display:flex;flex-direction:column;
+   background:var(--panel);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);border-left:1px solid var(--bd);
+   box-shadow:-24px 0 70px rgba(0,0,0,.45);transform:translateX(101%);transition:transform .28s cubic-bezier(.4,0,.2,1)}
+ body.open .panel{transform:none}
+ .scrim{position:fixed;inset:0;z-index:35;background:rgba(0,0,0,.28);opacity:0;pointer-events:none;transition:opacity .28s}
+ body.open .scrim{opacity:1;pointer-events:auto}
+ .phead{display:flex;align-items:center;gap:.6rem;padding:1rem 1.1rem;border-bottom:1px solid var(--bd)}
+ .phead h1{font-size:1rem;margin:0;letter-spacing:-.01em}
+ .phead .x{margin-left:auto;width:30px;height:30px;border-radius:8px;display:grid;place-items:center;flex:0 0 auto;
+   background:var(--panel2);border:1px solid var(--bd);color:var(--mut);cursor:pointer;font-size:.9rem}
+ .phead .x:hover{color:#fff;border-color:var(--acc)}
+ .pbody{flex:1;overflow:auto;padding:.2rem .2rem 1.4rem}
  .grp{padding:.5rem .9rem}
  .grp h2{font:600 .72rem/1 var(--mono);text-transform:uppercase;letter-spacing:.09em;color:var(--mut);margin:.7rem 0 .3rem}
  .ctl{padding:.5rem .1rem;border-top:1px solid var(--bd)}
@@ -139,22 +161,28 @@ PAGE = ("""<!doctype html><html lang="en"><head><meta charset="utf-8">
  button.primary:hover{filter:brightness(1.08)}
  .hint{color:var(--mut);font-size:.72rem;padding:.2rem .9rem 0;line-height:1.4}
 </style></head><body>
-<header><span class="dot"></span><h1>USB Bench Camera</h1><span class="meta" id="meta"></span></header>
-<div class="wrap">
-  <div class="stage"><img id="v" src="/stream" alt="live"></div>
-  <div class="panel">
+<img id="v" src="/stream" alt="live">
+<div class="live"><span class="dot"></span><span id="meta">connecting&#8230;</span></div>
+<div class="top">
+  <button class="fab" id="snap" title="Save snapshot">&#128247;</button>
+  <button class="fab" id="gear" title="Camera controls">&#9881;</button>
+</div>
+<div class="scrim" id="scrim"></div>
+<aside class="panel" id="panel">
+  <div class="phead"><h1>Camera controls</h1><button class="x" id="close" title="Close">&#10005;</button></div>
+  <div class="pbody">
     <div class="bar">
       <button class="primary" id="preset">Panel lock</button>
       <button id="auto">Auto</button>
     </div>
     <div class="bar">
-      <button id="snap">&#128247; Snapshot</button>
+      <button id="snap2">&#128247; Snapshot</button>
       <button id="reset">Reset defaults</button>
     </div>
     <div class="hint"><b>Panel lock</b>: manual 6&#8202;ms exposure + locked white balance for a bright emissive panel. <b>Snapshot</b> saves the current full-res frame. Controls reset to auto when you unplug the camera.</div>
     <div id="ctls"></div>
   </div>
-</div>
+</aside>
 <script>
 const $=s=>document.querySelector(s);
 async function api(u){const r=await fetch(u);return r.json()}
@@ -206,15 +234,22 @@ $('#preset').onclick=async()=>{  // panel lock: dyn-framerate off, manual AE, 6m
 $('#auto').onclick=async()=>{    // back to fully-auto exposure + white balance
   await set(0x009a0901,3);await set(0x0098090c,1);await set(0x009a0903,1);load();
 };
-$('#snap').onclick=async()=>{    // download the current full-res frame
-  const b=$('#snap');const t=b.textContent;b.textContent='Saving…';b.disabled=true;
+async function snap(){            // download the current full-res frame
+  const btns=[$('#snap'),$('#snap2')];const p=$('#snap2');const t=p.textContent;
+  btns.forEach(b=>b.disabled=true);p.textContent='Saving…';
   try{
     const r=await fetch('/snapshot');const blob=await r.blob();const u=URL.createObjectURL(blob);
     const ts=new Date().toISOString().replace('T','-').replace(/[:.]/g,'').slice(0,15);
     const a=document.createElement('a');a.href=u;a.download='bench-'+ts+'.jpg';document.body.appendChild(a);a.click();a.remove();
     setTimeout(()=>URL.revokeObjectURL(u),1000);
-  }finally{b.textContent=t;b.disabled=false;}
-};
+  }finally{btns.forEach(b=>b.disabled=false);p.textContent=t;}
+}
+$('#snap').onclick=snap;$('#snap2').onclick=snap;
+const openPanel=v=>document.body.classList.toggle('open',v);
+$('#gear').onclick=()=>openPanel(!document.body.classList.contains('open'));
+$('#close').onclick=()=>openPanel(false);
+$('#scrim').onclick=()=>openPanel(false);
+document.addEventListener('keydown',e=>{if(e.key==='Escape')openPanel(false)});
 load();
 </script></body></html>""")
 
