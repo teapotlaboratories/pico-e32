@@ -66,7 +66,7 @@ IDF := source "$(IDF_PATH)/export.sh" >/dev/null 2>&1 && cd "$(APP_DIR)" && \
 help:
 	@echo "pico-e32 firmware build (ESP-IDF wrapper)"
 	@echo "  APP=$(APP)  BOARD=$(BOARD)  PORT=$(PORT)"
-	@echo "  make install       - one-time: install the esp32s3 toolchain into vendor/.espressif"
+	@echo "  make install       - one-time: install toolchains ($(IDF_TARGETS)) into vendor/.espressif"
 	@echo "  make build         - build APP for BOARD"
 	@echo "  make flash         - flash APP to PORT"
 	@echo "  make monitor       - serial monitor (Ctrl-] to exit)"
@@ -76,7 +76,11 @@ help:
 	@echo "  apps:   $(notdir $(wildcard firmware/pico-e32-*))"
 	@echo "  boards: $(notdir $(wildcard boards/*))"
 
-install:       ; "$(IDF_PATH)/install.sh" esp32s3
+# Toolchains installed by `make install` (comma-separated, ESP-IDF install.sh syntax). Covers every target
+# board: esp32 (bench-cam / M5Stack cam), esp32s3 (fake08 / Makerfabs ILI9488), esp32p4 (Guition JC4880P443C).
+# Override e.g. `make install IDF_TARGETS=esp32s3` for a single toolchain.
+IDF_TARGETS ?= esp32,esp32s3,esp32p4
+install:       ; "$(IDF_PATH)/install.sh" $(IDF_TARGETS)
 build:         ; $(IDF) build
 flash:         ; $(IDF) -p "$(PORT)" flash
 monitor:       ; $(IDF) -p "$(PORT)" monitor

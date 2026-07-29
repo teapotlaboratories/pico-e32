@@ -47,11 +47,14 @@ The existing design already supports multiple targets — **`boards/<name>/sdkco
 the S3 board keeps its LovyanGFX i80 path. Known portability blockers to fix so a P4 build is clean and
 S3 is untouched:
 
-- **LovyanGFX is S3-only** (`boards.cmake/esp-idf.cmake` hard-globs `platforms/esp32s3/*.cpp`). It must
-  stay **board-scoped** (pulled only by boards that use it) and/or no-op its CMake on non-S3 targets, so a
-  P4 build never compiles it. `GP-1`.
-- **`make install` is hardcoded `esp32s3`** — add `esp32p4` to the target list. The riscv32 toolchain is
-  already installed and IDF 5.4.2 supports esp32p4, so this is small. `GP-1`.
+- **`make install` was hardcoded `esp32s3`** — ✅ **fixed (`GP-1`)**: now installs `esp32,esp32s3,esp32p4`
+  (configurable via `IDF_TARGETS`). The riscv32 compiler P4 needs was already present; `make install
+  IDF_TARGETS=esp32p4` verified clean (only the riscv32 GDB was pulled).
+- **LovyanGFX** — *not* a blocker after all: its `esp-idf.cmake` globs **all** platforms (incl.
+  `platforms/esp32p4/*.cpp`) and already has an IDF-v6 `REQUIRES` branch; each platform `.cpp` is
+  `#if CONFIG_IDF_TARGET_*`-guarded, so it compiles clean (empty) on non-matching targets. And a P4 board
+  driving the panel via `esp_lcd_mipi_dsi` won't `REQUIRES` it anyway. (The earlier "S3-only" note was a
+  misread of a targeted grep that only surfaced the esp32s3 line.)
 - z8lua's `-fjump-tables -ftree-switch-conversion` is a **generic GCC flag** (portable to RISC-V); the
   Gate-2 throughput number was Xtensa-only and needs re-measuring on P4 (deferred with the runtime).
 
@@ -59,7 +62,7 @@ S3 is untouched:
 
 | # | phase | status |
 |---|---|---|
-| **GP-1** | **Portability foundation** — add `esp32p4` to `make install`; scope/guard LovyanGFX so a P4 build never sees the S3 glob; confirm the S3 build still passes. No P4 hardware needed. | ☐ |
+| **GP-1** | **Portability foundation** — ✅ **DONE**: `make install` now covers `esp32p4` (via `IDF_TARGETS`), P4-toolchain install verified. LovyanGFX needed no change (already multi-targets incl. p4); S3 build path untouched (`install` ≠ `build`). | ✅ |
 | **GP-2** | **P4 board scaffold + proof-of-life** — new `boards/guition-jc4880p443c/` (`sdkconfig.defaults` target=esp32p4 + 16 MB flash + PSRAM/DSI, `board.h` 480×800 + `BOARD_HAS_*`, `board.cpp` stub); a minimal display-test build that flashes to `ttyACM0` and logs over serial → proves **P4 build → flash → boot** end to end. | ☐ |
 | **GP-3** | **Display bring-up (the core)** — implement `board_lcd_*` via `esp_lcd_mipi_dsi` + ST7701S manual init (lanes, DPHY clock, timing, reset/backlight GPIOs), PSRAM framebuffer, handle the ST7701S-on-DSI rotation quirk (PPA hardware-rotate) so 480×800 renders upright. | ☐ |
 | **GP-4** | **Gate-1 verification on the real glass** — fill R/G/B then an L-pattern; confirm **colour + orientation** on the bench camera (re-aimed at the P4 panel). Never trust a checksum — the panel is the oracle. | ☐ |
