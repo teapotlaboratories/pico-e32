@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP-IDF v5.4.2 → v6.0.2 migration — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8;
+        --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  :root[data-theme="light"]{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;--ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  :root[data-theme="dark"]{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;--border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)} .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;font-family:var(--mono)}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:9px;padding:.9rem 1.05rem;overflow-x:auto;font-size:.82rem;line-height:1.5;font-family:var(--mono)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left}
+  th{background:var(--codebg);font-family:var(--mono);font-size:.82rem}
+  td.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .bad{color:var(--bad);font-weight:600} .ok{color:var(--ok);font-weight:600} .warn{color:var(--warn);font-weight:600}
+  .bars{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.2rem 1.3rem;margin:1.3rem 0}
+  .bars h3{margin:.1rem 0 1rem;font-size:.95rem}
+  .bar{display:grid;grid-template-columns:150px 1fr;align-items:center;gap:.8rem;margin:.55rem 0}
+  .bar .lab{font:600 .8rem/1.2 var(--mono);color:var(--muted)}
+  .bar .track{position:relative;background:var(--codebg);border-radius:7px;height:30px;overflow:hidden}
+  .bar .fill{position:absolute;inset:0 auto 0 0;border-radius:7px;display:flex;align-items:center;justify-content:flex-end;padding-right:.55rem;font:700 .8rem/1 var(--mono);color:#fff;white-space:nowrap}
+  .fill.b{background:linear-gradient(90deg,#c0392b,#e0563f)}
+  .fill.a{background:linear-gradient(90deg,#1a7f4b,#2faa68)}
+  .diag{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.3rem;margin:1.3rem 0}
+  .diag h3{margin:.1rem 0 .4rem;font-size:.95rem}
+  .diag .sub{color:var(--muted);font-size:.82rem;margin:0 0 1rem}
+  .frames{display:flex;gap:.4rem;flex-wrap:wrap;align-items:flex-end}
+  .fr{display:flex;flex-direction:column;align-items:center;gap:.25rem;min-width:56px}
+  .fr .box{width:100%;height:46px;border-radius:6px;display:flex;align-items:center;justify-content:center;font:700 .72rem/1 var(--mono);border:1px solid var(--border);text-align:center}
+  .fr .fno{font:.68rem/1 var(--mono);color:var(--muted)}
+  .fr .pos{font:.66rem/1 var(--mono);color:var(--muted)}
+  .box.idle{background:var(--codebg);color:var(--muted)}
+  .box.dash{background:linear-gradient(180deg,#5b8bf0,#356ad4);color:#fff;border-color:transparent}
+  .box.frz{background:repeating-linear-gradient(45deg,var(--codebg),var(--codebg) 5px,transparent 5px,transparent 10px);color:var(--warn)}
+  .box.mv{background:linear-gradient(180deg,#2faa68,#1a7f4b);color:#fff;border-color:transparent}
+  .legend{font-size:.78rem;color:var(--muted);margin-top:.7rem}
+  .foot{margin-top:2.6rem;padding-top:1rem;border-top:1px solid var(--border);color:var(--muted);font-size:.85rem}
+  figure{margin:1.3rem 0;text-align:center}
+  figure img{max-width:min(270px,46%);border-radius:10px;border:1px solid var(--border);margin:0 .25rem;vertical-align:top}
+  figcaption{color:var(--muted);font-size:.82rem;margin-top:.5rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <h1>ESP-IDF v5.4.2 → v6.0.2 migration</h1>
+  <p class="date">2026-07-28 · bump the vendored SDK a major version, keep the ESP32-S3 building / booting / running, and map the whole migration surface — motivated by the new ESP32-P4 board</p>
+
+  <div class="tldr">
+    Bumped the vendored ESP-IDF from <b>v5.4.2</b> to <b>v6.0.2</b> so the S3 project shares a modern IDF with the
+    incoming Guition <b>ESP32-P4</b> board (its MIPI-DSI stack needs it) — and proved the move is
+    <b class="ok">non-regressive</b> first. The entire S3 migration was <b>two small, backward-compatible changes</b>
+    (a driver-component-split <code>REQUIRES</code> fix + a LEDC zero-init). The S3 board <b class="ok">builds,
+    boots (Picolibc), and runs</b> — Celeste clears <b>100→300 M</b> on hardware, camera-confirmed. Every
+    actively-used app builds on v6; the two that don't were <b>already broken pre-v6</b> (superseded apps).
+    Area doc / plan: <code>docs/hardware/pico-e32-guition-jc4880p443c-p4.md</code>; this log is the running record.
+  </div>
+
+  <nav aria-label="Contents" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:.85rem 1.1rem;margin:1.4rem 0">
+    <div style="font:600 .74rem/1 var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:.55rem">On this page</div>
+    <ol style="margin:0;padding-left:1.2rem;columns:2;column-gap:2rem;font-size:.92rem">
+      <li><a href="#s1">Why v6.0.2 + the one runtime risk</a></li>
+      <li><a href="#s2">The bump</a></li>
+      <li><a href="#s3">S3 build — two changes</a></li>
+      <li><a href="#s4">On-device verification</a></li>
+      <li><a href="#s5">Other apps on v6</a></li>
+      <li><a href="#s6">The whole surface + size</a></li>
+      <li><a href="#state">State + landing plan</a></li>
+    </ol>
+  </nav>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:.8rem;margin:1.6rem 0">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">v6.0.2</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">latest v6.0 patch. submodule <code>f5c3654</code> → <code>7101770</code></div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">5 files</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">the whole S3+bench-cam migration — all <b>valid on v5.4.2 too</b></div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">899 KB</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">v6 app (<code>0xe0a60</code>), <b>12% free</b> — <b class="ok">smaller</b> than v5 (Picolibc)</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">fc=1016</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">Celeste clears <b>100→200→300 M</b> on the v6 board — identical to v5</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">29.8 fps</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">achieved avg on v6 (min 9.9 / max 30.0) — matches v5</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">3 / 3</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">actively-used apps build on v6 (2 failures are pre-v6 bit-rot)</div>
+    </div>
+  </div>
+
+  <h2 id="s1">1. Why v6.0.2 + the one runtime risk</h2>
+  <p>ESP-IDF v6.0 released 2026-03; <b>v6.0.2</b> is the latest patch of the v6.0 line (v6.1 is beta/dev),
+     supported to 2028. It is "mostly compatible with v5.x" but with real breaking changes. The one that matters
+     for <em>this</em> board: v6 switches the default C library <b>Newlib → Picolibc</b>.</p>
+  <div class="tldr" style="border-left-color:var(--warn)">
+    <b class="warn">The Picolibc risk —</b> the board's earlier boot-loop (board-recovery,
+    <code>2026-07-20-celeste-closed-loop-fc-scheduled.md</code>, commit <code>385a988</code>) was a <em>newlib</em>
+    recursive-stdio-lock <code>configASSERT</code> on the first <code>printh</code>. Picolibc could change that
+    behaviour — fix it, or move it — so on-device boot was the thing verification <b>had</b> to check.
+  </div>
+  <p>Reversible throughout: the submodule was pinned at v5.4.2 (<code>f5c3654</code>); revert is
+     <code>git -C vendor/esp-idf checkout f5c3654 &amp;&amp; … submodule update</code>, and the v5.4.2 toolchain
+     stays in <code>vendor/.espressif</code> (installs are additive). Disk was never a constraint (785 G free).</p>
+
+  <h2 id="s2">2. The bump</h2>
+  <ul>
+    <li><code>git -C vendor/esp-idf fetch --depth 1 origin tag v6.0.2</code>, checkout,
+       <code>submodule update --init --recursive</code>.</li>
+    <li><code>make install</code> → v6 toolchain into <code>vendor/.espressif</code> (IDF_TOOLS_PATH exported by
+       the Makefile — never <code>~/</code>). Later <code>install.sh esp32</code> for the bench-cam target.</li>
+    <li>Both clean. <code>git -C vendor/esp-idf describe --tags</code> → <code>v6.0.2</code>.</li>
+  </ul>
+
+  <h2 id="s3">3. S3 build — exactly two changes, both backward-compatible</h2>
+  <p>A clean-configure S3 build (<code>APP=pico-e32-fake08 BOARD=makerfabs-ili9488-r1</code>) surfaced two v6
+     breakages, fixed in the tree:</p>
+
+  <p><b>(1) The driver-component split.</b> v6 broke the monolithic <code>driver</code> component into
+     per-peripheral <code>esp_driver_*</code>, and a component must now <code>REQUIRES</code> the <em>specific</em>
+     one that provides its header — bare <code>REQUIRES driver</code> no longer re-exports them. IDF's own error
+     said it: <em>"input_scheduled.c includes driver/uart.h, provided by esp_driver_uart."</em></p>
+
+  <div class="diag">
+    <h3><code>driver</code> monolith → per-peripheral <code>esp_driver_*</code> (v6)</h3>
+    <p class="sub">Each of our components/apps that reached into <code>driver</code> for a specific header now
+       requires the split-out component instead. The <b>legacy</b> <code>driver/i2c.h</code> (bench-cam's camera
+       SCCB) is the exception — v6 still ships it inside <code>driver</code>, so bench-cam keeps <code>driver</code>
+       and adds the two split ones.</p>
+    <svg viewBox="0 0 820 250" width="100%" role="img" aria-label="The v5 driver monolith splits in v6 into esp_driver_uart, gpio, ledc, i2c; legacy i2c.h stays in driver">
+      <defs>
+        <marker id="ah3" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L7,3 L0,6 z" style="fill:var(--line)"/>
+        </marker>
+      </defs>
+      <!-- v5 monolith -->
+      <text x="105" y="20" style="fill:var(--muted);font:600 11px var(--mono);text-anchor:middle">v5.4.2</text>
+      <rect x="20" y="86" width="170" height="70" rx="10" style="fill:var(--surface);stroke:var(--bad);stroke-width:1.8"/>
+      <text x="105" y="116" style="fill:var(--fg);text-anchor:middle;font:700 13px var(--mono)">driver</text>
+      <text x="105" y="134" style="fill:var(--muted);text-anchor:middle;font:10px var(--mono)">uart · gpio · ledc · i2c</text>
+      <!-- split arrow -->
+      <line x1="190" y1="121" x2="300" y2="121" style="stroke:var(--accent);stroke-width:2" marker-end="url(#ah3)"/>
+      <text x="245" y="112" style="fill:var(--accent);text-anchor:middle;font:700 11px var(--mono)">v6 split</text>
+      <!-- v6 split components -->
+      <text x="560" y="20" style="fill:var(--muted);font:600 11px var(--mono);text-anchor:middle">v6.0.2</text>
+      <g style="font-family:var(--mono)">
+        <rect x="310" y="34" width="230" height="34" rx="8" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+        <text x="322" y="55" style="fill:var(--fg);font:700 11px var(--mono)">esp_driver_uart</text>
+        <text x="530" y="55" style="fill:var(--muted);font:10px var(--mono);text-anchor:end">driver/uart.h</text>
+        <rect x="310" y="76" width="230" height="34" rx="8" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+        <text x="322" y="97" style="fill:var(--fg);font:700 11px var(--mono)">esp_driver_gpio</text>
+        <text x="530" y="97" style="fill:var(--muted);font:10px var(--mono);text-anchor:end">driver/gpio.h</text>
+        <rect x="310" y="118" width="230" height="34" rx="8" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+        <text x="322" y="139" style="fill:var(--fg);font:700 11px var(--mono)">esp_driver_ledc</text>
+        <text x="530" y="139" style="fill:var(--muted);font:10px var(--mono);text-anchor:end">driver/ledc.h</text>
+        <rect x="310" y="160" width="230" height="34" rx="8" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+        <text x="322" y="181" style="fill:var(--fg);font:700 11px var(--mono)">esp_driver_i2c</text>
+        <text x="530" y="181" style="fill:var(--muted);font:10px var(--mono);text-anchor:end">driver/i2c_master.h</text>
+        <!-- legacy stays -->
+        <rect x="310" y="206" width="230" height="34" rx="8" style="fill:var(--codebg);stroke:var(--warn);stroke-width:1.6;stroke-dasharray:5 3"/>
+        <text x="322" y="227" style="fill:var(--fg);font:700 11px var(--mono)">driver (legacy)</text>
+        <text x="530" y="227" style="fill:var(--warn);font:10px var(--mono);text-anchor:end">driver/i2c.h — stays</text>
+      </g>
+      <!-- which of our files require what -->
+      <g style="font-family:var(--mono)">
+        <text x="640" y="20" style="fill:var(--muted);font:600 11px var(--mono);text-anchor:middle">requires (our tree)</text>
+        <text x="560" y="52" style="fill:var(--fg);font:10px var(--mono)">input → uart</text>
+        <text x="560" y="94" style="fill:var(--fg);font:10px var(--mono)">sdcard_spi → gpio</text>
+        <text x="560" y="129" style="fill:var(--fg);font:10px var(--mono)">fake08 main →</text>
+        <text x="560" y="143" style="fill:var(--muted);font:10px var(--mono)">uart+gpio+ledc+i2c</text>
+        <text x="560" y="220" style="fill:var(--fg);font:10px var(--mono)">bench-cam →</text>
+        <text x="560" y="234" style="fill:var(--muted);font:10px var(--mono)">driver+gpio+ledc</text>
+      </g>
+    </svg>
+    <p class="legend">Fixed <code>REQUIRES</code> in 4 CMakeLists (<code>components/input</code>,
+       <code>components/sdcard_spi</code>, <code>firmware/pico-e32-fake08/main</code>,
+       <code>firmware/pico-e32-bench-cam/main</code>). The <code>esp_driver_*</code> components exist since
+       <b>v5.3</b>, so every one of these is valid on v5.4.2 too — no fork, and a v5 revert still builds.</p>
+  </div>
+
+  <p><b>(2) LEDC struct init.</b> <code>boards/makerfabs-ili9488-r1/board.cpp</code>'s
+     <code>backlight_on()</code> used partial designated initializers for <code>ledc_timer_config_t</code> /
+     <code>ledc_channel_config_t</code>. v6 <b>added fields</b> (<code>deconfigure</code>, <code>intr_type</code>,
+     <code>sleep_mode</code>, <code>flags</code>) <em>and</em> promotes <code>-Wmissing-field-initializers</code>
+     to a hard <b class="bad">error</b>. Fixed by zero-initializing (<code>= {}</code>) then assigning — clean on
+     both v5.4.2 and v6.0.2, and future-field-proof. (These were <em>warnings</em> on v5; v6 made them errors.)</p>
+
+  <h2 id="s4">4. On-device verification — the real Picolibc test</h2>
+  <p>Flashed the v6 build (board identified read-only via <code>/dev/serial/by-id/*CP2104*</code> → so no esptool
+     probe disturbed the bench camera's tuning), then drove Celeste over the fc-scheduled path:</p>
+  <pre>python3 test/playtest/celeste/fc_device.py /dev/ttyUSB1 --openloop --to300
+  -> CLEAR at fc=1016 ; fps 9.9/29.8/30.0 ; PASS  (100 M -> 200 M -> 300 M)</pre>
+  <ul>
+    <li><b class="ok">Boots clean — no boot-loop.</b> The Picolibc risk is cleared; the first-<code>printh</code>
+       newlib-assert path is gone and the board comes up normally.</li>
+    <li><b>Celeste runs and clears</b> at <b>fc=1016</b> (bit-identical to the v5 result — deterministic),
+       fps <b>29.8</b> avg (matches v5). Telemetry, the fc-scheduled input backend, and per-frame draw timing all work.</li>
+    <li><b>Display camera-confirmed</b> (bench cam <code>http://192.168.7.135</code>, de-distorted + uprighted):
+       the panel renders the room correctly, backlight on, colours right, green "30 FPS" HUD — which covers the
+       <b>LEDC/backlight change</b>. A still + a video of the 100→300 M clear (throwaway <code>/tmp</code>).</li>
+  </ul>
+  <div class="tldr">
+    <b class="ok">Verified end to end —</b> build + wire-level (boot / game logic / input / fps / draw timing) +
+    camera-on-glass (display). The Newlib→Picolibc switch is the notable win: the board boots fine <em>and</em>
+    the binary got smaller (§6).
+  </div>
+  <div class="tldr" style="border-left-color:var(--warn)">
+    <b class="warn">Compile-only on v6 (honest gap) —</b> the run used <code>FORCE_FLASH_CART</code> +
+    <code>INPUT_BACKEND=scheduled</code>, so the <b>SD-card mount path</b> and the <b>touch backend</b>
+    (<code>esp_driver_i2c</code> / <code>i2c_master</code> on v6) <em>compile</em> but were <b>not run</b> on
+    hardware here. Low-risk (standard IDF APIs, driver-split verified at build time), but not exercised.
+  </div>
+
+  <h2 id="s5">5. Other apps on v6</h2>
+  <p>Clean-configure build of the four non-fake08 apps (esp32 toolchain installed first for bench-cam):</p>
+  <table>
+    <tr><th>app</th><th>board</th><th>v6 result</th><th>change</th></tr>
+    <tr><td><code>pico-e32-luabench</code></td><td>makerfabs (S3)</td><td class="ok">✓ builds clean</td><td>none — no <code>driver</code> dep</td></tr>
+    <tr><td><code>pico-e32-fake08</code></td><td>makerfabs (S3)</td><td class="ok">✓ builds + boots + runs</td><td>driver-split + LEDC zero-init</td></tr>
+    <tr><td><code>pico-e32-bench-cam</code></td><td>m5stack (<b>esp32</b>)</td><td class="ok">✓ builds clean</td><td>driver-split <code>REQUIRES</code></td></tr>
+    <tr><td><code>pico-e32-display-test</code></td><td>makerfabs (S3)</td><td class="bad">✗ pre-broken (not v6)</td><td>superseded — retire or revive</td></tr>
+    <tr><td><code>pico-e32-host</code></td><td>makerfabs (S3)</td><td class="bad">✗ pre-broken (not v6)</td><td>superseded — retire or revive</td></tr>
+  </table>
+  <ul>
+    <li><b>display-test + host are broken independently of v6.</b> Both <code>#include "board.h"</code>
+       (display-test <code>main.c:25</code>, host <code>host_main.cpp:516</code>), and <code>board.h:13</code>
+       includes <code>sdcard_spi.h</code> — added in the <b>2026-07-17 SD refactor</b> (commit <code>9596b35</code>)
+       without adding <code>sdcard_spi</code> to those apps' <code>REQUIRES</code>. So they have failed on
+       <b>v5.4.2 too</b> since then. They are the <b>superseded</b> Phase-0 apps (reference-only), left as-is.</li>
+    <li><b>bench-cam was the only real v6 work.</b> It uses <code>driver/gpio.h</code> + <code>driver/ledc.h</code>
+       (split out) and the <b>legacy</b> <code>driver/i2c.h</code> for the camera SCCB. Checked: v6 <b>still ships</b>
+       legacy i2c (<code>components/driver/i2c/include/driver/i2c.h</code>), so no SCCB rewrite — just the
+       driver-split <code>REQUIRES</code>. Confirmed clean (<code>0xe2d40</code> app) with dummy build-time
+       <code>WIFI_SSID</code>/<code>WIFI_PASS</code>; the only remaining "error" was the app's intentional
+       credentials guard (by design, fires on v5 too).</li>
+  </ul>
+
+  <h2 id="s6">6. The whole surface + the size win</h2>
+  <p>Total v6 migration = <b>5 files</b>, all backward-compatible: the <code>vendor/esp-idf</code> submodule bump,
+     the driver-split <code>REQUIRES</code> in 4 CMakeLists, and the <code>board.cpp</code> LEDC zero-init.</p>
+
+  <div class="bars">
+    <h3>fake-08 app binary — v5.4.2 vs v6.0.2 (bar ∝ size; app partition = 1 MB)</h3>
+    <div class="bar"><div class="lab">v5.4.2 · newlib</div><div class="track"><div class="fill b" style="width:100%">969 KB · 5% free</div></div></div>
+    <div class="bar"><div class="lab">v6.0.2 · picolibc</div><div class="track"><div class="fill a" style="width:92.8%">899 KB · 12% free</div></div></div>
+    <p class="legend">To scale (v5's <code>0xf2470</code> ≈ 969 KB = full track): the v6 build
+       (<code>0xe0a60</code> ≈ 899 KB) is <b>~7% smaller</b>, taking partition headroom from <b>5% → 12% free</b>.
+       The Newlib→Picolibc switch is the cause — a smaller C library, for free.</p>
+  </div>
+
+  <h2 id="state">State + landing plan</h2>
+  <ul>
+    <li><b>Board:</b> the S3 CP2104 board holds the <b>v6 Celeste build</b>, idle after the clear — a known-good state.</li>
+    <li><b>Tree:</b> uncommitted at time of writing. Code change → feature branch <code>idf-v6-migration</code> +
+       PR + <code>/review</code> before a rebase-merge; the submodule gitlink bump is part of it. This worklog +
+       this HTML render land in the same change.</li>
+    <li><b>Decision: keep v6.</b> Follow-ups: the superseded display-test/host apps (retire or trivially revive),
+       and then the <b>ESP32-P4 board</b> (GP-1…GP-4) — now on a modern IDF with proper MIPI-DSI support, which
+       is what motivated the bump.</li>
+  </ul>
+
+  <div class="foot">pico-e32 · worklog 2026-07-28 · ESP-IDF v5.4.2 → v6.0.2 · <a href="index.html">← index</a></div>
+</div>
+</body>
+</html>
