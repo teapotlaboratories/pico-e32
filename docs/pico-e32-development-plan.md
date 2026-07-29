@@ -142,7 +142,7 @@ borders.
 
 | Step | Action |
 |---|---|
-| B1 | Build **`libs/z8lua`** (`LUA_NUMBER = z8::fix32`, Lua 5.2) as an **ESP-IDF component**, **compiled as C++** — `fix32` is a C++ type, so it can't build as C — with **`-DLUA_USE_LONGJMP`** so `LUAI_THROW` uses setjmp/longjmp and C++ exceptions can stay disabled. It opens no io/os/loadlib libs and loads carts from memory — needs only `malloc` + `setjmp/longjmp`. **Done & host-verified — see [`firmware/pico-e32-luabench/`](../firmware/pico-e32-luabench/).** |
+| B1 | Build **`libs/z8lua`** (`LUA_NUMBER = z8::fix32`, Lua 5.2) as an **ESP-IDF component**, **compiled as C++** — `fix32` is a C++ type, so it can't build as C — with **`-DLUA_USE_LONGJMP`** so `LUAI_THROW` uses setjmp/longjmp and C++ exceptions can stay disabled. It opens no io/os/loadlib libs and loads carts from memory — needs only `malloc` + `setjmp/longjmp`. **Done & host-verified** (in the since-removed `pico-e32-luabench` Gate-2 app; see the 2026-07-14 worklog). |
 | B2 | Run a fixed micro-benchmark: (i) a tight fixed-point arithmetic loop, (ii) a `sin()` sweep (~32k calls), (iii) a table-churn/alloc loop — **timed with the Lua heap in PSRAM (`heap_caps` SPIRAM allocator) vs internal SRAM**, via `esp_timer`. |
 
 **🚦 GATE #2 — z8lua sustained throughput within ~2–3× of PICO-8's ~4.2 M VM-inst/sec
@@ -181,12 +181,11 @@ capture of the moving sprite + FPS.
 > precompile + SRAM-arena tuning), that is the trigger to switch silicon to the
 > **ESP32-P4** — see the sibling silicon-decision doc.
 
-**Phase-0 status** (firmware in [`../firmware/`](../firmware/); ESP-IDF v5.4.2 vendored at
-`vendor/esp-idf`): both Phase-0 apps now **compile clean for esp32s3** (`make build`).
-`pico-e32-luabench` (Gate #2) also **builds + runs on the host** — z8lua + fix32 confirmed
-working; the on-device build measures the SRAM-vs-PSRAM heap delta. `pico-e32-display-test`
-(Gate #1, i80 blit + FPS) compiles but is **not yet run on hardware**. Findings from actually
-building it: (1) z8lua must compile as **C++** (fix32 is a C++ type) with `-DLUA_USE_LONGJMP`;
+**Phase-0 status** (firmware in [`../firmware/`](../firmware/)): the Phase-0 de-risking apps
+(`pico-e32-luabench`, `pico-e32-display-test`, `pico-e32-host`) were **removed** once superseded by the
+fake-08 port — their gate work stands (results in the `2026-07-14` / `-16` worklogs). Both compiled clean for
+esp32s3; `pico-e32-luabench` (Gate #2) also **built + ran on the host** (z8lua + fix32 confirmed), and
+`pico-e32-display-test` (Gate #1, i80 blit + FPS) compiled. Findings from actually building them: (1) z8lua must compile as **C++** (fix32 is a C++ type) with `-DLUA_USE_LONGJMP`;
 (2) it exposed a real `fix32.h` portability bug on xtensa (plain `int` unconstructible where
 `int32_t == long`) — patched; (3) z8lua numbers are **16.16 fixed point (range ±32768)**, so a
 `for i=1,2000000` loop overflows — keep bounds < 32767.
