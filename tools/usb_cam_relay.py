@@ -13,7 +13,7 @@ Env: CAM_DEVICE (default: auto-detect the first MJPEG-capable node), CAM_W/CAM_H
 CAM_FPS (30), CAM_PORT (8090). Needs ffmpeg. Controls are the camera's own V4L2 controls (reset to auto on
 each replug). Endpoints: GET / (UI), GET /stream (MJPEG), GET /api/controls (JSON), GET /api/set?id&value.
 """
-import subprocess, threading, http.server, socketserver, os, sys, json, fcntl, ctypes, glob
+import subprocess, threading, http.server, socketserver, os, sys, json, fcntl, ctypes, glob, time
 from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -144,10 +144,14 @@ PAGE = ("""<!doctype html><html lang="en"><head><meta charset="utf-8">
   <div class="stage"><img id="v" src="/stream" alt="live"></div>
   <div class="panel">
     <div class="bar">
-      <button class="primary" id="preset">Lock exposure (panel)</button>
+      <button class="primary" id="preset">Panel lock</button>
+      <button id="auto">Auto</button>
+    </div>
+    <div class="bar">
+      <button id="snap">&#128247; Snapshot</button>
       <button id="reset">Reset defaults</button>
     </div>
-    <div class="hint">Controls are the camera's own; they reset to auto when you unplug it.</div>
+    <div class="hint"><b>Panel lock</b>: manual 6&#8202;ms exposure + locked white balance for a bright emissive panel. <b>Snapshot</b> saves the current full-res frame. Controls reset to auto when you unplug the camera.</div>
     <div id="ctls"></div>
   </div>
 </div>
@@ -196,9 +200,20 @@ async function load(){
   });
 }
 $('#reset').onclick=async()=>{for(const g of CTRLS)for(const c of g.controls)if(c.type!=='button')await set(c.id,c.default);load()};
-$('#preset').onclick=async()=>{
-  // manual exposure locked for an emissive panel: dyn-framerate off, manual AE, 6ms, WB manual
+$('#preset').onclick=async()=>{  // panel lock: dyn-framerate off, manual AE, 6ms exposure, manual WB
   await set(0x009a0903,0);await set(0x009a0901,1);await set(0x009a0902,60);await set(0x0098090c,0);load();
+};
+$('#auto').onclick=async()=>{    // back to fully-auto exposure + white balance
+  await set(0x009a0901,3);await set(0x0098090c,1);await set(0x009a0903,1);load();
+};
+$('#snap').onclick=async()=>{    // download the current full-res frame
+  const b=$('#snap');const t=b.textContent;b.textContent='Saving…';b.disabled=true;
+  try{
+    const r=await fetch('/snapshot');const blob=await r.blob();const u=URL.createObjectURL(blob);
+    const ts=new Date().toISOString().replace('T','-').replace(/[:.]/g,'').slice(0,15);
+    const a=document.createElement('a');a.href=u;a.download='bench-'+ts+'.jpg';document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(u),1000);
+  }finally{b.textContent=t;b.disabled=false;}
 };
 load();
 </script></body></html>""")
@@ -227,6 +242,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._send(200, 'application/json', json.dumps({'ok': True, 'value': newv}).encode())
             except Exception as e:
                 self._send(400, 'application/json', json.dumps({'ok': False, 'error': str(e)}).encode())
+        elif path == '/snapshot':
+            with _lock:
+                f = _latest[0]
+            if f is None:
+                self._send(503, 'text/plain', b'no frame yet'); return
+            self.send_response(200)
+            self.send_header('Content-Type', 'image/jpeg')
+            self.send_header('Content-Disposition', 'attachment; filename="bench-%s.jpg"' % time.strftime('%Y%m%d-%H%M%S'))
+            self.send_header('Content-Length', str(len(f))); self.send_header('Connection', 'close'); self.end_headers()
+            try:
+                self.wfile.write(f)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
         elif path == '/stream' or path == '/stream.mjpg':
             self.send_response(200)
             self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
