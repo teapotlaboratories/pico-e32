@@ -10,6 +10,27 @@ actually renders*, per [`.ai/AGENTS.md` → Verifying changes](../../.ai/AGENTS.
   (per [`.ai/AGENTS.md`](../../.ai/AGENTS.md) → *Hardware & flashing notes*). Override with
   `CAPTURE_DIR=` only for a frame being kept as evidence.
 
+## Secondary bench cam — a USB webcam (V4L2)
+
+A plain **USB (UVC) webcam** can serve as a second bench eye — a wide shot of several boards at once, or when
+the ESP cam is busy. It's driven straight off `/dev/video*` via ffmpeg, no firmware:
+
+- **Live webserver:** [`tools/usb_cam_relay.py`](../../tools/usb_cam_relay.py) — a multi-client MJPEG relay
+  (one ffmpeg → any number of browsers, no reconnect gaps). Run it, then open `http://<host>:8090/`.
+  Auto-detects the camera's capture node (survives replug renumbering); override with `CAM_DEVICE=/dev/videoN`,
+  size via `CAM_W`/`CAM_H` (default 2560×1440), rate via `CAM_FPS`, port via `CAM_PORT`.
+- **Exposure config:** [`tools/usb_cam_setup.sh`](../../tools/usb_cam_setup.sh) — locks exposure + white
+  balance and turns off dynamic-framerate, so an emissive panel doesn't make the camera hunt (the USB analogue
+  of the ESP cam's `awb=0`, see *Measuring settings* below). **UVC controls reset to auto on every replug — re-run
+  this after reconnecting.** `CAM_EXPOSURE=<×100µs>` tunes it (~60 = 6 ms for a close panel; raise for a
+  wider/dim framing).
+- **Controls helper:** [`tools/v4l2ctl.py`](../../tools/v4l2ctl.py) — `list` / `set <id|name> <value>`, a tiny
+  `v4l2-ctl` stand-in (no `v4l-utils` needed).
+
+Camera-dependent caveats: **framerate** — cheap "2K" webcams are often 30 fps max at *every* resolution (check
+`tools/v4l2ctl.py list` / the UVC frame descriptors before assuming 60). **Focus** — many are fixed-focus with
+no V4L2 focus control; sharpen by distance or a physical lens ring, not software.
+
 ## Boards on the bench
 
 | role | board | chip |
