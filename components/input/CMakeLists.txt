@@ -12,11 +12,14 @@ if(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/${_input_src}")
     message(FATAL_ERROR "input: unknown INPUT_BACKEND='${INPUT_BACKEND}' (no ${_input_src}); use stub|serial|touch|i2c")
 endif()
 
-# REQUIRES driver: serial uses driver/uart.h; touch/i2c will use driver/i2c. Harmless for stub.
+# REQUIRES esp_driver_uart: the serial + scheduled backends include driver/uart.h. ESP-IDF v6 split the
+# monolithic `driver` component apart, so a component must require the SPECIFIC esp_driver_* that provides
+# its header (esp_driver_uart exists on v5.3+ too, so this stays valid on v5.4.2). The touch/i2c backends
+# pull no driver/ header directly (touch reaches the FT6236 via board_touch_* externs). Harmless for stub.
 idf_component_register(
     SRCS "${_input_src}"
     INCLUDE_DIRS "."
-    REQUIRES driver
+    REQUIRES esp_driver_uart
 )
 message(STATUS "input: backend '${INPUT_BACKEND}' (${_input_src})")
 

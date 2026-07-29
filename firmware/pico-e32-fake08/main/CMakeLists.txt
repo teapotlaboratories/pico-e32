@@ -3,10 +3,13 @@
 idf_component_register(
     SRCS "main.cpp" "${BOARD_DIR}/board.cpp"
     INCLUDE_DIRS "." "${BOARD_DIR}" "${CMAKE_CURRENT_LIST_DIR}/../../../assets"
-    REQUIRES fake08 z8lua LovyanGFX driver esp_timer sdcard_spi input
+    REQUIRES fake08 z8lua LovyanGFX esp_driver_uart esp_driver_gpio esp_driver_ledc esp_driver_i2c esp_timer sdcard_spi input
 )
 # SD-over-SPI is now the board-agnostic components/sdcard_spi (fatfs/sdmmc/sdspi are its private
 # concern); esp_driver_spi reaches board.cpp transitively via sdcard_spi's public REQUIRES.
+# The main component compiles main.cpp (driver/uart.h) + board.cpp (driver/ledc.h, driver/i2c_master.h,
+# driver/gpio.h). ESP-IDF v6 split the monolithic `driver` component, so each header's specific esp_driver_*
+# is required directly (all exist on v5.3+ too, so this stays valid on v5.4.2).
 
 # Opt-in Celeste build: `make build APP=pico-e32-fake08 ... DEFS='-D CELESTE=1'` embeds the real
 # Celeste .p8 (the gitignored assets/celeste_p8.h) instead of the test cart. Off by default.

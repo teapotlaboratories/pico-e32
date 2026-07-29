@@ -134,11 +134,24 @@ static PanelLGFX *s_lcd;
 
 static void backlight_on(int pin) {
     if (pin < 0) return;
-    ledc_timer_config_t t = { .speed_mode=LEDC_LOW_SPEED_MODE, .duty_resolution=LEDC_TIMER_8_BIT,
-                              .timer_num=LEDC_TIMER_0, .freq_hz=5000, .clk_cfg=LEDC_AUTO_CLK };
+    /* Zero-init then assign, rather than a partial designated initializer: the LEDC config structs gained
+     * fields across IDF versions (v6 added ledc_timer_config_t::deconfigure and ledc_channel_config_t::
+     * intr_type/sleep_mode/flags), and a partial initializer trips -Werror=missing-field-initializers on v6.
+     * `= {}` zero-fills every field (including ones we don't set) and is clean on both v5.4.2 and v6.0.2. */
+    ledc_timer_config_t t = {};
+    t.speed_mode      = LEDC_LOW_SPEED_MODE;
+    t.duty_resolution = LEDC_TIMER_8_BIT;
+    t.timer_num       = LEDC_TIMER_0;
+    t.freq_hz         = 5000;
+    t.clk_cfg         = LEDC_AUTO_CLK;
     ledc_timer_config(&t);
-    ledc_channel_config_t c = { .gpio_num=pin, .speed_mode=LEDC_LOW_SPEED_MODE, .channel=LEDC_CHANNEL_0,
-                                .timer_sel=LEDC_TIMER_0, .duty=255, .hpoint=0 };
+    ledc_channel_config_t c = {};
+    c.gpio_num   = pin;
+    c.speed_mode = LEDC_LOW_SPEED_MODE;
+    c.channel    = LEDC_CHANNEL_0;
+    c.timer_sel  = LEDC_TIMER_0;
+    c.duty       = 255;
+    c.hpoint     = 0;
     ledc_channel_config(&c);
 }
 

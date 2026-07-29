@@ -30,6 +30,19 @@
       linked from this index (see <a href="../../../.ai/AGENTS.md">.ai/AGENTS.md</a> → Worklogs).</p>
     <ul class="entries">
       <li>
+        <span class="d">2026-07-28</span>
+        <a class="t" href="2026-07-28-idf-v6-migration.html">ESP-IDF v5.4.2 → v6.0.2 migration</a>
+        <span class="s">Bumped the vendored ESP-IDF a major version so the S3 project shares a modern IDF with the incoming
+          <strong>ESP32-P4</strong> board — and proved it non-regressive first. The whole S3 migration was <strong>two
+          small, backward-compatible changes</strong>: a driver-component-split <code>REQUIRES</code> fix (v6 broke the
+          monolithic <code>driver</code> into <code>esp_driver_*</code>) and a <code>board.cpp</code> LEDC zero-init (v6 added
+          struct fields + <code>-Werror</code>). The S3 board <strong>builds, boots (Picolibc — the old newlib boot-loop risk
+          cleared), and runs</strong> — Celeste clears 100→300 M on hardware at <code>fc=1016</code>, 29.8 fps,
+          camera-confirmed; the binary even shrank (969→899 KB, 5→12% free) on Picolibc. Every actively-used app builds
+          (luabench, fake08, bench-cam); display-test/host are pre-v6 bit-rot (superseded). Total: 5 files, all valid on
+          v5.4.2 too.</span>
+      </li>
+      <li>
         <span class="d">2026-07-19</span>
         <a class="t" href="2026-07-19-playtest-harness-agent-solve.html">Play-test harness → a gym for agent-solved carts + FPS measurement</a>
         <span class="s">Turned the one-off Celeste play-test into a reusable rig aimed at <strong>measuring real on-device
