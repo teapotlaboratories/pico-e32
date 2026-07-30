@@ -1,11 +1,17 @@
-# Bench camera (M5Stack Timer Camera F) — hardware-in-the-loop capture
+# Bench camera — hardware-in-the-loop capture
 
 The bench camera is equipment, not handheld firmware: it is aimed at the panel under test
-and serves a still JPEG over HTTP so display changes can be verified by *looking at what
-actually renders*, per [`.ai/AGENTS.md` → Verifying changes](../../.ai/AGENTS.md#verifying-changes).
+so display changes can be verified by *looking at what actually renders*, per
+[`.ai/AGENTS.md` → Verifying changes](../../.ai/AGENTS.md#verifying-changes).
 
-- **Firmware:** [`firmware/pico-e32-bench-cam`](../../firmware/pico-e32-bench-cam) (target `esp32`, board `m5stack-timer-cam`)
-- **Capture tool:** [`tools/capture_frame.sh`](../../tools/capture_frame.sh)
+> **The bench eye is now a USB (UVC) webcam** driven by [`tools/usb_cam_relay.py`](../../tools/usb_cam_relay.py)
+> (no firmware — see the section below). The original **M5Stack Timer Camera F firmware
+> (`pico-e32-bench-cam`) + its `m5stack-timer-cam` board were REMOVED (2026-07-30)** in favour of the USB
+> webcam. The `esp32` toolchain is no longer installed by `make install`. `tools/capture_frame.sh` +
+> `tools/bench_cam.env` (the M5's HTTP-still capture path) are now **orphaned** — kept only for reference; a
+> still can be grabbed from the USB relay with `ffmpeg -i http://127.0.0.1:8090/stream -frames:v 1 out.jpg`.
+> The M5 rig details below are retained as historical record.
+
 - **Frames land in:** `/tmp/pico-e32-captures/<timestamp>[-label].jpg` — **never the repo**
   (per [`.ai/AGENTS.md`](../../.ai/AGENTS.md) → *Hardware & flashing notes*). Override with
   `CAPTURE_DIR=` only for a frame being kept as evidence.

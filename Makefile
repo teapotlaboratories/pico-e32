@@ -41,12 +41,9 @@ BAUD ?= 460800
 # stale sdkconfig.
 BUILD_DIR := $(CURDIR)/build/$(APP)/$(BOARD)
 
-# Secrets are passed on the command line, never stored in the tree. Used by
-# pico-e32-bench-cam (the bench capture camera):
-#   make flash APP=pico-e32-bench-cam BOARD=m5stack-timer-cam PORT=/dev/ttyUSB0 \
-#        WIFI_SSID='my ssid' WIFI_PASS='my pass'
-# Note: -D puts these in the *gitignored* build dir's CMakeCache.txt, so `make fullclean`
-# after flashing if you don't want them lingering on disk.
+# Secrets passed on the command line, never stored in the tree — a generic hatch for a WiFi-consuming app
+# (none at present; the M5 bench-cam that used it was removed). -D puts these in the *gitignored* build
+# dir's CMakeCache.txt, so `make fullclean` after flashing if you don't want them lingering on disk.
 WIFI_DEFS := $(if $(WIFI_SSID),-D WIFI_SSID="$(WIFI_SSID)") $(if $(WIFI_PASS),-D WIFI_PASS="$(WIFI_PASS)")
 
 # Generic escape hatch for extra CMake -D options, e.g. an app compile flag:
@@ -77,9 +74,9 @@ help:
 	@echo "  boards: $(notdir $(wildcard boards/*))"
 
 # Toolchains installed by `make install` (comma-separated, ESP-IDF install.sh syntax). Covers every target
-# board: esp32 (bench-cam / M5Stack cam), esp32s3 (fake08 / Makerfabs ILI9488), esp32p4 (Guition JC4880P443C).
+# board: esp32s3 (fake08 / Makerfabs ILI9488), esp32p4 (Guition JC4880P443C).
 # Override e.g. `make install IDF_TARGETS=esp32s3` for a single toolchain.
-IDF_TARGETS ?= esp32,esp32s3,esp32p4
+IDF_TARGETS ?= esp32s3,esp32p4
 install:       ; "$(IDF_PATH)/install.sh" $(IDF_TARGETS)
 build:         ; $(IDF) build
 flash:         ; $(IDF) -p "$(PORT)" flash
