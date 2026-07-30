@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GP-2: ESP32-P4 board scaffold + proof-of-life — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8;
+        --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  :root[data-theme="light"]{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;--ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  :root[data-theme="dark"]{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;--border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)} .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;font-family:var(--mono)}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:9px;padding:.9rem 1.05rem;overflow-x:auto;font-size:.82rem;line-height:1.5;font-family:var(--mono)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left}
+  th{background:var(--codebg);font-family:var(--mono);font-size:.82rem}
+  td.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .bad{color:var(--bad);font-weight:600} .ok{color:var(--ok);font-weight:600} .warn{color:var(--warn);font-weight:600}
+  .bars{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.2rem 1.3rem;margin:1.3rem 0}
+  .bars h3{margin:.1rem 0 1rem;font-size:.95rem}
+  .bar{display:grid;grid-template-columns:150px 1fr;align-items:center;gap:.8rem;margin:.55rem 0}
+  .bar .lab{font:600 .8rem/1.2 var(--mono);color:var(--muted)}
+  .bar .track{position:relative;background:var(--codebg);border-radius:7px;height:30px;overflow:hidden}
+  .bar .fill{position:absolute;inset:0 auto 0 0;border-radius:7px;display:flex;align-items:center;justify-content:flex-end;padding-right:.55rem;font:700 .8rem/1 var(--mono);color:#fff;white-space:nowrap}
+  .fill.b{background:linear-gradient(90deg,#c0392b,#e0563f)}
+  .fill.a{background:linear-gradient(90deg,#1a7f4b,#2faa68)}
+  .diag{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.3rem;margin:1.3rem 0}
+  .diag h3{margin:.1rem 0 .4rem;font-size:.95rem}
+  .diag .sub{color:var(--muted);font-size:.82rem;margin:0 0 1rem}
+  .legend{font-size:.78rem;color:var(--muted);margin-top:.7rem}
+  .foot{margin-top:2.6rem;padding-top:1rem;border-top:1px solid var(--border);color:var(--muted);font-size:.85rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <h1>GP-2 · ESP32-P4 board scaffold + proof-of-life</h1>
+  <p class="date">2026-07-29 · stand up the Guition JC4880P443C (ESP32-P4) in the tree and prove <b>build → flash → boot → serial</b> end to end, without regressing the S3 path — no display yet (that's GP-3)</p>
+
+  <div class="tldr">
+    The new <b>ESP32-P4</b> board now <b class="ok">boots our firmware on real hardware</b>. Backed up the 16 MB
+    factory flash first (and hit — then solved — a native-USB read quirk), added
+    <code>boards/guition-jc4880p443c/</code> (target + HEX PSRAM + USB-JTAG console + a <b>v1.x rev-min</b> fix)
+    and a minimal <code>pico-e32-p4-hello</code> app, and watched it come up on serial:
+    <b>esp32p4, 2 cores, rev v1.3, 32 MB PSRAM @200 MHz, 16 MB flash</b>, heartbeat ticking. Two facts the board
+    doc had marked 🟡 are now <b class="ok">confirmed at boot</b>: the 32 MB PSRAM, and that this is
+    <b>early v1.3 silicon</b> — which needed a special build and constrains GP-3.
+  </div>
+
+  <nav aria-label="Contents" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:.85rem 1.1rem;margin:1.4rem 0">
+    <div style="font:600 .74rem/1 var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:.55rem">On this page</div>
+    <ol style="margin:0;padding-left:1.2rem;columns:2;column-gap:2rem;font-size:.92rem">
+      <li><a href="#s1">Board identity</a></li>
+      <li><a href="#s2">Factory backup + the read quirk</a></li>
+      <li><a href="#s3">The scaffold + the app</a></li>
+      <li><a href="#s4">Three build/flash breakages</a></li>
+      <li><a href="#s5">Boot → serial (verified)</a></li>
+      <li><a href="#state">State + next</a></li>
+    </ol>
+  </nav>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:.8rem;margin:1.6rem 0">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">esp32p4</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">rev <b>v1.3</b> · 2 cores + LP · 360 MHz — <b>early silicon</b></div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--ok);font-variant-numeric:tabular-nums">32 MB</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">PSRAM @200 MHz, HEX/X16, AP Memory — <b class="ok">verified at boot</b> (was 🟡)</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">189 KB</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35"><code>p4-hello</code> app (<code>0x2e550</code>) — <b>82% free</b> of the 1 MB partition</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--ok);font-variant-numeric:tabular-nums">16 MB</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">factory flash backed up + <b class="ok">verified</b> (sha256 <code>5e1a3c4d…</code>)</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">3 fixes</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">chip-info field · component-fan-in · <b>v1.x rev-min</b> (the real one)</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--ok);font-variant-numeric:tabular-nums">alive #9</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">heartbeat ticking on serial, uptime advancing — <b class="ok">proof of life</b></div>
+    </div>
+  </div>
+
+  <h2 id="s1">1. Board identity — re-confirmed on the wire</h2>
+  <p><code>esptool flash_id</code> over the board's native USB-Serial-JTAG link, then again in the boot log,
+     matches the board doc: <b>ESP32-P4 rev v1.3, 16 MB flash</b>. It is the only native-USB device on the bench,
+     matched read-only by its stable serial id (MAC <code>80:f1:b2:d3:7e:ca</code>, currently <code>/dev/ttyACM0</code>).</p>
+  <pre>Chip type:  ESP32-P4 (revision v1.3)     Features: Dual Core + LP Core, 400MHz
+Crystal:    40MHz                        Flash:    16MB (mfr 0x68, dev 0x4018)
+MAC:        80:f1:b2:d3:7e:ca            USB mode: USB-Serial/JTAG</pre>
+
+  <h2 id="s2">2. Factory backup first — and a native-USB read quirk</h2>
+  <p>Before writing anything, backed up the full 16 MB factory image so the board can be restored. This surfaced
+     a reliability quirk worth recording for all future P4 flashing here:</p>
+  <ul>
+    <li>A single continuous <code>read_flash 0 0x1000000</code> @460800 <b class="bad">dropped</b> mid-transfer
+       (<em>"Packet content transfer stopped"</em>). 1 MB chunks: 14/16 fine, the 5–7 MB region failed every retry.</li>
+    <li>But a <b>64 KB</b> read of that same region succeeds instantly — so the flash isn't bad; <b>long continuous
+       reads over this USB link drop.</b> The failure just tends to land where the transfer has run longest.</li>
+    <li>Three stubborn 4 KB pages refused every <b>stub-flasher</b> read at both bauds. <b class="ok">The fix: the
+       ROM loader (<code>esptool --no-stub</code>)</b> recovered all three — slow but reliable. (They held real data,
+       so the <code>0xFF</code> placeholder would have been a genuine loss.)</li>
+  </ul>
+
+  <div class="diag">
+    <h3>Backup read strategy — from one big read to reliable pieces</h3>
+    <p class="sub">The escalation that got a complete, offset-correct 16 MB image over a flaky link.</p>
+    <svg viewBox="0 0 820 210" width="100%" role="img" aria-label="Escalation: 16MB continuous read fails; 1MB chunks mostly work; 64KB sectors for the bad region; no-stub 4KB for the 3 stubborn pages; assembled and verified">
+      <defs>
+        <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L7,3 L0,6 z" style="fill:var(--line)"/>
+        </marker>
+      </defs>
+      <rect x="14" y="30" width="150" height="52" rx="9" style="fill:var(--surface);stroke:var(--bad);stroke-width:1.8"/>
+      <text x="89" y="52" style="fill:var(--fg);text-anchor:middle;font:700 11px var(--mono)">16 MB read</text>
+      <text x="89" y="69" style="fill:var(--bad);text-anchor:middle;font:10px var(--mono)">drops @~5.6 MB</text>
+
+      <line x1="164" y1="56" x2="204" y2="56" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah)"/>
+      <rect x="206" y="30" width="150" height="52" rx="9" style="fill:var(--surface);stroke:var(--warn);stroke-width:1.8"/>
+      <text x="281" y="52" style="fill:var(--fg);text-anchor:middle;font:700 11px var(--mono)">1 MB × 16</text>
+      <text x="281" y="69" style="fill:var(--warn);text-anchor:middle;font:10px var(--mono)">14 OK · 2 fail (5–7 MB)</text>
+
+      <line x1="356" y1="56" x2="396" y2="56" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah)"/>
+      <rect x="398" y="30" width="160" height="52" rx="9" style="fill:var(--surface);stroke:var(--warn);stroke-width:1.8"/>
+      <text x="478" y="52" style="fill:var(--fg);text-anchor:middle;font:700 11px var(--mono)">64 KB sectors</text>
+      <text x="478" y="69" style="fill:var(--warn);text-anchor:middle;font:10px var(--mono)">3 pages still fail</text>
+
+      <line x1="558" y1="56" x2="598" y2="56" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah)"/>
+      <rect x="600" y="30" width="200" height="52" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.8"/>
+      <text x="700" y="52" style="fill:var(--fg);text-anchor:middle;font:700 11px var(--mono)">--no-stub 4 KB × 3</text>
+      <text x="700" y="69" style="fill:var(--ok);text-anchor:middle;font:10px var(--mono)">ROM loader → recovered</text>
+
+      <line x1="700" y1="82" x2="700" y2="118" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah)"/>
+      <rect x="250" y="120" width="320" height="58" rx="10" style="fill:var(--codebg);stroke:var(--ok);stroke-width:1.8"/>
+      <text x="410" y="144" style="fill:var(--fg);text-anchor:middle;font:700 12px var(--mono)">assembled 16,777,216 B</text>
+      <text x="410" y="163" style="fill:var(--ok);text-anchor:middle;font:10px var(--mono)">sha256 5e1a3c4d… · 4 offsets re-read = MATCH</text>
+      <line x1="600" y1="70" x2="572" y2="120" style="stroke:var(--line);stroke-width:2;stroke-dasharray:4 3" marker-end="url(#ah)"/>
+    </svg>
+    <p class="legend"><b>Takeaway for all future P4 flashing on this board:</b> prefer <code>--no-stub</code> for
+       reads (or keep reads ≤64 KB); the stub flasher drops long transfers over this USB link. <b>Writes/flash
+       were fine with the stub.</b> Backup lives in the session scratchpad (binary, not the repo) — owner to archive off-box.</p>
+  </div>
+
+  <h2 id="s3">3. The scaffold + the proof-of-life app</h2>
+  <p><code>boards/guition-jc4880p443c/</code> mirrors the S3 board's structure:</p>
+  <ul>
+    <li><b><code>sdkconfig.defaults</code></b> — <code>CONFIG_IDF_TARGET=esp32p4</code>, 16 MB flash, external
+       <b>HEX</b> PSRAM (200 MHz, the P4 default), console pinned to the <b>native USB-Serial-JTAG</b> as
+       <em>primary</em> (this board's only host wire → single stdout, no dual-path stdio-lock surprise), and the
+       <b>v1.x rev-min</b> fix (§4).</li>
+    <li><b><code>board.h</code></b> — the same board-agnostic contract (<code>board_lcd_*</code> + 480×800 geometry),
+       trimmed to the LCD core. Defines <em>neither</em> <code>BOARD_HAS_SD</code> nor <code>BOARD_HAS_TOUCH</code>
+       yet, so those app paths compile out.</li>
+    <li><b><code>board.cpp</code></b> — a <b>stub</b>: <code>board_lcd_init</code> logs + returns
+       <code>ESP_ERR_NOT_SUPPORTED</code>; blit/fill no-op; <code>board_lcd_rgb565</code> is a live pure function.
+       Real ST7701S/MIPI-DSI bring-up lands here in GP-3.</li>
+    <li><b><code>README.md</code></b> — per-board README matching the S3 board's format.</li>
+  </ul>
+  <p><code>firmware/pico-e32-p4-hello/</code> is the minimal app: dumps chip/flash/PSRAM identity, calls the board
+     display seam (stub), and heartbeats every second. Its only job is to prove the P4 path end to end.</p>
+
+  <h2 id="s4">4. Three build/flash breakages — the third is the real one</h2>
+  <table>
+    <tr><th>#</th><th>symptom</th><th>cause</th><th>fix</th></tr>
+    <tr><td>1</td><td class="bad">no member <code>full_revision</code></td><td>field is <code>.revision</code> (format <code>MXX</code>)</td><td><code>chip.revision/100 . %100</code></td></tr>
+    <tr><td>2</td><td class="bad"><code>input_stub.c</code> <code>-Werror</code></td><td><code>main</code> auto-depends on <b>every</b> discovered component; pointing at <code>components/</code> dragged in the whole tree</td><td>drop <code>EXTRA_COMPONENT_DIRS</code> (this app needs no repo component)</td></tr>
+    <tr><td>3</td><td class="bad">bootloader rejects the chip</td><td>IDF v6 min P4 rev defaults to <b>v3.1</b>; this is <b>v1.3</b></td><td><code>SELECTS_REV_LESS_V3</code> + <code>REV_MIN_100</code></td></tr>
+  </table>
+
+  <div class="diag">
+    <h3>The min-revision fork — early v1.x vs v3.x P4 (mutually exclusive)</h3>
+    <p class="sub">IDF's own Kconfig: rev <3.0 and ≥3.0 support are <b>mutually exclusive</b>, "huge hardware difference", ≥3.0 "not compatible with 0.x and 1.x". The stock default rejects this board.</p>
+    <svg viewBox="0 0 820 200" width="100%" role="img" aria-label="First flash rejected because IDF default min rev is v3.1; this chip is v1.3; opting into the less-than-v3 branch with min v1.0 accepts it">
+      <defs>
+        <marker id="ah2" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L7,3 L0,6 z" style="fill:var(--line)"/>
+        </marker>
+      </defs>
+      <rect x="14" y="74" width="176" height="54" rx="9" style="fill:var(--surface);stroke:var(--border);stroke-width:1.6"/>
+      <text x="102" y="97" style="fill:var(--fg);text-anchor:middle;font:700 12px var(--mono)">this chip</text>
+      <text x="102" y="115" style="fill:var(--accent);text-anchor:middle;font:11px var(--mono)">rev v1.3 (early)</text>
+
+      <line x1="190" y1="101" x2="236" y2="101" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah2)"/>
+      <text x="360" y="30" style="fill:var(--muted);text-anchor:middle;font:600 11px var(--mono)">IDF v6 ESP32P4_REV_MIN</text>
+
+      <rect x="240" y="42" width="250" height="52" rx="9" style="fill:var(--surface);stroke:var(--bad);stroke-width:1.8"/>
+      <text x="365" y="63" style="fill:var(--fg);text-anchor:middle;font:700 11px var(--mono)">default: REV_MIN_301 (v3.1)</text>
+      <text x="365" y="81" style="fill:var(--bad);text-anchor:middle;font:10px var(--mono)">bootloader REJECTS v1.3 ✗</text>
+
+      <rect x="240" y="110" width="250" height="52" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.8"/>
+      <text x="365" y="131" style="fill:var(--fg);text-anchor:middle;font:700 11px var(--mono)">SELECTS_REV_LESS_V3 + MIN_100</text>
+      <text x="365" y="149" style="fill:var(--ok);text-anchor:middle;font:10px var(--mono)">min v1.0 → accepts v1.3 ✓</text>
+
+      <line x1="490" y1="136" x2="536" y2="136" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah2)"/>
+      <rect x="538" y="108" width="268" height="56" rx="9" style="fill:var(--codebg);stroke:var(--ok);stroke-width:1.8"/>
+      <text x="672" y="131" style="fill:var(--fg);text-anchor:middle;font:700 11px var(--mono)">boot: Min v1.0 · Max v1.99 · Chip v1.3</text>
+      <text x="672" y="150" style="fill:var(--ok);text-anchor:middle;font:10px var(--mono)">runs — proof of life</text>
+    </svg>
+    <p class="legend"><b>Implication for GP-3:</b> because &lt;3.0 and ≥3.0 P4 silicon differ in hardware, v3.x P4
+       reference code (DSI init, PSRAM timing) may not apply unchanged. Treat this board as early silicon.</p>
+  </div>
+
+  <h2 id="s5">5. Build → flash → boot → serial — verified</h2>
+  <p>Clean esp32p4 build; <code>make flash … BAUD=230400</code> wrote 189,776 bytes, <b class="ok">"Hash of data
+     verified."</b> (the stub flasher is fine for writes). Then the boot log over USB-Serial-JTAG:</p>
+  <pre>I (10) boot: chip revision: v1.3          I (11) boot.esp32p4: SPI Flash Size : 16MB
+I (59) hex_psram: vendor id : 0x0d (AP)  density 0x07 (256 Mbit)  X16 Mode
+I (236) esp_psram: Found 32MB PSRAM device   Speed: 200MHz
+I (1235) app_init: Project name: pico_e32_p4_hello   ESP-IDF: v6.0.2
+I (1235) efuse_init: Min chip rev: v1.0   Max chip rev: v1.99   Chip rev: v1.3
+I (1238) esp_psram: Adding pool of 32768K of PSRAM memory to heap allocator
+I (1242) p4-hello: target=esp32p4  cores=2  silicon_rev=v1.3
+I (1242) p4-hello: flash: 16 MB
+I (1242) p4-hello: PSRAM: initialized=1  size=33554432 bytes (32 MB)
+I (1242) p4-hello: heap free: internal=598355 B  PSRAM=33551752 B
+W (1242) board.p4: board_lcd_init: STUB (GP-2). ... display bring-up is GP-3 — not yet implemented.
+I (1242) p4-hello: board_lcd_init -> ESP_ERR_NOT_SUPPORTED   (panel 480x800)
+I (1242) p4-hello: alive #0 ...  I (10242) p4-hello: alive #9  uptime=8s  free_heap=34118076 B</pre>
+  <div class="tldr">
+    <b class="ok">Acceptance met —</b> P4 build → flash → boot proven end to end; console on native USB-Serial-JTAG
+    works; the board seam reports honestly (stub). <b>Bonus, both were 🟡 in the board doc and are now confirmed:</b>
+    32 MB PSRAM present + initialized @200 MHz, and silicon rev v1.3. PSRAM vendor <code>0x0d</code> = AP Memory,
+    256 Mbit die, X16 (HEX) mode.
+  </div>
+  <p><b>S3 non-regression:</b> the P4 board is purely additive — no shared file touched; the S3 fake08 path is
+     unchanged (already green on v6.0.2 per <code>2b1efbe</code>). Not re-run this session.</p>
+
+  <h2 id="state">State + next</h2>
+  <ul>
+    <li><b>Board:</b> holds <code>pico-e32-p4-hello</code> — a known-good idle state (logs + heartbeats only, never
+       touches hardware). Factory image backed up should a restore be needed.</li>
+    <li><b>Tree:</b> branch <code>gp2-p4-board-scaffold</code> — code change → PR → <code>/review</code> →
+       rebase-merge (commit held until after 17:00 Pacific per the work-hours rule). This worklog + this render
+       land in the same change.</li>
+    <li><b>Next — GP-3:</b> real ST7701S/MIPI-DSI bring-up. Needs this board's schematic/demo package for the init
+       sequence + reset/backlight GPIOs + DSI timing (still unverified), and must account for this being
+       <b>early v1.x P4 silicon</b> (v3.x references may diverge).</li>
+    <li><b>Open:</b> archive the verified factory backup off the ephemeral scratchpad (owner).</li>
+  </ul>
+
+  <div class="foot">pico-e32 · worklog 2026-07-29 · GP-2 P4 board scaffold + proof-of-life · <a href="index.html">← index</a></div>
+</div>
+</body>
+</html>

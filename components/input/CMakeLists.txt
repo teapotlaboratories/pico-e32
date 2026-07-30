@@ -16,11 +16,17 @@ endif()
 # monolithic `driver` component apart, so a component must require the SPECIFIC esp_driver_* that provides
 # its header (esp_driver_uart exists on v5.3+ too, so this stays valid on v5.4.2). The touch/i2c backends
 # pull no driver/ header directly (touch reaches the FT6236 via board_touch_* externs). Harmless for stub.
+# esp_driver_usb_serial_jtag: the serial backend uses it as its transport when the console is native
+# USB-Serial-JTAG (CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG — the ESP32-P4 board); the S3 (UART console) links it
+# but never calls it. Both targets support the peripheral, so requiring it unconditionally is harmless.
 idf_component_register(
     SRCS "${_input_src}"
     INCLUDE_DIRS "."
-    REQUIRES esp_driver_uart
+    PRIV_INCLUDE_DIRS "${CMAKE_CURRENT_LIST_DIR}/../../assets"
+    REQUIRES esp_driver_uart esp_driver_usb_serial_jtag
 )
+# PRIV_INCLUDE_DIRS assets/: the touch backend (input_touch.c) renders O/X/MENU labels from
+# assets/pico8_font.h via the portable deck. Private — only this component's own sources use it.
 message(STATUS "input: backend '${INPUT_BACKEND}' (${_input_src})")
 
 # Opt-in override for the serial backend's auto-release hold length (game-update frames per byte).

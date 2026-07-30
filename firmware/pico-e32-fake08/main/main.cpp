@@ -130,8 +130,9 @@ extern "C" void app_main(void) {
     }
 #endif
 
-    /* fake-08 boot sequence (mirrors source/main.cpp:39-51). */
-    Host    *host   = new Host(0, 0);
+    /* fake-08 boot sequence (mirrors source/main.cpp:39-51). Pass the board's panel size so the host
+     * centres the game blit for this geometry (S3 320x480, P4 480x800). */
+    Host    *host   = new Host(BOARD_LCD_H_RES, BOARD_LCD_V_RES);
     PicoRam *memory = new PicoRam();
     memory->Reset();
     Audio   *audio  = new Audio(memory);
@@ -397,6 +398,36 @@ extern "C" void app_main(void) {
                 printf("TS %u %u %u\n", (unsigned)sfed, (unsigned)smiss, (unsigned)sapplied);
                 fflush(stdout);
             }
+        }
+    }
+#elif defined(FB_DUMP)
+    /* Dev "screenshot over serial": run the loop so the game + touch deck composite into the panel
+     * framebuffer, then stream the live DPI framebuffer (RGB565) over the console once, framed, for a
+     * camera-free host-side PNG (tools/fb_screenshot.py). P4-only (uses board_lcd_framebuffer). */
+    ESP_LOGI(TAG, "FB_DUMP: streaming the framebuffer after warmup");
+    {
+        const int target = 120;   /* ~2 s at 60 Hz resume: deck drawn (frame-0 scanInput) + game settled */
+        for (int f = 0;; f++) {
+            vm->Step();
+            host->drawFrame(vm->GetPicoInteralFb(), vm->GetScreenPaletteMap(), 0);
+            if (f == target) {
+                int w = 0, h = 0;
+                const uint16_t *fb = board_lcd_framebuffer(&w, &h);
+                if (fb && w > 0 && h > 0) {
+                    esp_log_level_set("*", ESP_LOG_NONE);      /* silence logs during the binary blob */
+                    vTaskDelay(pdMS_TO_TICKS(60));
+                    uint8_t hdr[12] = { 0xFB, 0xFB, 0xFB, 0xFB, 'S', 'H', 'O', 'T',
+                                        (uint8_t)(w & 0xff), (uint8_t)(w >> 8),
+                                        (uint8_t)(h & 0xff), (uint8_t)(h >> 8) };
+                    fwrite(hdr, 1, sizeof(hdr), stdout);
+                    fwrite(fb, 2, (size_t)w * h, stdout);      /* raw RGB565, little-endian */
+                    fflush(stdout);
+                    vTaskDelay(pdMS_TO_TICKS(60));
+                    esp_log_level_set("*", ESP_LOG_INFO);
+                    ESP_LOGI(TAG, "FB_DUMP: sent %dx%d framebuffer (%u bytes)", w, h, (unsigned)(w * h * 2));
+                }
+            }
+            host->waitForTargetFps();
         }
     }
 #else

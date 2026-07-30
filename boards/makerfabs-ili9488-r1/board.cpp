@@ -186,6 +186,9 @@ extern "C" uint16_t board_lcd_rgb565(uint8_t r, uint8_t g, uint8_t b) {
     return v;
 }
 
+extern "C" int board_lcd_width(void)  { return BOARD_LCD_H_RES; }
+extern "C" int board_lcd_height(void) { return BOARD_LCD_V_RES; }
+
 extern "C" void board_lcd_selftest(void) {
     if (!s_lcd) { ESP_LOGE(TAG, "selftest: not initialised"); return; }
     const uint32_t cols[3] = { 0xFF0000u, 0x00FF00u, 0x0000FFu };
@@ -277,69 +280,11 @@ extern "C" int board_touch_read(int *xs, int *ys, int max) {
     return out;
 }
 
-/* Draw the touch control deck once (LovyanGFX primitives) — the bottom band below the game. Coordinates
- * match docs/runtime/pico-e32-fake08-touch-ui.html and the zones in components/input/input_touch.c.
- * Goes through the same LovyanGFX device as the game blit, so its coordinate system (incl. ROTATE_180) is
- * identical — deck and game line up. drawFrame writes only y 0..255, so this bottom band is never overdrawn. */
-extern "C" void board_draw_touch_deck(void) {
-    if (!s_lcd) return;
-    auto &g = *s_lcd;
-    g.startWrite();
-    g.fillRect(0, 256, 320, 224, g.color888(0x0d, 0x11, 0x17));      /* deck background */
-    /* d-pad — two rounded bars form the cross (centre 92,376; arms ~140x50) */
-    uint32_t pad = g.color888(0x2c, 0x35, 0x43);
-    g.fillRoundRect(22, 351, 140, 50, 20, pad);
-    g.fillRoundRect(67, 306,  50, 140, 20, pad);
-    g.fillCircle(92, 376, 15, g.color888(0x0e, 0x13, 0x1b));         /* hub */
-    /* direction chevrons (soft blue) */
-    uint32_t gl = g.color888(0x7f, 0xa8, 0xe6);
-    g.fillTriangle(92, 320, 100, 330, 84, 330, gl);                 /* up */
-    g.fillTriangle(92, 432, 100, 422, 84, 422, gl);                 /* down */
-    g.fillTriangle(36, 376, 46, 368, 46, 384, gl);                  /* left */
-    g.fillTriangle(148, 376, 138, 368, 138, 384, gl);               /* right */
-    /* O / X — spheres with a thin coloured ring, gamepad diagonal */
-    g.fillCircle(212, 414, 31, g.color888(0x22, 0x29, 0x33));
-    g.drawCircle(212, 414, 31, g.color888(0xe7, 0x9a, 0xa0));
-    g.fillCircle(272, 352, 31, g.color888(0x22, 0x29, 0x33));
-    g.drawCircle(272, 352, 31, g.color888(0x5f, 0xc4, 0xbb));
-    /* menu pill outline */
-    g.drawRoundRect(131, 272, 58, 22, 11, g.color888(0x4a, 0x55, 0x66));
-    /* labels (default top-left datum; offset by half the glyph box to centre) */
-    g.setTextSize(2);
-    g.setTextColor(g.color888(0xf3, 0xd6, 0xd8)); g.drawString("O", 212 - 6, 414 - 8);
-    g.setTextColor(g.color888(0xcf, 0xee, 0xea)); g.drawString("X", 272 - 6, 352 - 8);
-    g.setTextSize(1);
-    g.setTextColor(g.color888(0x9a, 0xa6, 0xb6)); g.drawString("MENU", 160 - 12, 283 - 3);
-    g.endWrite();
-    ESP_LOGI(TAG, "touch control deck drawn");
-}
+/* board_draw_touch_deck() moved to the shared, PORTABLE deck in components/input/input_touch.c — it
+ * rasterizes the d-pad / O / X / MENU through board_lcd_blit + board_lcd_rgb565 (using board_lcd_width/
+ * height to lay out for any panel), so one implementation serves this board and the P4 with no per-board
+ * drawing code. The zone map that pairs with it lives in the same file. */
 
-/* Dev HUD: draw `fps` centred at the TOP of the game frame. The centred game blit is x 32..287, y 112..367
- * (CENTER_GAME); this readout sits in the black top letterbox just above the game's top edge, so the game blit
- * (which never touches y<112) never overwrites it — it persists and only needs repainting when the integer
- * value changes. Colour-coded to the 30 fps target so a dip is visible at a glance: green = at rate, amber =
- * dipping, red = struggling. (In the touch-deck build, OY=0 puts the game flush to the top and there is no top
- * letterbox — but the play-test builds that stream fps use CENTER_GAME, so the strip above the game is clear.) */
-/* HUD ownership: ESP32Host's generic meter times the render loop (one tick per coroutine resume). For a
- * 30 fps PICO-8 cart that is ~2x the drawn-frame rate, so a play-test loop that knows the true game-frame
- * count sets this flag to take over the HUD (drawing the motion fps) and make the generic meter stand down. */
-extern "C" { volatile int g_hud_owned_by_app = 0; }
-
-extern "C" void board_lcd_draw_fps(int fps) {
-    if (!s_lcd) return;
-    if (fps < 0) fps = 0;
-    if (fps > 999) fps = 999;
-    auto &g = *s_lcd;
-    const int cx = 160, y = 80;                                 /* game centre x=160; y in the top letterbox */
-    char buf[16];
-    snprintf(buf, sizeof(buf), "%d FPS", fps);
-    uint32_t col = fps >= 28 ? g.color888(0x7f, 0xe0, 0x9a)     /* at the 30 fps target */
-                 : fps >= 18 ? g.color888(0xf2, 0xc9, 0x60)     /* dipping */
-                             : g.color888(0xe8, 0x6f, 0x6f);     /* struggling */
-    g.startWrite();
-    g.fillRect(cx - 88, y - 6, 176, 34, g.color888(0x0d, 0x11, 0x17));  /* fixed-width clear box (fits "999 FPS") */
-    g.setTextSize(3);
-    g.setTextColor(col);
-    g.drawString(buf, cx - g.textWidth(buf) / 2, y);            /* manual centre — digit-count-proof */
-    g.endWrite();
-}
+/* The dev FPS HUD (board_lcd_draw_fps) and its g_hud_owned_by_app flag moved to the shared, PORTABLE HUD at
+ * firmware/pico-e32-fake08/main/fps_hud.cpp — it renders through board_lcd_blit + board_lcd_rgb565, so one
+ * implementation serves every board (this ILI9488 board and the P4 ST7701S board) with no per-board text code. */

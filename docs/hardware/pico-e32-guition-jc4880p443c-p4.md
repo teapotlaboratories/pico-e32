@@ -15,11 +15,11 @@ The model name decodes as **JC-4880-P4-43C** → 480×800, ESP32-**P4**, 4.3″.
 
 | | detail | confidence |
 |---|---|---|
-| MCU | **ESP32-P4** rev v1.3 (RISC-V dual-core ~360 MHz, **no native WiFi/BT**) | ✅ esptool |
+| MCU | **ESP32-P4** rev **v1.3 — EARLY silicon** (RISC-V dual-core 360 MHz, **no native WiFi/BT**) | ✅ esptool + boot |
 | Radio | **ESP32-C6** companion (SDIO/esp-hosted) — for WiFi/BT, off the display path | 🟡 vendor/CNX |
-| Flash | **16 MB** | ✅ esptool |
-| PSRAM | 32 MB (per vendor spec) | 🟡 verify |
-| Display | 4.3″ IPS **480×800**, **ST7701S** controller over **MIPI-DSI** | 🟡 multi-source |
+| Flash | **16 MB** (AP/Boya generic) | ✅ esptool + boot |
+| PSRAM | **32 MB, HEX/X16, 200 MHz — AP Memory** (vendor id `0x0d`, 256 Mbit die) | ✅ **verified at boot (GP-2)** |
+| Display | 4.3″ IPS **480×800**, **ST7701S** over **MIPI-DSI** (2-lane @ 500 Mbps, 34 MHz DPI) | ✅ **lit + verified (GP-3/4)** |
 | Touch | **GT911** capacitive, I²C | 🟡 multi-source |
 | Audio | **ES8311** codec, I²C (bonus — the S3 project's Gate-4 audio gap) | 🟡 multi-source |
 | USB | native USB-Serial-JTAG (`303a:1001`), MAC `80:f1:b2:d3:7e:ca` | ✅ observed |
@@ -31,12 +31,54 @@ replug). This P4 is the only native-USB device on the bench, so match it read-on
 (`BOARD=guition-jc4880p443c`), never raw `idf.py`, so the board's `sdkconfig.defaults` (target=esp32p4, PSRAM,
 flash) is layered in.
 
-**Unverified, needed before the driver (from the Guition demo/schematic package):** the ST7701S init
-sequence (the finicky "no black screen" part), DSI lane count (likely 2) + DPHY clock + panel timing,
-the **reset GPIO** and **backlight GPIO/driver** (one source cited reset GPIO23 + backlight GPIO22 via a
-Silergy SY7023 PWM driver, but that may be a *different* Guition P4 board — **do not trust it until
-confirmed against this board's schematic**), and the GT911 I²C pins/address. This is exactly the class of
-"trust the schematic, not a plausible source" caution that cost two days on the S3 rev-1 pin map.
+> ⚠️ **This is EARLY v1.3 P4 silicon — it needs a special build, and it constrains GP-3.** IDF v6
+> defaults the minimum supported P4 revision to **v3.1**, so a stock build's bootloader **refuses to run**
+> (*"requires chip revision [v3.1 - v3.99], this chip is v1.3"*). The board `sdkconfig.defaults` opts into
+> the <3.0 branch: `CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y` + `CONFIG_ESP32P4_REV_MIN_100=y` (min v1.0, the
+> highest that still includes v1.3). IDF marks rev **<3.0 vs ≥3.0 support as mutually exclusive** with
+> "huge hardware difference" — so **v3.x P4 reference code (DSI init, PSRAM timing) may not apply unchanged
+> in GP-3**; treat this as early silicon.
+>
+> **Flashing quirk on this native USB-Serial-JTAG link:** the **stub flasher drops long/large `read_flash`
+> transfers** (fails mid-read, "Packet content transfer stopped"), but **writes/flash are fine**. For reads
+> (e.g. a flash backup), use the **ROM loader — `esptool --no-stub`** (slower but reliable), or keep reads
+> ≤64 KB. This is how the factory backup was completed. See
+> [`../worklog/2026-07-29-gp2-p4-board-scaffold.md`](../worklog/2026-07-29-gp2-p4-board-scaffold.md).
+
+### Display config (GP-3) — ✅ HARDWARE-VERIFIED on this board (2026-07-29)
+
+Sourced from **ESPHome's board-specific model** for this exact panel
+([esphome/esphome#12068](https://github.com/esphome/esphome/pull/12068),
+`components/mipi_dsi/models/guition.py`, model `"JC4880P443"`) and then **confirmed on the glass** — the
+panel lit on the first flash with correct colour + orientation (GP-3/GP-4 worklog). So the values below are
+no longer just a candidate; they are the working config. (The vendor schematic package is still a nice
+second source for the audio/touch pins and any gamma polish, but is off the critical path.) Note this is
+**early v1.x silicon** and the DSI path worked as-is — no v3.x-vs-v1.x divergence hit the display.
+
+| param | value | source |
+|---|---|---|
+| Controller / res | ST7701(S), **480×800**, color order **RGB** | #12068 |
+| DSI | **2 lanes @ 500 Mbps**, DPI pixel clock **34 MHz** | #12068 |
+| H timing | pulse **12**, back porch **42**, front porch **42** | #12068 |
+| V timing | pulse **2**, back porch **8**, front porch **166** | #12068 |
+| **LCD reset** | **GPIO5** | #12068 (mipi_dsi model) |
+| **Backlight** | **GPIO23** (LEDC PWM) | ESPHomeDesigner #254 + search |
+| DPHY power | internal LDO **channel 3 @ 2500 mV** | IDF P4 fixed (`esp_lcd/dsi` test board) |
+| GT911 touch | I²C **SDA GPIO7 / SCL GPIO8**, **reset GPIO3**, 400 kHz | ESPHomeDesigner #254 |
+| ES8311 audio | addr **0x18**, I²C SDA7/SCL8, I2S LRCLK10 / BCLK12 / MCLK13, mic-in48, spk-out9 | ESPHomeDesigner #254 |
+
+The full 37-command ST7701 init sequence is captured verbatim in the GP-3 worklog. **Correction to the
+earlier note:** the "reset GPIO23 / backlight GPIO22" source was **wrong for this board** — LCD reset is
+**GPIO5**, GPIO3 is the *touch* reset, GPIO23 is backlight. Exactly the "trust the schematic, not a
+plausible source" trap. The **authoritative** source remains the vendor package
+`JC4880P443C_I_W.zip` (pin map + schematics + Arduino ST7701S demo), linked from
+[MiniWebRadio #791](https://github.com/schreibfaul1/ESP32-MiniWebRadio/issues/791) — its direct link now
+serves an HTML portal, so it needs manual retrieval.
+
+**Feasibility (GP-3) — checked in IDF v6.0.2:** MIPI-DSI is viable here — `esp_lcd/dsi` (bus/DBI/DPI) +
+the P4 DPHY LL are present, and there is **no chip-revision guard** in the DSI path. DPHY power is the
+LDO channel-3 @ 2500 mV above. The one thing only first light will settle: whether the DPHY on **early
+v1.x** silicon behaves like the v3.x parts these references were tuned on.
 
 ## Portability principle (the hard constraint)
 
@@ -63,10 +105,12 @@ S3 is untouched:
 | # | phase | status |
 |---|---|---|
 | **GP-1** | **Portability foundation** — ✅ **DONE**: `make install` now covers `esp32p4` (via `IDF_TARGETS`), P4-toolchain install verified. LovyanGFX needed no change (already multi-targets incl. p4); S3 build path untouched (`install` ≠ `build`). | ✅ |
-| **GP-2** | **P4 board scaffold + proof-of-life** — new `boards/guition-jc4880p443c/` (`sdkconfig.defaults` target=esp32p4 + 16 MB flash + PSRAM/DSI, `board.h` 480×800 + `BOARD_HAS_*`, `board.cpp` stub); a minimal display-test build that flashes to `ttyACM0` and logs over serial → proves **P4 build → flash → boot** end to end. | ☐ |
-| **GP-3** | **Display bring-up (the core)** — implement `board_lcd_*` via `esp_lcd_mipi_dsi` + ST7701S manual init (lanes, DPHY clock, timing, reset/backlight GPIOs), PSRAM framebuffer, handle the ST7701S-on-DSI rotation quirk (PPA hardware-rotate) so 480×800 renders upright. | ☐ |
-| **GP-4** | **Gate-1 verification on the real glass** — fill R/G/B then an L-pattern; confirm **colour + orientation** on the bench camera (re-aimed at the P4 panel). Never trust a checksum — the panel is the oracle. | ☐ |
-| — | fake-08 runtime on P4 (RISC-V re-validation of Gate #2 + input + audio) — **DEFERRED**, out of this scope; built on the same `board.h` seam so it drops on later. | — |
+| **GP-2** | **P4 board scaffold + proof-of-life** — ✅ **DONE (2026-07-29).** `boards/guition-jc4880p443c/` (`sdkconfig.defaults` target=esp32p4 + 16 MB flash + HEX PSRAM + USB-Serial-JTAG console + **v1.x rev-min**, `board.h` 480×800, `board.cpp` stub) + `firmware/pico-e32-p4-hello/` (chip/PSRAM dump + heartbeat). **Build → flash → boot proven on serial**; factory flash backed up first. **Bonus: 32 MB PSRAM + rev v1.3 confirmed at boot.** See [worklog](../worklog/2026-07-29-gp2-p4-board-scaffold.md). | ✅ |
+| **GP-3** | **Display bring-up (the core)** — ✅ **DONE (2026-07-29).** `board.cpp` implements `board_lcd_*` via IDF's built-in `esp_lcd/dsi`: LDO ch3 → DSI bus (2×500 Mbps) → DBI + hand-rolled ST7701 37-cmd init → DPI (34 MHz) + PSRAM framebuffer; reset G5, backlight G23. **First light on the first flash**, zero init errors on early v1.x silicon. The ST7701S-on-DSI rotation quirk turned out **not needed** (native-portrait renders upright). See [worklog](../worklog/2026-07-29-gp3-p4-display-research.md). | ✅ |
+| **GP-4** | **Gate-1 verification on the real glass** — ✅ **DONE (2026-07-29).** RGB fills + four corner markers on the bench camera: **RED-TL · GREEN-TR · BLUE-BL · WHITE-BR** exactly as drawn → **colour order correct (no BGR swap), orientation upright**. The panel confirmed it, not a checksum. | ✅ |
+| **GP-5** | **Input (serial backend + GT911 touch)** — ✅ **DONE (2026-07-30).** Two input paths on the same `input.h` seam, both hardware-verified. **(a) Serial input — ✅ VERIFIED:** ported the S3's `input_serial` backend; its transport is now console-config-conditional (`CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG` → native USB-Serial-JTAG on P4, else UART0 on S3 — one file, S3 unchanged). `pico-e32-p4-hello` drives an on-panel marker from `l/r/u/d`/`z`/`x`; injecting keys over USB-JTAG produced exact held masks + marker moves (`held=0x02` right, `0x08` down, `0x10` O, `0x20` X, `0x01` left) — the full host→backend→app path works. **(b) GT911 touch — ✅ VERIFIED on hardware (2026-07-30):** `board_touch_init`/`board_touch_read` (v6 `i2c_master`, 16-bit regs) + `BOARD_HAS_TOUCH`; controller `GT911 id "911" @ 0x5D, SDA7/SCL8`. **Owner tapped the panel — all buttons register correctly**, so the GT911 read + zone mapping are confirmed (closes the GP-5b HITL gap). The approved control deck (d-pad + O/X + MENU, `pico-e32-fake08-touch-ui.html`) renders on the P4 via a **portable** `input_touch.c`: geometry-derived zones (reproduce the S3's 320×480 layout exactly, scale to 480×800) + a deck renderer through `board_lcd_blit` (S3 LovyanGFX deck removed; added `board_lcd_width/height` to the seam), with gradient d-pad bars (rounded) + chevrons + spherical O/X buttons matching the mockup. | ✅ |
+| **GP-6** | **ES8311 audio** — 🅱️ **BACKLOG (deferred 2026-07-29).** Onboard codec, a bonus for the S3's parts-blocked Gate-4 audio gap. ES8311 I²C **0x18** (shared SDA7/SCL8), I2S LRCLK **10** / BCLK **12** / MCLK **13**, spk-out **9**. Needs HITL (hear the tone). Parked while feature parity (GP-7) lands. | 🅱️ |
+| **GP-7** | **Feature parity — fake-08 runtime on P4** — ✅ **CORE DONE (2026-07-29).** `pico-e32-fake08` builds + runs for `BOARD=guition-jc4880p443c`: z8lua + fake-08 on **RISC-V**, **real Celeste renders on the P4 panel** (title → gameplay room) driven over serial input — camera-verified. Made the host geometry-agnostic (runtime `OX/OY` from the panel size via the Host ctor; auto-centred 256×256 on 480×800; S3 unchanged). **Fixed a RISC-V-only z8lua bug** (see below). **Gate #2 re-validated on RISC-V:** Celeste computes at **~8 ms/frame** (Step ~5.4 + draw ~2.7 ms, ~120 fps headroom, worst-frame ~13–21 ms) — ~2× the S3, comfortably 30/60-capable; gameplay video captured. See [worklog](../worklog/2026-07-29-gp3-p4-display-research.md). | ✅ |
 
 ## Reference implementations (for the ST7701S init + pins)
 
@@ -81,5 +125,8 @@ S3 is untouched:
 ## Open questions for the owner
 
 1. **Guition demo/schematic package** — if it's available locally, it's the authoritative source for the
-   ST7701S init sequence + pin map (beats reverse-engineering from third-party repos).
-2. **Panel verification** — re-aim the bench camera at the P4 panel, or eyeball the first fills?
+   ST7701S init sequence + pin map (beats reverse-engineering from third-party repos). **Now doubly
+   important given this is early v1.x silicon** — third-party P4 DSI repos likely target v3.x.
+2. **Panel verification (GP-4)** — re-aim the bench camera at the P4 panel, or eyeball the first fills?
+3. ~~**Factory backup archival**~~ — RESOLVED (2026-07-29): the verified 16 MB factory image (sha256
+   `5e1a3c4d…`) is archived at `~/pico-e32-backups/guition-jc4880p443c-factory-16MB-2026-07-29.bin`.

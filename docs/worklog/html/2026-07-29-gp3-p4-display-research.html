@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GP-3 kickoff: P4 ST7701S/MIPI-DSI feasibility + config — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8;
+        --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  :root[data-theme="light"]{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;--ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  :root[data-theme="dark"]{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;--border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)} .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;font-family:var(--mono)}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:9px;padding:.9rem 1.05rem;overflow-x:auto;font-size:.75rem;line-height:1.5;font-family:var(--mono)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left}
+  th{background:var(--codebg);font-family:var(--mono);font-size:.82rem}
+  .bad{color:var(--bad);font-weight:600} .ok{color:var(--ok);font-weight:600} .warn{color:var(--warn);font-weight:600}
+  .diag{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.3rem;margin:1.3rem 0}
+  .diag h3{margin:.1rem 0 .4rem;font-size:.95rem}
+  .diag .sub{color:var(--muted);font-size:.82rem;margin:0 0 1rem}
+  .legend{font-size:.78rem;color:var(--muted);margin-top:.7rem}
+  .foot{margin-top:2.6rem;padding-top:1rem;border-top:1px solid var(--border);color:var(--muted);font-size:.85rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <h1>GP-3 · P4 ST7701S/MIPI-DSI display bring-up — FIRST LIGHT ✅</h1>
+  <p class="date">2026-07-29 · de-risk → implement → verify the 480×800 ST7701S display in one day: DSI feasibility, config from ESPHome's board model, a hand-rolled driver, and first light camera-confirmed with correct colour + orientation</p>
+
+  <div class="tldr">
+    <b class="ok">DONE — the panel lights.</b> Feasibility confirmed (MIPI-DSI viable on this IDF v6.0.2: bus/DBI/DPI
+    + P4 DPHY, <b>no chip-revision guard</b>, DPHY power = internal LDO ch3 @ 2500 mV) → config sourced from
+    ESPHome's board-specific model (PR #12068, exact panel) → <b>hand-rolled the DSI driver in board.cpp</b> →
+    first light on the first flash. Serial: <code>board_lcd_init -&gt; ESP_OK</code>, all 37 init writes clean on
+    <b>early v1.x silicon</b>. Camera (P4 = right panel): the four corner markers land
+    <b class="ok">RED-TL · GREEN-TR · BLUE-BL · WHITE-BR</b> exactly as drawn → <b>colour order correct (no BGR
+    swap), orientation upright (no rotation needed)</b>. The ESPHome-sourced config is now hardware-validated on
+    this board; the "trust the schematic" risk is retired by the panel itself. This also satisfies <b>GP-4</b>.
+  </div>
+
+  <h2>Feasibility — MIPI-DSI on this board (IDF v6.0.2)</h2>
+  <ul>
+    <li><code>esp_lcd/dsi</code> ships the DSI <b>bus + DBI (command) + DPI (video)</b> driver.</li>
+    <li>P4 <b>DPHY</b> LL present (<code>esp_hal_lcd/esp32p4/.../mipi_dsi_phy_ll.h</code>); <code>SOC_MIPI_DSI_SUPPORTED 1</code>.</li>
+    <li><b class="ok">No chip-revision guard</b> in the DSI path — the driver does not refuse early silicon.</li>
+    <li>DPHY power = internal LDO <b>channel 3 @ 2500 mV</b> (P4-fixed; from the IDF DSI test board).</li>
+    <li><b>No built-in ST7701 in IDF</b> — use the managed <code>esp_lcd_st7701</code> (takes a custom init) or hand-roll DBI.</li>
+  </ul>
+
+  <div class="diag">
+    <h3>The GP-3 datapath to build</h3>
+    <p class="sub">Each stage's parameters are now known (below) except the DPHY-on-v1.x behaviour, which only first light settles.</p>
+    <svg viewBox="0 0 820 128" width="100%" role="img" aria-label="LDO ch3 2500mV powers the DPHY; DSI bus 2 lanes 500Mbps; DBI sends the ST7701 init; DPI streams video at 34MHz; ST7701S 480x800 panel">
+      <defs><marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L7,3 L0,6 z" style="fill:var(--line)"/></marker></defs>
+      <g style="font-family:var(--mono)">
+        <rect x="10" y="46" width="120" height="46" rx="8" style="fill:var(--surface);stroke:var(--warn);stroke-width:1.6"/>
+        <text x="70" y="68" style="fill:var(--fg);text-anchor:middle;font:700 10px var(--mono)">LDO ch3</text>
+        <text x="70" y="83" style="fill:var(--warn);text-anchor:middle;font:9px var(--mono)">2500 mV → DPHY</text>
+        <line x1="130" y1="69" x2="158" y2="69" style="stroke:var(--line);stroke-width:2" marker-end="url(#a)"/>
+        <rect x="160" y="46" width="130" height="46" rx="8" style="fill:var(--surface);stroke:var(--accent);stroke-width:1.6"/>
+        <text x="225" y="68" style="fill:var(--fg);text-anchor:middle;font:700 10px var(--mono)">DSI bus</text>
+        <text x="225" y="83" style="fill:var(--muted);text-anchor:middle;font:9px var(--mono)">2 lanes · 500 Mbps</text>
+        <line x1="290" y1="69" x2="318" y2="69" style="stroke:var(--line);stroke-width:2" marker-end="url(#a)"/>
+        <rect x="320" y="24" width="130" height="40" rx="8" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+        <text x="385" y="42" style="fill:var(--fg);text-anchor:middle;font:700 10px var(--mono)">DBI: init</text>
+        <text x="385" y="56" style="fill:var(--muted);text-anchor:middle;font:9px var(--mono)">37-cmd ST7701</text>
+        <rect x="320" y="74" width="130" height="40" rx="8" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+        <text x="385" y="92" style="fill:var(--fg);text-anchor:middle;font:700 10px var(--mono)">DPI: video</text>
+        <text x="385" y="106" style="fill:var(--muted);text-anchor:middle;font:9px var(--mono)">34 MHz · timing</text>
+        <line x1="450" y1="69" x2="478" y2="69" style="stroke:var(--line);stroke-width:2" marker-end="url(#a)"/>
+        <rect x="480" y="40" width="150" height="58" rx="8" style="fill:var(--codebg);stroke:var(--accent);stroke-width:1.8"/>
+        <text x="555" y="64" style="fill:var(--fg);text-anchor:middle;font:700 11px var(--mono)">ST7701S</text>
+        <text x="555" y="82" style="fill:var(--muted);text-anchor:middle;font:9px var(--mono)">480×800 · reset G5</text>
+        <rect x="648" y="40" width="160" height="58" rx="8" style="fill:var(--surface);stroke:var(--border);stroke-width:1.4;stroke-dasharray:5 3"/>
+        <text x="728" y="60" style="fill:var(--muted);text-anchor:middle;font:9px var(--mono)">backlight G23 (PWM)</text>
+        <text x="728" y="78" style="fill:var(--muted);text-anchor:middle;font:9px var(--mono)">touch GT911 · SDA7/SCL8</text>
+      </g>
+    </svg>
+  </div>
+
+  <h2>The config — from ESPHome's board-specific model (PR #12068)</h2>
+  <p>The finicky ST7701S init + timing + reset were the GP-3 blocker. ESPHome merged a reviewed, on-hardware model
+     for this <em>exact</em> panel — <code>components/mipi_dsi/models/guition.py</code>, model <code>"JC4880P443"</code>.</p>
+  <table>
+    <tr><th>param</th><th>value</th><th>source</th></tr>
+    <tr><td>controller / res / color</td><td>ST7701(S) · 480×800 · RGB</td><td>#12068</td></tr>
+    <tr><td>DSI</td><td><b>2 lanes @ 500 Mbps</b>, DPI clock <b>34 MHz</b></td><td>#12068</td></tr>
+    <tr><td>H timing</td><td>pulse 12 · bp 42 · fp 42</td><td>#12068</td></tr>
+    <tr><td>V timing</td><td>pulse 2 · bp 8 · fp 166</td><td>#12068</td></tr>
+    <tr><td><b>LCD reset</b></td><td class="ok"><b>GPIO5</b></td><td>#12068</td></tr>
+    <tr><td><b>backlight</b></td><td>GPIO23 (LEDC PWM)</td><td>ESPHomeDesigner #254</td></tr>
+    <tr><td>DPHY power</td><td>LDO ch3 @ 2500 mV</td><td>IDF (P4 fixed)</td></tr>
+    <tr><td>GT911 touch</td><td>I²C SDA7 / SCL8, reset 3, 400 kHz</td><td>ESPHomeDesigner #254</td></tr>
+    <tr><td>ES8311 audio</td><td>0x18, SDA7/SCL8, I2S LRCLK10/BCLK12/MCLK13, mic48, spk9</td><td>ESPHomeDesigner #254</td></tr>
+  </table>
+
+  <div class="tldr" style="border-left-color:var(--warn)">
+    <b class="warn">Pin correction (the "trust the schematic" trap, again) —</b> the doc carried a source claiming
+    <em>"reset GPIO23 / backlight GPIO22."</em> Against the board-specific model that is <b>wrong for this board</b>:
+    <b>LCD reset = GPIO5</b>, GPIO3 is the <em>touch</em> reset, GPIO23 is backlight. The one authoritative source
+    for every pin is the vendor package <code>JC4880P443C_I_W.zip</code> (schematics + Arduino demo) linked from
+    MiniWebRadio #791 — its direct link now serves an HTML portal, so it needs manual retrieval.
+  </div>
+
+  <h2>Full ST7701S init sequence (verbatim, model JC4880P443)</h2>
+  <p><code>0xFF,0x77,0x01,0x00,0x00,0xNN</code> selects command bank NN; the framework appends DCS <code>0x11</code>
+     (sleep-out) + <code>0x29</code> (display-on) after this vendor sequence.</p>
+  <pre>(0xFF,0x77,0x01,0x00,0x00,0x13) (0xEF,0x08) (0xFF,0x77,0x01,0x00,0x00,0x10)
+(0xC0,0x63,0x00) (0xC1,0x0D,0x02) (0xC2,0x10,0x08) (0xCC,0x10)
+(0xB0,0x80,0x09,0x53,0x0C,0xD0,0x07,0x0C,0x09,0x09,0x28,0x06,0xD4,0x13,0x69,0x2B,0x71)
+(0xB1,0x80,0x94,0x5A,0x10,0xD3,0x06,0x0A,0x08,0x08,0x25,0x03,0xD3,0x12,0x66,0x6A,0x0D)
+(0xFF,0x77,0x01,0x00,0x00,0x11)
+(0xB0,0x5D) (0xB1,0x58) (0xB2,0x87) (0xB3,0x80) (0xB5,0x4E) (0xB7,0x85) (0xB8,0x21)
+(0xB9,0x10,0x1F) (0xBB,0x03) (0xBC,0x00) (0xC1,0x78) (0xC2,0x78) (0xD0,0x88)
+(0xE0,0x00,0x3A,0x02)
+(0xE1,0x04,0xA0,0x00,0xA0,0x05,0xA0,0x00,0xA0,0x00,0x40,0x40)
+(0xE2,0x30,0x00,0x40,0x40,0x32,0xA0,0x00,0xA0,0x00,0xA0,0x00,0xA0,0x00)
+(0xE3,0x00,0x00,0x33,0x33) (0xE4,0x44,0x44)
+(0xE5,0x09,0x2E,0xA0,0xA0,0x0B,0x30,0xA0,0xA0,0x05,0x2A,0xA0,0xA0,0x07,0x2C,0xA0,0xA0)
+(0xE6,0x00,0x00,0x33,0x33) (0xE7,0x44,0x44)
+(0xE8,0x08,0x2D,0xA0,0xA0,0x0A,0x2F,0xA0,0xA0,0x04,0x29,0xA0,0xA0,0x06,0x2B,0xA0,0xA0)
+(0xEB,0x00,0x00,0x4E,0x4E,0x00,0x00,0x00) (0xEC,0x08,0x01)
+(0xED,0xB0,0x2B,0x98,0xA4,0x56,0x7F,0xFF,0xFF,0xFF,0xFF,0xF7,0x65,0x4A,0x89,0xB2,0x0B)
+(0xEF,0x08,0x08,0x08,0x45,0x3F,0x54) (0xFF,0x77,0x01,0x00,0x00,0x00)</pre>
+
+  <h2>Implementation + first light (VERIFIED — satisfies GP-4)</h2>
+  <p>No <code>esp_lcd_st7701</code> component is vendored, so the driver is <b>hand-rolled</b> in
+     <code>board.cpp</code> against IDF's built-in <code>esp_lcd/dsi</code> (self-contained, no download).
+     <code>board_lcd_init</code>: LDO ch3 power → reset G5 → <code>esp_lcd_new_dsi_bus</code> (2×500) →
+     <code>esp_lcd_new_panel_io_dbi</code> + 37-cmd ST7701 init via <code>tx_param</code> + DCS 0x11/0x29 →
+     <code>esp_lcd_new_panel_dpi</code> (34 MHz, RGB565, PSRAM FB) → backlight G23. Fill flushes the FB with
+     <code>esp_cache_msync</code>; <code>rgb565</code> is standard LE (no swap).</p>
+  <div class="tldr">
+    <b class="ok">Serial —</b> <code>board_lcd_init -&gt; ESP_OK</code>;
+    <code>ST7701S/MIPI-DSI up: 480x800, 2-lane @ 500 Mbps, DPI 34 MHz</code>. Every stage (LDO, bus, all 37 DBI
+    writes, sleep-out/display-on, DPI init) returned ESP_OK — so the <b>DPHY works on early v1.x silicon</b>,
+    the one thing feasibility couldn't settle on paper.
+  </div>
+  <div class="tldr">
+    <b class="ok">Camera (the oracle) —</b> the P4 panel (right of the two-panel frame; S3 Celeste idle is centre)
+    lit on the first flash. RGB fills initially blew out orange — the camera was tuned dark for the S3, so the
+    panel was just <em>bright</em>, not miscoloured. Dropping the relay's exposure resolved the four corner
+    markers: <b>RED-TL · GREEN-TR · BLUE-BL · WHITE-BR</b>, exactly as drawn. Therefore: <b>colour order correct
+    (no BGR swap)</b>, <b>orientation upright (rotation quirk not needed)</b>, and the <b>ESPHome-sourced config
+    is validated on this exact board.</b> Evidence: <code>/tmp/pico-e32-captures/gp3-markers.jpg</code>.
+  </div>
+  <div class="diag">
+    <h3>First-light corner-marker key (what the camera showed)</h3>
+    <p class="sub">Portrait 480×800; each marker in the corner it was drawn — geometry + colour both confirmed.</p>
+    <svg viewBox="0 0 300 440" width="150" role="img" aria-label="Panel with red top-left, green top-right, blue bottom-left, white bottom-right corner markers">
+      <rect x="30" y="20" width="240" height="400" rx="10" style="fill:#000;stroke:var(--border);stroke-width:2"/>
+      <rect x="46" y="36" width="70" height="70" rx="4" style="fill:#e00"/>
+      <rect x="184" y="36" width="70" height="70" rx="4" style="fill:#0c0"/>
+      <rect x="46" y="334" width="70" height="70" rx="4" style="fill:#00e"/>
+      <rect x="184" y="334" width="70" height="70" rx="4" style="fill:#fff"/>
+      <text x="150" y="230" style="fill:var(--muted);text-anchor:middle;font:11px var(--mono)">480×800</text>
+      <text x="81" y="128" style="fill:var(--muted);text-anchor:middle;font:9px var(--mono)">RED</text>
+      <text x="219" y="128" style="fill:var(--muted);text-anchor:middle;font:9px var(--mono)">GREEN</text>
+      <text x="81" y="326" style="fill:var(--muted);text-anchor:middle;font:9px var(--mono)">BLUE</text>
+      <text x="219" y="326" style="fill:var(--muted);text-anchor:middle;font:9px var(--mono)">WHITE</text>
+    </svg>
+  </div>
+  <h2>GP-5a · Serial input backend ported to P4 — VERIFIED</h2>
+  <p>To unblock input without physical access, ported the S3's <code>input_serial</code> backend. Only the
+     <b>transport</b> is board-specific (S3 = UART0; P4 console = native USB-Serial-JTAG), so
+     <code>input_serial.c</code> is now conditional on <code>CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG</code> —
+     <b>one file, S3 path byte-for-byte unchanged</b>. <code>pico-e32-p4-hello</code> drives an on-panel
+     marker: <code>l/r/u/d</code> move it, <code>z</code>=O green, <code>x</code>=X red.</p>
+  <div class="tldr">
+    <b class="ok">Verified end to end over serial —</b> injecting keys on <code>/dev/ttyACM0</code> and reading
+    the log back on the same USB-JTAG link: <code>rrr → held=0x02, x 220→320</code>;
+    <code>ddd → 0x08, y 380→480</code>; <code>z → 0x10</code>; <code>x → 0x20</code>;
+    <code>lll → 0x01, x 300→200</code>. Masks match <code>input.h</code> exactly and the marker tracks —
+    host → USB-JTAG → backend → app all work. <b>Camera-confirmed:</b> the cyan marker renders on the P4
+    panel and moved between two frames (top-left → lower). Also fixed a pre-existing latent v6
+    <code>-Werror=misleading-indentation</code> in <code>input_serial.c</code> (the S3's v6 builds used the
+    <code>scheduled</code> backend, so this file hadn't been recompiled on v6).
+  </div>
+
+  <h2>GP-5b · GT911 touch — controller up, touch-point HITL deferred</h2>
+  <p>Added <code>board_touch_init</code>/<code>board_touch_read</code> (v6 <code>i2c_master</code>, GT911's
+     <b>16-bit</b> register map) + <code>BOARD_HAS_TOUCH</code>; the app polls ~33 Hz and logs points. Pins from
+     ESPHomeDesigner #254: I²C <b>SDA GPIO7 / SCL GPIO8</b>, 400 kHz, addr <b>0x5D</b>.</p>
+  <div class="tldr">
+    <b class="ok">Controller detection VERIFIED —</b> serial: <code>GT911 touch up: id "911" @ 0x5D (SDA=7 SCL=8)</code>,
+    <code>board_touch_init -&gt; OK</code>. The product-ID probe (<code>0x8140</code> → "911") succeeded, so the
+    I²C bus, the SDA7/SCL8 pins, and the 0x5D address are all correct.
+  </div>
+  <div class="tldr" style="border-left-color:var(--warn)">
+    <b class="warn">Touch points UNVERIFIED (honest blocker) —</b> no points registered, and the
+    <b>panel was not physically reachable</b> this session, so no one could touch it. Added a
+    <code>TOUCH_DEBUG</code> build (logs the raw <code>0x814E</code> status) to disambiguate a parse bug from
+    "no touch happened," but it needs a finger on the glass. <code>board_touch_read</code> follows the GT911
+    spec but is untested; touch↔display axis alignment is likewise unconfirmed (same class as the S3's
+    <code>DP-9</code>). <b>Resume:</b> flash <code>pico-e32-p4-hello</code>, watch serial, touch the corners.
+  </div>
+  <h2>GP-7 · Feature parity — real Celeste on the P4 (RISC-V) ✅ core</h2>
+  <p>Built the existing <code>pico-e32-fake08</code> app for the P4 board — same runtime, same cart, same
+     <code>board.h</code> seam: <code>DEFS='-D CELESTE=1 -D FORCE_FLASH_CART=1 -D CENTER_GAME=1 -D INPUT_BACKEND=serial'</code>.
+     Three S3-neutral changes: (1) host geometry-agnostic — <code>ESP32Host.cpp</code> computes
+     <code>OX/OY</code> at runtime from the panel size the app passes to <code>Host(BOARD_LCD_H_RES,V_RES)</code>
+     (S3 320×480 unchanged; P4 auto-centres 256² → 112,272 on 480×800); (2) fake08 app
+     <code>REQUIRES += esp_lcd esp_mm</code>; (3) the RISC-V z8lua fix below.</p>
+  <div class="tldr" style="border-left-color:var(--bad)">
+    <b class="bad">★ RISC-V z8lua bug (the real blocker) —</b> first P4 boot panicked
+    <code>bad conversion number-&gt;int</code> → boot-loop. Instrumented the check: <code>ti=-4660</code> (ok)
+    but <b><code>tu=0</code></b> — <code>lua_tounsigned(fix32(-0x1234))</code> gave 0, not 0xFFFFEDCC.
+    <code>llimits.h</code>'s generic <code>lua_number2unsigned</code> runs through a <code>floor()</code>/modulo
+    path in <b>double</b>, then casts a negative double to unsigned — which <b>wraps on Xtensa but RISC-V
+    saturates to 0</b> (<code>fcvt.wu</code>). Fixed in z8lua's fix32 config: convert via <b>int32</b>
+    (<code>(LUA_UNSIGNED)(int32_t)(n)</code>), never <code>double</code> — arch-independent. This is the
+    "RISC-V re-validation" risk made concrete.
+  </div>
+  <div class="tldr">
+    <b class="ok">Camera-verified —</b> real Celeste renders on the P4 panel: the <b>title screen</b>
+    (<code>gp7-celeste-title.jpg</code>) and, after serial input drove it in, a <b>gameplay room</b>
+    (<code>gp7-celeste-play.jpg</code>). Serial: <code>loading celeste.p8</code> → <code>entering GameLoop</code>
+    → <code>serial input on USB-Serial-JTAG</code>, no panic. z8lua + fake-08 + display + input all work on
+    RISC-V — <b>feature parity with the S3.</b>
+  </div>
+  <div class="tldr">
+    <b class="ok">Gate #2 re-validated on RISC-V —</b> a MEASURE_FPS build driven into gameplay:
+    <b>Step ~5–6 ms + drawFrame ~2.7 ms ≈ 8 ms/frame</b> → ~120 fps of headroom (worst-frame ~13–21 ms at
+    room transitions; one-time 121 ms cart-load spike). That's <b>~2× the S3</b> (Xtensa 240 MHz,
+    ~15.8 ms/frame), so Celeste is comfortably 30/60-fps-capable, capped to the 30 fps target by the pacer.
+    Draw is cheap — the DSI blit is fast. Heap-free ~32 MB. Gameplay video captured (<code>gp7-celeste-p4.mp4</code>).
+  </div>
+  <div class="tldr" style="border-left-color:var(--warn)">
+    <b class="warn">Shared-file caveats —</b> GP-7 touched <code>components/z8lua/luaconf.h</code> (a
+    <b>submodule</b>; needs a gitlink bump to land) and <code>ESP32Host.cpp</code> — both shared with the S3.
+    The z8lua fix is a strict correctness improvement and the host change is 320/480-identical on S3, but
+    neither was re-run on the S3 this session. Re-verify S3 Celeste before landing.
+  </div>
+
+  <div class="foot">pico-e32 · worklog 2026-07-29 · P4 bring-up: display (GP-3/4) · input (GP-5) · fake-08 parity (GP-7) · <a href="index.html">← index</a></div>
+</div>
+</body>
+</html>

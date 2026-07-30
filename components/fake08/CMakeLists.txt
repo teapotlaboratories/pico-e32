@@ -20,13 +20,19 @@ list(FILTER FAKE08_SRCS EXCLUDE REGEX "/main\\.cpp$")
 idf_component_register(
     SRCS ${FAKE08_SRCS}
          "${F08}/platform/esp32/ESP32Host.cpp"
+         "${CMAKE_CURRENT_LIST_DIR}/fps_hud.cpp"
          "${F08}/libs/lodepng/lodepng.cpp"
          "${F08}/libs/miniz/miniz.c"
          "${F08}/libs/simpleini/ConvertUTF.c"
     INCLUDE_DIRS "fake08/source" "fake08/platform/esp32"
                  "fake08/libs/lodepng" "fake08/libs/miniz" "fake08/libs/simpleini"
+                 "${CMAKE_CURRENT_LIST_DIR}/../../assets"
     REQUIRES z8lua esp_timer input
 )
+# fps_hud.cpp is the portable on-screen FPS HUD (board_lcd_draw_fps + g_hud_owned_by_app), OURS in the
+# parent-repo wrapper — NOT the vendored submodule. It's compiled into THIS component so its symbols resolve
+# in the same archive as ESP32Host.cpp (which calls them) on every board; it renders via the board_lcd_*
+# seam + assets/pico8_font.h (hence the assets include dir), with no per-board text code or board.h geometry.
 
 # Upstream third-party code: silence its warnings so a -Werror app build still passes.
 target_compile_options(${COMPONENT_LIB} PRIVATE -w)

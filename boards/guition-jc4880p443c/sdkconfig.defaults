@@ -1,0 +1,30 @@
+# Board: Guition JC4880P443C-I-W — 4.3" 480x800 IPS smart display.
+# MCU ESP32-P4 (RISC-V dual-core ~360 MHz, no native WiFi/BT; an ESP32-C6 companion
+# handles radio off the display path). 16 MB flash + 32 MB HEX PSRAM (vendor spec).
+# Display ST7701S over MIPI-DSI; touch GT911 (I2C); audio ES8311 (I2C).
+# The board owns CONFIG_IDF_TARGET; apps layer their own config on top.
+# See docs/hardware/pico-e32-guition-jc4880p443c-p4.md.
+CONFIG_IDF_TARGET="esp32p4"
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# This unit is EARLY P4 silicon — rev v1.3 (esptool). IDF v6 defaults the minimum supported P4
+# revision to v3.1 (ESP32P4_REV_MIN_301), so a stock build's bootloader REFUSES to run on it
+# ("requires chip revision [v3.1 - v3.99], this chip is v1.3"). Opt into the <3.0 branch and set the
+# minimum to v1.0 (the highest option that still includes v1.3). NOTE: IDF marks rev <3.0 and >=3.0
+# support as MUTUALLY EXCLUSIVE with "huge hardware difference" — so v3.x P4 reference code (DSI/PSRAM)
+# may not apply unchanged in GP-3. See docs/hardware/pico-e32-guition-jc4880p443c-p4.md.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_100=y
+
+# External PSRAM: this P4 module is 16-line (HEX) PSRAM. Mode + 200 MHz clock are the
+# P4 defaults; pinned explicitly so the framebuffer path (GP-3) has a documented baseline.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_HEX=y
+CONFIG_SPIRAM_SPEED_200M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+
+# Console over the native USB-Serial-JTAG peripheral — the only wire this board exposes to
+# the host (303a:1001, /dev/ttyACM*). Making it the PRIMARY console routes all log/stdout to
+# that port and disables the (default) secondary path, so there is a single stdout — no
+# dual-path stdio-lock surprises like the S3's UART/USB-JTAG split.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

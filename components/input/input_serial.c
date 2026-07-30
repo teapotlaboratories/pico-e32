@@ -1,22 +1,31 @@
-/* input_serial.c — serial (UART0) input backend: bytes over the console UART become PICO-8 buttons.
+/* input_serial.c — serial input backend: bytes over the console link become PICO-8 buttons.
  *
  * This is the hardware-in-the-loop path. An automated bench can't press a button or touch the panel,
- * but it can write bytes to the board's CP2104 console UART — so the whole scanInput -> btn/btnp -> cart
- * path becomes verifiable over the wire. See docs/runtime/pico-e32-fake08-input.md.
+ * but it can write bytes to the board's console — so the whole scanInput -> btn/btnp -> cart path becomes
+ * verifiable over the wire. See docs/runtime/pico-e32-fake08-input.md.
  *
  * Protocol: one byte per key (case-insensitive), held for HOLD_FRAMES then auto-released, so a single
  * byte is a tap and repeated bytes hold. l/r/u/d = dpad, z or o = O, x = X, p = pause.
  *
- * Coexistence: UART0 is also the console log TX. We install the RX driver and read raw bytes; ESP_LOG
- * keeps writing on TX. If a build ever shows the console fighting this, move to USB-Serial-JTAG. */
+ * Transport is the board's console link, chosen at build time by the console config so one file serves
+ * both boards:
+ *   - CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG (ESP32-P4 Guition board): native USB-Serial-JTAG.
+ *   - else (ESP32-S3 Makerfabs board): UART0 (the CP2104 bridge).
+ * Coexistence: the same link also carries the console log TX; we install the RX driver and read raw
+ * bytes while ESP_LOG keeps writing on TX. */
 #include "input.h"
 
 #include <stdbool.h>
-#include "driver/uart.h"
 #include "esp_log.h"
 
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+#include "driver/usb_serial_jtag.h"
+#define IN_RX_BUF   256
+#else
+#include "driver/uart.h"
 #define IN_UART     UART_NUM_0
 #define IN_RX_BUF   256
+#endif
 /* game-update frames a byte stays held (auto-release). Default 6 (~200 ms at 30 fps) suits a human
  * typing single keys; an automated frame-synced driver overrides it to 1 (`-D INPUT_HOLD_FRAMES=1`)
  * for frame-exact control (each byte = exactly one held frame; re-send every frame to keep held). */
@@ -44,28 +53,40 @@ static int key_to_bit(unsigned char c) {
 }
 
 esp_err_t input_init(void) {
-    /* The console — or the app's dev-only TELEMETRY_HOST_CFG startup read — may already own the UART0 RX
+    esp_err_t r = ESP_OK;
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+    /* Native USB-Serial-JTAG: install the interrupt-driven driver so we can read host bytes; ESP_LOG keeps
+     * writing on TX. A second install returns ESP_ERR_INVALID_STATE (already up) — treat that as fine. */
+    usb_serial_jtag_driver_config_t cfg = { .tx_buffer_size = 256, .rx_buffer_size = IN_RX_BUF };
+    r = usb_serial_jtag_driver_install(&cfg);
+    const char *link = "USB-Serial-JTAG";
+#else
+    /* UART0: the console — or the app's dev-only TELEMETRY_HOST_CFG startup read — may already own the RX
      * driver. Install it only if it isn't already: a second install can return ESP_FAIL (not just
      * ESP_ERR_INVALID_STATE), which would wrongly disable input. If it's up, just use it. */
-    esp_err_t r = ESP_OK;
     if (!uart_is_driver_installed(IN_UART)) {
         r = uart_driver_install(IN_UART, IN_RX_BUF, 0, 0, NULL, 0);
     }
+    const char *link = "UART0";
+#endif
     if (r != ESP_OK && r != ESP_ERR_INVALID_STATE) {
-        ESP_LOGW(TAG, "uart_driver_install: %s - serial input unavailable", esp_err_to_name(r));
+        ESP_LOGW(TAG, "serial input driver install: %s - unavailable", esp_err_to_name(r));
         s_ok = false;
         return r;
     }
     s_ok = true;
-    ESP_LOGI(TAG, "serial input on UART0 (inherits the console baud): l/r/u/d dir, z=O x=X p=pause "
-             "(tap holds %d frames)", HOLD_FRAMES);
+    ESP_LOGI(TAG, "serial input on %s: l/r/u/d dir, z=O x=X p=pause (tap holds %d frames)", link, HOLD_FRAMES);
     return ESP_OK;
 }
 
 uint8_t input_poll(void) {
     if (s_ok) {
         unsigned char buf[32];
-        int n = uart_read_bytes(IN_UART, buf, sizeof(buf), 0);   /* non-blocking */
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+        int n = usb_serial_jtag_read_bytes(buf, sizeof(buf), 0);  /* non-blocking */
+#else
+        int n = uart_read_bytes(IN_UART, buf, sizeof(buf), 0);    /* non-blocking */
+#endif
         for (int i = 0; i < n; ++i) {
             int b = key_to_bit(buf[i]);
             if (b >= 0) {
@@ -86,5 +107,7 @@ const char *input_backend_name(void) { return "serial"; }
 
 /* no-op: only the scheduled backend tracks deadline misses (report zeros so main.cpp can stream unconditionally) */
 void input_sched_stats(uint32_t *fed, uint32_t *miss, uint32_t *applied) {
-    if (fed) *fed = 0; if (miss) *miss = 0; if (applied) *applied = 0;
+    if (fed) *fed = 0;
+    if (miss) *miss = 0;
+    if (applied) *applied = 0;
 }

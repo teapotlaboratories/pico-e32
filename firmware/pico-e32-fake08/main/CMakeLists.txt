@@ -3,8 +3,11 @@
 idf_component_register(
     SRCS "main.cpp" "${BOARD_DIR}/board.cpp"
     INCLUDE_DIRS "." "${BOARD_DIR}" "${CMAKE_CURRENT_LIST_DIR}/../../../assets"
-    REQUIRES fake08 z8lua LovyanGFX esp_driver_uart esp_driver_gpio esp_driver_ledc esp_driver_i2c esp_timer sdcard_spi input
+    REQUIRES fake08 z8lua LovyanGFX esp_driver_uart esp_driver_gpio esp_driver_ledc esp_driver_i2c esp_timer sdcard_spi input esp_lcd esp_mm
 )
+# esp_lcd + esp_mm are for the ESP32-P4 board.cpp (MIPI-DSI panel: esp_lcd DSI bus/DBI/DPI + esp_cache_msync
+# for the PSRAM framebuffer). The S3 board.cpp doesn't use them (LovyanGFX i80), but linking them there is
+# harmless — the REQUIRES is the superset covering whichever board.cpp is compiled in.
 # SD-over-SPI is now the board-agnostic components/sdcard_spi (fatfs/sdmmc/sdspi are its private
 # concern); esp_driver_spi reaches board.cpp transitively via sdcard_spi's public REQUIRES.
 # The main component compiles main.cpp (driver/uart.h) + board.cpp (driver/ledc.h, driver/i2c_master.h,
@@ -28,6 +31,12 @@ endif()
 # times Step() vs drawFrame() over UART instead of fake-08's GameLoop. Off by default.
 if(DEFINED MEASURE_FPS)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE MEASURE_FPS=${MEASURE_FPS})
+endif()
+
+# Opt-in dev "screenshot over serial" (`... DEFS='-D FB_DUMP=1'`, P4 only): streams the live DPI
+# framebuffer once, framed, for a camera-free host PNG via tools/fb_screenshot.py. See main.cpp.
+if(DEFINED FB_DUMP)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE FB_DUMP=${FB_DUMP})
 endif()
 
 # Opt-in on-screen FPS HUD (`... DEFS='-D SHOW_FPS=1'`). The fake08 component already forwards this to its
