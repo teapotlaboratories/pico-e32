@@ -69,15 +69,16 @@ esp_err_t board_touch_init(void);
  * a point lands where it is drawn. Returns the point count (0..2). One I²C transaction; non-blocking-ish. */
 int board_touch_read(int *xs, int *ys, int max);
 
-/* Draw the on-screen touch control deck (d-pad + O/X + menu) once into the panel's bottom band, below the
- * game. Static — drawFrame writes only the top 256 px, so the deck persists without a per-frame redraw.
- * Layout matches docs/runtime/pico-e32-fake08-touch-ui.html. Only meaningful with BOARD_HAS_TOUCH. */
-void board_draw_touch_deck(void);
+/* Panel dimensions in pixels (BOARD_LCD_H_RES / V_RES). Runtime getters so board-agnostic code (e.g. the
+ * portable touch deck) can compute layout without including this board.h. */
+int board_lcd_width(void);
+int board_lcd_height(void);
 
-/* Dev HUD: paint the current loop FPS in the right letterbox (x >= 288), which the centred 256px game
- * blit never overwrites — so it persists without a per-frame redraw and never covers gameplay. Called
- * only by SHOW_FPS builds. */
-void board_lcd_draw_fps(int fps);
+/* NOTE: board_draw_touch_deck() is no longer a board function — the touch control deck is now portable and
+ * lives in components/input/input_touch.c (rendered via board_lcd_blit), like the FPS HUD. */
+
+/* NOTE: board_lcd_draw_fps() is no longer a board function — the FPS HUD is now portable and lives in
+ * firmware/pico-e32-fake08/main/fps_hud.cpp (rendered via board_lcd_blit). See that file. */
 
 #ifdef __cplusplus
 }

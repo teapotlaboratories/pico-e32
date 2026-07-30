@@ -30,6 +30,32 @@
       linked from this index (see <a href="../../../.ai/AGENTS.md">.ai/AGENTS.md</a> → Worklogs).</p>
     <ul class="entries">
       <li>
+        <span class="d">2026-07-29</span>
+        <a class="t" href="2026-07-29-gp3-p4-display-research.html">P4 bring-up day — display, input, and real Celeste (GP-3→GP-7)</a>
+        <span class="s">The ESP32-P4 board went from dark to running <strong>real Celeste</strong> in one session.
+          <strong>Display (GP-3/4):</strong> hand-rolled ST7701S/MIPI-DSI driver from ESPHome's board model (PR #12068,
+          2-lane @ 500 Mbps, 34 MHz), first light on the first flash — colour + orientation camera-verified; corrected a
+          bad reset pin (GPIO5). <strong>Input (GP-5):</strong> ported the serial backend to the P4's USB-Serial-JTAG (an
+          on-panel marker tracks injected keys); GT911 touch controller detected @ 0x5D but touch-points await a finger.
+          <strong>Parity (GP-7):</strong> built <code>pico-e32-fake08</code> for the P4 — the fake-08 runtime on RISC-V,
+          Celeste title → gameplay driven over serial, camera-verified. Required a <strong>RISC-V-specific z8lua fix</strong>
+          (negative-float→unsigned saturates to 0 on RISC-V, wraps on Xtensa — boot-looped the VM). Made the host
+          geometry-agnostic; touched shared z8lua (submodule) + fake08 host → re-verify S3 before landing.</span>
+      </li>
+      <li>
+        <span class="d">2026-07-29</span>
+        <a class="t" href="2026-07-29-gp2-p4-board-scaffold.html">GP-2 · ESP32-P4 board scaffold + proof-of-life</a>
+        <span class="s">Stood up the new <strong>ESP32-P4</strong> Guition JC4880P443C board in the tree and proved
+          <strong>build → flash → boot → serial</strong> end to end — no display yet (that's GP-3). Backed up the 16 MB
+          factory flash first (and solved a native-USB read quirk: the stub flasher drops long reads, so
+          <code>--no-stub</code> recovered the stubborn pages; image verified, sha256 <code>5e1a3c4d…</code>). Added
+          <code>boards/guition-jc4880p443c/</code> (target + HEX PSRAM + USB-JTAG console + a <strong>v1.x rev-min</strong>
+          fix) and a minimal <code>pico-e32-p4-hello</code> app. Three breakages fixed; the real one: IDF v6 defaults the
+          min P4 revision to <strong>v3.1</strong> but this is <strong>early v1.3 silicon</strong>, so the stock bootloader
+          rejected it. Boots clean: <strong>32 MB PSRAM @200 MHz + rev v1.3 confirmed at boot</strong> (both were 🟡),
+          heartbeat ticking. Constrains GP-3 (v3.x P4 references may diverge).</span>
+      </li>
+      <li>
         <span class="d">2026-07-28</span>
         <a class="t" href="2026-07-28-idf-v6-migration.html">ESP-IDF v5.4.2 → v6.0.2 migration</a>
         <span class="s">Bumped the vendored ESP-IDF a major version so the S3 project shares a modern IDF with the incoming
