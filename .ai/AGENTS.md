@@ -389,11 +389,10 @@ sources** so the claim can be checked — don't report a bare conclusion.
   BOARD=… PORT=…` layers `boards/<BOARD>/sdkconfig.defaults` (which **owns `CONFIG_IDF_TARGET`,
   PSRAM, and flash size**) under the app config, pins the board's flash `BAUD` from its
   `board.mk`, and builds out-of-source into `build/<APP>/<BOARD>/`. Running `idf.py` directly
-  regenerates an sdkconfig **without** the board overlay — e.g. for `m5stack-timer-cam` that
-  silently drops `CONFIG_SPIRAM=y`, so `esp_camera_init` fails with `0xffffffff` (no PSRAM for
-  the frame buffer) even though the sensor is detected, and defaults the bridge to 460800 baud
-  which its FTDI can't sustain. Secrets still go on the command line (`WIFI_SSID=… WIFI_PASS=…`),
-  never in the tree.
+  regenerates an sdkconfig **without** the board overlay — e.g. for `guition-jc4880p443c` that
+  silently drops `CONFIG_IDF_TARGET=esp32p4`, the HEX PSRAM, and the `ESP32P4_REV_MIN_100`
+  early-silicon opt-in (so the bootloader then refuses to run on the v1.3 chip), and for
+  `makerfabs-ili9488-r1` it drops `CONFIG_SPIRAM=y`. Secrets still go on the command line, never in the tree.
 - **Captured frames go under `/tmp`, never in the repo** — unless the owner explicitly asks for
   one to be kept. Camera captures are throwaway diagnostics produced by the dozen: they are
   binaries, they churn, and they are worthless a day later. `tools/capture_frame.sh` writes to
