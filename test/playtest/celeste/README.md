@@ -131,7 +131,7 @@ Verify deterministically: `drive_sim_room((rx,ry))` (isolation) **and** `drive_s
 whole chain — the board reaches room N only by clearing N-1, so the device always plays from 100 M).
 
 **5. Run it on the board (fc-scheduled).** Firmware (already flashed):
-`-D CELESTE=1 -D INPUT_BACKEND=scheduled -D TELEMETRY=1 -D FORCE_FLASH_CART=1 -D SHOW_FPS=1 -D CENTER_GAME=1`
+`-D CELESTE=1 -D INPUT_BACKEND=scheduled -D TELEMETRY=1 -D FORCE_FLASH_CART=1 -D SHOW_FPS=1`
 (the driver skips the title with jump commands; no `CELESTE_START`). Two delivery shapes in `fc_device.py`:
 - `--predictive` — twin-in-the-loop, rebases on divergence. Clears the forgiving rooms (100 M/200 M).
 - `--openloop --to300` / `--to400` — blind fc-scheduled replay of the pre-solved masks. Clears **all** rooms incl.

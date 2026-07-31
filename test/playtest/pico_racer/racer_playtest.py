@@ -16,7 +16,10 @@ REQUIRED FIRMWARE (build + flash from the repo root; `-D RACER=1` embeds the rac
     make flash APP=pico-e32-fake08 BOARD=makerfabs-ili9488-r1 PORT=<board> \
       DEFS='-D FORCE_FLASH_CART=1 -D RACER=1 -D TELEMETRY=1 -D TELEMETRY_HOST_CFG=1 \
             -D TELEMETRY_BAUD=921600 -D TELEMETRY_BINARY=1 -D TELEMETRY_BINARY_BYTES=40 -D RND_SEED=39 \
-            -D INPUT_BACKEND=serial -D INPUT_HOLD_FRAMES=2 -D SHOW_FPS=1 -D CENTER_GAME=1'
+            -D INPUT_BACKEND=serial -D INPUT_HOLD_FRAMES=2 -D SHOW_FPS=1'
+    On the ESP32-P4 (BOARD=guition-jc4880p443c, console = USB-Serial-JTAG) DROP `-D TELEMETRY_BAUD` — a USB-CDC
+    console has no wire baud; the CFG handshake + binary telemetry already run over USB-JTAG (the firmware reads
+    /writes the console the host is on, not UART0). Everything else is identical.
 `TELEMETRY_HOST_CFG=1` makes the firmware cart-agnostic: the telemetry TAIL isn't baked in — this driver sends
 `RACER_TAIL_BIN` (a poke-tail, below) at startup via the CFG? handshake, so no per-cart firmware. The racer's
 dodge is latency-sensitive, so the device path defaults to the two levers that tightened it: `TELEMETRY_BAUD`

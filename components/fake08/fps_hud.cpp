@@ -8,8 +8,9 @@
  * Lives in the fake-08 component (parent-repo wrapper, NOT the vendored submodule) alongside ESP32Host,
  * which calls it — so the symbols resolve within one archive on every board. It depends only on the
  * board_lcd_* seam, never on a specific board.h, so it carries no geometry: the HUD sits at a fixed
- * TOP-LEFT margin, in the top letterbox of the CENTER_GAME layout the demo/HITL builds use (the centred
- * 256x256 game leaves that corner clear on both panels). Only *called* in SHOW_FPS builds.
+ * TOP-LEFT margin, in the horizontal letterbox left when the integer-scaled game is narrower than the
+ * panel (the game is flush to the top and centred horizontally on both boards). Only *called* in SHOW_FPS
+ * builds.
  */
 #include "fake08_board.h"    /* board_lcd_blit(), board_lcd_rgb565() — the board-agnostic seam */
 #include "pico8_font.h"      /* {char c; const char *rows[5];} PICO8_FONT_GLYPHS[] — 3x5, '#' = pixel on */

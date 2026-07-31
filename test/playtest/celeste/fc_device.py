@@ -10,7 +10,7 @@ hardware test of the fc-scheduled design (docs/runtime/pico-e32-fake08-input.md 
 REQUIRED FIRMWARE (build + flash from the repo root):
     make flash APP=pico-e32-fake08 BOARD=makerfabs-ili9488-r1 PORT=<board> \\
       DEFS='-D CELESTE=1 -D FORCE_FLASH_CART=1 -D INPUT_BACKEND=scheduled \\
-            -D TELEMETRY=1 -D SHOW_FPS=1 -D CENTER_GAME=1'
+            -D TELEMETRY=1 -D SHOW_FPS=1'
 The driver skips the title itself, over the same fc-scheduled backend it uses to play: a short warmup pulses
 jump commands to press "start", so the player spawns at (8,96) with no raw-key press and no cart-specific
 autostart (a boot-time CELESTE_START begin_game()/load_room does not survive the title's deferred init, so the
