@@ -97,8 +97,10 @@ S3 is untouched:
   `#if CONFIG_IDF_TARGET_*`-guarded, so it compiles clean (empty) on non-matching targets. And a P4 board
   driving the panel via `esp_lcd_mipi_dsi` won't `REQUIRES` it anyway. (The earlier "S3-only" note was a
   misread of a targeted grep that only surfaced the esp32s3 line.)
-- z8lua's `-fjump-tables -ftree-switch-conversion` is a **generic GCC flag** (portable to RISC-V); the
-  Gate-2 throughput number was Xtensa-only and needs re-measuring on P4 (deferred with the runtime).
+- z8lua's `-fjump-tables -ftree-switch-conversion` is a **generic GCC flag** (portable to RISC-V). **P4
+  throughput measured (2026-07-31): Celeste runs at a steady 60 Hz loop (30 fps drawn) with ~9.6 ms/frame
+  headroom on core 0 while audio synth runs on core 1 — Gate #4 met.** (Earlier "Xtensa-only / deferred"
+  note is obsolete.)
 
 ## Plan (staged, Gate-style) — display first
 
