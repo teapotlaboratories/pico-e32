@@ -34,6 +34,13 @@
 #endif
 #define HOLD_FRAMES INPUT_HOLD_FRAMES
 
+/* Board seam (resolved at the final app link, like board_lcd_*): paint the on-screen control deck. The
+ * serial backend takes its input over the wire, but it draws the SAME static deck as the touch backend so
+ * the play-test build shows the identical button layout as the shipped touch build — the panel just isn't
+ * read for input here. A board with no deck omits this hook, so an INPUT_BACKEND=serial build link-fails
+ * there (the intended signal); both current boards define it. */
+extern void board_draw_touch_deck(void);
+
 static const char *TAG = "input.serial";
 static bool    s_ok;
 static uint8_t s_hold[7];    /* per-button remaining hold frames, bits 0..6 */
@@ -75,6 +82,8 @@ esp_err_t input_init(void) {
         return r;
     }
     s_ok = true;
+    board_draw_touch_deck();   /* paint the on-screen control deck once (static overlay) — same layout as the
+                                * touch build; input still comes over the wire, the panel just isn't read. */
     ESP_LOGI(TAG, "serial input on %s: l/r/u/d dir, z=O x=X p=pause (tap holds %d frames)", link, HOLD_FRAMES);
     return ESP_OK;
 }

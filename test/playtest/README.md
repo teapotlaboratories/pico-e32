@@ -331,8 +331,9 @@ make flash APP=pico-e32-fake08 BOARD=makerfabs-ili9488-r1 PORT=<board> \
      DEFS='-D CELESTE=1 -D FORCE_FLASH_CART=1 -D PLAYTEST=1'
 ```
 (`-D PLAYTEST=1` is the play-test build — serial input + telemetry + frame-exact input hold + fps HUD,
-with the **same flush-to-top game layout** as the touch build (just no on-screen deck). It expands to the
-old flag soup in the app CMakeLists; omit it or pass `-D PLAYTEST=0` for the shipped touch build. The
+with the **same flush-to-top game layout AND on-screen deck** as the touch build (the deck is cosmetic here —
+input arrives over serial). It expands to the old flag soup in the app CMakeLists; omit it or pass
+`-D PLAYTEST=0` for the shipped touch build. The
 closed-loop TWIN still sets `-D INPUT_BACKEND=scheduled` explicitly.)
 See [`docs/runtime/pico-e32-fake08-input.md`](../../docs/runtime/pico-e32-fake08-input.md).
 
