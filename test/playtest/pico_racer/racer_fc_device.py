@@ -8,7 +8,7 @@ board; a divergence therefore comes from a missed/late command, which continuous
 REQUIRED FIRMWARE:
     make flash APP=pico-e32-fake08 BOARD=makerfabs-ili9488-r1 PORT=<board> \\
       DEFS='-D RACER=1 -D RND_SEED=39 -D FORCE_FLASH_CART=1 -D INPUT_BACKEND=scheduled -D TELEMETRY=1 \\
-            -D TELEMETRY_HOST_CFG=1 -D SHOW_FPS=1 -D CENTER_GAME=1'
+            -D TELEMETRY_HOST_CFG=1 -D SHOW_FPS=1'
 The driver sends `RACER_TAIL` at the CFG? handshake (tpos/px/speed/pt/clock/gamemode — enough to anchor,
 detect divergence + the run's end, and rebase; the POLICY runs on the twin's full state, not this).
 

@@ -378,7 +378,7 @@ latency-sensitive dodge; see the racer README + M9 worklog):
 make flash APP=pico-e32-fake08 BOARD=makerfabs-ili9488-r1 PORT=<board> \
   DEFS='-D FORCE_FLASH_CART=1 -D RACER=1 -D TELEMETRY=1 -D TELEMETRY_HOST_CFG=1 \
         -D TELEMETRY_BAUD=921600 -D TELEMETRY_BINARY=1 -D TELEMETRY_BINARY_BYTES=40 -D RND_SEED=39 \
-        -D INPUT_BACKEND=serial -D INPUT_HOLD_FRAMES=2 -D SHOW_FPS=1 -D CENTER_GAME=1'
+        -D INPUT_BACKEND=serial -D INPUT_HOLD_FRAMES=2 -D SHOW_FPS=1'
 ```
 
 **Run a frame-precise cart closed-loop on the board — the TWIN shape (fc-scheduled).** LIVE closed-loop is
@@ -393,7 +393,7 @@ wins:
 # firmware: the fc-scheduled input backend + Celeste (the driver skips the title itself, via jump commands)
 make flash APP=pico-e32-fake08 BOARD=makerfabs-ili9488-r1 PORT=<board> \
   DEFS='-D CELESTE=1 -D FORCE_FLASH_CART=1 -D INPUT_BACKEND=scheduled \
-        -D TELEMETRY=1 -D SHOW_FPS=1 -D CENTER_GAME=1'
+        -D TELEMETRY=1 -D SHOW_FPS=1'
 python3 test/playtest/celeste/fc_device.py <board> --openloop --to300  # 100→200→300 OPEN-LOOP (clears 300 M, deterministic)
 python3 test/playtest/celeste/fc_device.py <board> --predictive        # twin-in-the-loop, 100 M -> 200 M, rebase on divergence
 python3 test/playtest/celeste/fc_device.py <board> --predictive --room0 # just 100 M

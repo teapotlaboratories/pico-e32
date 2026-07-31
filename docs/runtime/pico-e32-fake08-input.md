@@ -102,13 +102,14 @@ backs up and delivery lags on the later room.) Result: the same clears at the sa
 ```sh
 make flash APP=pico-e32-fake08 BOARD=makerfabs-ili9488-r1 PORT=<board> \
      DEFS='-D CELESTE=1 -D INPUT_BACKEND=serial -D INPUT_HOLD_FRAMES=1 \
-           -D FORCE_FLASH_CART=1 -D SHOW_FPS=1 -D TELEMETRY=1 -D CENTER_GAME=1'
+           -D FORCE_FLASH_CART=1 -D SHOW_FPS=1 -D TELEMETRY=1'
 python3 test/playtest/celeste/celeste_playtest.py <board>   # -> CLEARED 100 M -> 200 M -> 300 M ; PASS (exit 0)
 ```
 
-`-D CENTER_GAME=1` (gated in `components/fake08/CMakeLists.txt`, applied in `ESP32Host.cpp`'s `OY`) centres
-the 256×256 game blit vertically on the 320×480 panel. The default is flush to the top, leaving the bottom
-224 px for the touch control-deck; the serial play-test has no deck, so it centres instead. Optional.
+The game is ALWAYS flush to the top of the panel (`ESP32Host.cpp`'s `s_oy = 0`), centred horizontally when
+the integer upscale is narrower than the glass. The `CENTER_GAME` flag (which used to centre it vertically for
+the deck-less serial builds) was removed, so every build — touch, serial play-test, closed-loop — shares one
+layout and no build can overlap the game with the touch control-deck's band below.
 
 See [`docs/worklog/2026-07-18-celeste-playtest-clear.md`](../worklog/2026-07-18-celeste-playtest-clear.md).
 

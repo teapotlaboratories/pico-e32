@@ -72,7 +72,7 @@ cart — the gitignored `assets/pico_racer_p8.h`, mirroring the Celeste build; t
 make flash APP=pico-e32-fake08 BOARD=makerfabs-ili9488-r1 PORT=<board> \
   DEFS='-D FORCE_FLASH_CART=1 -D RACER=1 -D TELEMETRY=1 -D TELEMETRY_HOST_CFG=1 \
         -D TELEMETRY_BAUD=921600 -D TELEMETRY_BINARY=1 -D TELEMETRY_BINARY_BYTES=40 -D RND_SEED=39 \
-        -D INPUT_BACKEND=serial -D INPUT_HOLD_FRAMES=2 -D SHOW_FPS=1 -D CENTER_GAME=1'
+        -D INPUT_BACKEND=serial -D INPUT_HOLD_FRAMES=2 -D SHOW_FPS=1'
 ```
 Telemetry is **cart-agnostic**: the firmware carries no per-cart tail — `racer_playtest.py` sends the state
 expression at startup over a `CFG?` handshake (`-D TELEMETRY_HOST_CFG=1`, dev/HITL-only, compiles out of
