@@ -41,3 +41,6 @@ assets/pico_racer_p8.h
 # Python bytecode cache (from tools/)
 __pycache__/
 *.pyc
+
+# Local, per-developer Claude Code settings (personal permissions/overrides)
+.claude/settings.local.json

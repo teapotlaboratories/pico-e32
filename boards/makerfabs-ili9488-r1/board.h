@@ -74,8 +74,17 @@ int board_touch_read(int *xs, int *ys, int max);
 int board_lcd_width(void);
 int board_lcd_height(void);
 
-/* NOTE: board_draw_touch_deck() is no longer a board function — the touch control deck is now portable and
- * lives in components/input/input_touch.c (rendered via board_lcd_blit), like the FPS HUD. */
+/* On-screen touch control deck — the BOARD owns both the layout (where the d-pad / O / X / MENU sit on
+ * this panel) and the rendering, drawn with primitives suited to this display (S3: LovyanGFX vector calls,
+ * which avoid the i80 DMA's odd-pixel-count hang that a rasterised buffer blit would hit). The shared
+ * input layer (components/input/input_touch.c) just calls these; screen geometry never leaks into it. */
+void    board_draw_touch_deck(void);          /* paint the static deck once (after board_touch_init) */
+uint8_t board_touch_hittest(int x, int y);    /* map a touch (display coords) to an INPUT_* bit; 0 = none */
+
+/* This board has NO onboard audio hardware, but defines the seam so the shared Host links: board_audio_init()
+ * returns an error (Host then stays silent) and board_audio_write() is a no-op. (No BOARD_HAS_AUDIO.) */
+esp_err_t board_audio_init(void);
+void      board_audio_write(const int16_t *stereo, size_t frames);
 
 /* NOTE: board_lcd_draw_fps() is no longer a board function — the FPS HUD is now portable and lives in
  * firmware/pico-e32-fake08/main/fps_hud.cpp (rendered via board_lcd_blit). See that file. */

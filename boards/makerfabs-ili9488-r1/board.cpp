@@ -33,6 +33,7 @@
  * findings live in docs/worklog/2026-07-16-esp-lcd-vs-lovyangfx.md.
  */
 #include "board.h"
+#include "input.h"                 /* INPUT_* button bits, for board_touch_hittest */
 #include <string.h>
 #include <stdio.h>                 /* snprintf (fps HUD) */
 
@@ -280,10 +281,95 @@ extern "C" int board_touch_read(int *xs, int *ys, int max) {
     return out;
 }
 
-/* board_draw_touch_deck() moved to the shared, PORTABLE deck in components/input/input_touch.c — it
- * rasterizes the d-pad / O / X / MENU through board_lcd_blit + board_lcd_rgb565 (using board_lcd_width/
- * height to lay out for any panel), so one implementation serves this board and the P4 with no per-board
- * drawing code. The zone map that pairs with it lives in the same file. */
+/* ===================== On-screen touch control deck — S3-owned layout + rendering =====================
+ * Drawn with LovyanGFX VECTOR primitives (fillRoundRect / fillCircle / drawCircle / fillTriangle), NOT a
+ * rasterised buffer blit. That matters: this board's i80 bus (Bus_Parallel16) drives an odd-total-pixel
+ * pushImage into an unbounded DMA-FIFO wait, so blitting a 2r+1 square (odd) wedges the whole task — the
+ * vector calls sidestep it entirely (the way this board's original deck did). Geometry for the 320x480
+ * panel (game = top 256, deck below); draw + hit-test share these constants so they stay consistent.
+ * Approximates docs/runtime/pico-e32-fake08-touch-ui.html with native primitives. */
+namespace {
+struct DeckGeom {
+    static const int GAME_H = 256;
+    static const int DPAD_CX = 92,  DPAD_CY = 376, REACH = 70, DEAD = 16;
+    static const int BAR_L = 140, BAR_W = 50, BAR_R = 20;
+    static const int O_CX = 212, O_CY = 414, X_CX = 272, X_CY = 352, BTN_R = 31;
+    static const int MENU_X = 131, MENU_Y = 272, MENU_W = 58, MENU_H = 22, MENU_R = 11;
+};
+static inline int sq_(int v) { return v * v; }
+} // namespace
+
+extern "C" void board_draw_touch_deck(void) {
+    if (!s_lcd) return;
+    auto &g = *s_lcd;
+    typedef DeckGeom D;
+    g.startWrite();
+    /* deck surface — subtle dark blue-grey (matches ESP32Host's one-time fill + the P4 deck), not black */
+    g.fillRect(0, D::GAME_H, BOARD_LCD_H_RES, BOARD_LCD_V_RES - D::GAME_H, g.color888(0x0f, 0x14, 0x1d));
+    /* d-pad: two rounded bars form the cross + soft-blue chevrons + a dark hub */
+    uint32_t bar  = g.color888(0x2b, 0x33, 0x41);
+    uint32_t chev = g.color888(0x7f, 0xa8, 0xe6);
+    g.fillRoundRect(D::DPAD_CX - D::BAR_L / 2, D::DPAD_CY - D::BAR_W / 2, D::BAR_L, D::BAR_W, D::BAR_R, bar);
+    g.fillRoundRect(D::DPAD_CX - D::BAR_W / 2, D::DPAD_CY - D::BAR_L / 2, D::BAR_W, D::BAR_L, D::BAR_R, bar);
+    g.fillTriangle(D::DPAD_CX, D::DPAD_CY - 56, D::DPAD_CX - 8, D::DPAD_CY - 46, D::DPAD_CX + 8, D::DPAD_CY - 46, chev); /* up   */
+    g.fillTriangle(D::DPAD_CX, D::DPAD_CY + 56, D::DPAD_CX - 8, D::DPAD_CY + 46, D::DPAD_CX + 8, D::DPAD_CY + 46, chev); /* down */
+    g.fillTriangle(D::DPAD_CX - 56, D::DPAD_CY, D::DPAD_CX - 46, D::DPAD_CY - 8, D::DPAD_CX - 46, D::DPAD_CY + 8, chev); /* left */
+    g.fillTriangle(D::DPAD_CX + 56, D::DPAD_CY, D::DPAD_CX + 46, D::DPAD_CY - 8, D::DPAD_CX + 46, D::DPAD_CY + 8, chev); /* right*/
+    g.fillCircle(D::DPAD_CX, D::DPAD_CY, D::DEAD - 2, g.color888(0x14, 0x19, 0x22));                                    /* hub  */
+    /* O / X — spheres (base + upper highlight + thin coloured ring) with a vector glyph, gamepad diagonal */
+    const struct { int cx, cy; uint32_t ring, lbl; char k; } btn[2] = {
+        { D::O_CX, D::O_CY, g.color888(0xe7, 0x9a, 0xa0), g.color888(0xf3, 0xd6, 0xd8), 'O' },
+        { D::X_CX, D::X_CY, g.color888(0x5f, 0xc4, 0xbb), g.color888(0xcf, 0xee, 0xea), 'X' },
+    };
+    for (int i = 0; i < 2; i++) {
+        int cx = btn[i].cx, cy = btn[i].cy, r = D::BTN_R;
+        g.fillCircle(cx, cy, r, g.color888(0x22, 0x29, 0x33));                       /* base                  */
+        g.fillCircle(cx, cy - r * 35 / 100, r * 62 / 100, g.color888(0x2f, 0x37, 0x43)); /* upper highlight   */
+        g.drawCircle(cx, cy, r, btn[i].ring); g.drawCircle(cx, cy, r - 1, btn[i].ring); /* thin coloured ring */
+        if (btn[i].k == 'O') {                                                       /* O glyph: a ring       */
+            int rg = r * 42 / 100;
+            g.drawCircle(cx, cy, rg, btn[i].lbl); g.drawCircle(cx, cy, rg - 1, btn[i].lbl);
+        } else {                                                                     /* X glyph: a cross      */
+            int q = r * 40 / 100;
+            for (int t = -1; t <= 1; t++) {
+                g.drawLine(cx - q, cy - q + t, cx + q, cy + q + t, btn[i].lbl);
+                g.drawLine(cx - q, cy + q + t, cx + q, cy - q + t, btn[i].lbl);
+            }
+        }
+    }
+    /* MENU: outline pill (fill:none) + muted centred label */
+    g.drawRoundRect(D::MENU_X, D::MENU_Y, D::MENU_W, D::MENU_H, D::MENU_R, g.color888(0x4a, 0x55, 0x66));
+    g.setTextSize(1);
+    g.setTextColor(g.color888(0x9a, 0xa6, 0xb6));
+    g.drawString("MENU", D::MENU_X + D::MENU_W / 2 - 12, D::MENU_Y + D::MENU_H / 2 - 4);
+    g.endWrite();
+    ESP_LOGI(TAG, "touch deck drawn (S3 LovyanGFX-native): dpad(%d,%d) O(%d,%d) X(%d,%d) menu(%d,%d) r=%d",
+             D::DPAD_CX, D::DPAD_CY, D::O_CX, D::O_CY, D::X_CX, D::X_CY,
+             D::MENU_X + D::MENU_W / 2, D::MENU_Y + D::MENU_H / 2, D::BTN_R);
+}
+
+/* One touch point (display coords) -> a single INPUT_* bit (0 if it hits nothing). Same geometry as the
+ * draw above, so hits land on what the eye sees. */
+extern "C" uint8_t board_touch_hittest(int x, int y) {
+    typedef DeckGeom D;
+    int dx = x - D::DPAD_CX, dy = y - D::DPAD_CY;
+    if (dx > -D::REACH && dx < D::REACH && dy > -D::REACH && dy < D::REACH) {
+        if (sq_(dx) + sq_(dy) < sq_(D::DEAD)) return 0;             /* dead hub */
+        int ax = dx < 0 ? -dx : dx, ay = dy < 0 ? -dy : dy;        /* dominant axis picks the direction */
+        if (ax > ay) return dx < 0 ? INPUT_LEFT : INPUT_RIGHT;
+        return dy < 0 ? INPUT_UP : INPUT_DOWN;
+    }
+    int hit = D::BTN_R + D::BTN_R / 6;                             /* hit radius a touch larger than drawn */
+    if (sq_(x - D::O_CX) + sq_(y - D::O_CY) < sq_(hit)) return INPUT_O;
+    if (sq_(x - D::X_CX) + sq_(y - D::X_CY) < sq_(hit)) return INPUT_X;
+    if (x >= D::MENU_X && x <= D::MENU_X + D::MENU_W && y >= D::MENU_Y && y <= D::MENU_Y + D::MENU_H) return INPUT_PAUSE;
+    return 0;
+}
+
+/* Audio seam — this board has no onboard audio hardware. board_audio_init() fails (the Host then runs
+ * silent) and board_audio_write() is a no-op, so the shared ESP32Host still links on this board. */
+extern "C" esp_err_t board_audio_init(void) { return ESP_FAIL; }
+extern "C" void      board_audio_write(const int16_t *stereo, size_t frames) { (void)stereo; (void)frames; }
 
 /* The dev FPS HUD (board_lcd_draw_fps) and its g_hud_owned_by_app flag moved to the shared, PORTABLE HUD at
  * firmware/pico-e32-fake08/main/fps_hud.cpp — it renders through board_lcd_blit + board_lcd_rgb565, so one

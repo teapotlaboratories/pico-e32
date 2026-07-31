@@ -1,0 +1,6 @@
+## IDF Component Manager manifest for the fake-08 app.
+## esp_codec_dev provides the ES8311 codec driver (audio_codec_* + es8311_codec_new + esp_codec_dev_*)
+## used by the P4 board's board_audio_* seam (GP-6). The S3 board has no audio hardware and does not use
+## it, but the app is shared, so the dependency is declared once here.
+dependencies:
+  espressif/esp_codec_dev: "^1.3.4"

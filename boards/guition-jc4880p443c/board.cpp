@@ -12,7 +12,10 @@
  * config") + docs/worklog/2026-07-29-gp3-p4-display-research.md.
  */
 #include "board.h"
+#include "input.h"                /* INPUT_* button bits, for board_touch_hittest */
+#include "pico8_font.h"           /* {char c; const char *rows[5];} PICO8_FONT_GLYPHS[] — deck labels */
 #include <string.h>
+#include <stdlib.h>               /* malloc/free (deck raster buffers) */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
@@ -24,7 +27,10 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "driver/gpio.h"
-#include "driver/i2c_master.h"   /* GT911 touch (v6 I2C master API) */
+#include "driver/i2c_master.h"   /* GT911 touch + ES8311 codec share this I2C bus */
+#include "driver/i2s_std.h"      /* ES8311 audio: I2S standard TX */
+#include "esp_codec_dev.h"       /* esp_codec_dev (vendored managed component) */
+#include "esp_codec_dev_defaults.h"   /* pulls in es8311_codec.h: es8311_codec_new + ES8311_CODEC_DEFAULT_ADDR */
 
 static const char *TAG = "board.p4";
 
@@ -222,7 +228,11 @@ static esp_err_t gt_wr8(uint16_t reg, uint8_t val) {
     return i2c_master_transmit(s_touch, a, 3, pdMS_TO_TICKS(100));
 }
 
-extern "C" esp_err_t board_touch_init(void) {
+/* The GT911 touch controller (0x5D/0x14) and the ES8311 codec (0x18) share SDA7/SCL8, so the I2C master
+ * bus is a lazily-created shared resource: whichever of board_touch_init / board_audio_init runs first
+ * creates it, the other reuses it. */
+static esp_err_t ensure_i2c_bus(void) {
+    if (s_i2c_bus) return ESP_OK;
     i2c_master_bus_config_t bus = {};
     bus.i2c_port = I2C_NUM_0;
     bus.sda_io_num = TOUCH_SDA;
@@ -230,7 +240,11 @@ extern "C" esp_err_t board_touch_init(void) {
     bus.clk_source = I2C_CLK_SRC_DEFAULT;
     bus.glitch_ignore_cnt = 7;
     bus.flags.enable_internal_pullup = true;
-    ESP_RETURN_ON_ERROR(i2c_new_master_bus(&bus, &s_i2c_bus), TAG, "touch: I2C bus");
+    return i2c_new_master_bus(&bus, &s_i2c_bus);
+}
+
+extern "C" esp_err_t board_touch_init(void) {
+    ESP_RETURN_ON_ERROR(ensure_i2c_bus(), TAG, "touch: I2C bus");
 
     /* Try the default address first, then the alternate. */
     const uint8_t addrs[] = { TOUCH_ADDR_MAIN, TOUCH_ADDR_ALT };
@@ -288,4 +302,328 @@ extern "C" int board_touch_read(int *xs, int *ys, int max) {
     }
     gt_wr8(GT_REG_STATUS, 0);                    /* clear ready flag so the controller posts the next frame */
     return out;
+}
+
+/* ===================== On-screen touch control deck — P4-owned layout + rendering =====================
+ * Rasterised into the DPI framebuffer via board_lcd_blit + board_lcd_rgb565. That path is a framebuffer
+ * memcpy, so odd-sized buffers are fine (unlike the S3's i80 DMA, which the S3 board draws around with
+ * LovyanGFX vectors). Layout is derived from this panel's geometry; draw + hit-test share it. Matches the
+ * approved mockup, docs/runtime/pico-e32-fake08-touch-ui.html. Moved here from the shared input layer so
+ * the board owns its screen layout + rendering. */
+namespace {
+
+/* Deck layout, derived from panel geometry. */
+static struct {
+    int dpad_cx, dpad_cy, reach, dead, barH, barW;
+    int o_cx, o_cy, x_cx, x_cy, btn_r;
+    int menu_cx, menu_cy, menu_w, menu_h;
+    int lbl;   /* label glyph scale */
+} L;
+
+static void layout_init(void) {
+    int W = board_lcd_width();
+    int H = board_lcd_height();
+    /* Game height = 128 * integer scale, matching ESP32Host's pico_scale(W), so the deck sits exactly
+     * below the game: P4 480 -> 3x -> 384. */
+    int scale = W / 128; if (scale < 2) scale = 2; if (scale > 3) scale = 3;
+    int game_h = 128 * scale;
+    int deckH = H - game_h; if (deckH < 0) deckH = 0;
+    L.dpad_cx = W * 23 / 80;          L.dpad_cy = game_h + deckH * 120 / 224;
+    L.reach   = 74 * W / 320;         L.dead    = 16 * W / 320;
+    L.barH    = 50 * W / 320;         L.barW    = 50 * W / 320;
+    L.o_cx    = W * 53 / 80;          L.o_cy    = game_h + deckH * 158 / 224;
+    L.x_cx    = W * 68 / 80;          L.x_cy    = game_h + deckH * 96 / 224;
+    L.btn_r   = 31 * W / 320;
+    L.menu_cx = W / 2;                L.menu_cy = game_h + deckH * 27 / 224;
+    L.menu_w  = 58 * W / 320;         L.menu_h  = 22 * W / 320;
+    L.lbl     = 2 * W / 320; if (L.lbl < 1) L.lbl = 1;
+}
+
+static inline int sq(int v) { return v * v; }
+
+/* Linear colour interpolation -> board RGB565, for the gradients (matches the mockup's fills). */
+static uint16_t lerp565(int r0, int g0, int b0, int r1, int g1, int b1, int num, int den) {
+    if (den <= 0) den = 1;
+    if (num < 0) num = 0;
+    if (num > den) num = den;
+    return board_lcd_rgb565((uint8_t)(r0 + (r1 - r0) * num / den),
+                            (uint8_t)(g0 + (g1 - g0) * num / den),
+                            (uint8_t)(b0 + (b1 - b0) * num / den));
+}
+
+/* Deck surface colour — a subtle dark blue-grey (the mockup's deck tone), NOT pure black; must match
+ * ESP32Host's one-time panel fill. */
+static uint16_t deck_bg(void) { return board_lcd_rgb565(0x0f, 0x14, 0x1d); }
+
+/* Rounded-rect membership: is local pixel (rx,ry) inside a w×h rect with corner radius cr? */
+static int in_rrect(int rx, int ry, int w, int h, int cr) {
+    if (cr <= 0) return 1;
+    int ccx = rx < cr ? cr : (rx >= w - cr ? w - 1 - cr : -1);
+    int ccy = ry < cr ? cr : (ry >= h - cr ? h - 1 - cr : -1);
+    if (ccx < 0 || ccy < 0) return 1;              /* not in a corner region -> inside */
+    int dx = rx - ccx, dy = ry - ccy;
+    return dx * dx + dy * dy <= cr * cr;
+}
+
+/* Small direction chevron into buffer b (W×H). dir 0/1/2/3 = up/down/left/right; apex at (ax,ay). */
+static void chevron(uint16_t *b, int W, int H, int dir, int ax, int ay, int hw, int hh, uint16_t col) {
+    if (hh <= 0) return;
+    for (int r = 0; r <= hh; r++) {
+        int half = hw * r / hh;
+        for (int e = -half; e <= half; e++) {
+            int px, py;
+            if (dir == 0)      { px = ax + e; py = ay + r; }   /* up: apex top, widen down */
+            else if (dir == 1) { px = ax + e; py = ay - r; }   /* down: apex bottom, widen up */
+            else if (dir == 2) { px = ax + r; py = ay + e; }   /* left: apex left, widen right */
+            else               { px = ax - r; py = ay + e; }   /* right: apex right, widen left */
+            if (px >= 0 && px < W && py >= 0 && py < H) b[py * W + px] = col;
+        }
+    }
+}
+
+/* Rounded-rect OUTLINE (border only; interior = bg) — the MENU pill is fill:none in the mockup. */
+static void rrect_outline(int x, int y, int w, int h, int cr, int t, uint16_t col, uint16_t bg) {
+    if (w <= 0 || h <= 0) return;
+    uint16_t *b = (uint16_t *)malloc((size_t)w * h * 2); if (!b) return;
+    for (int ry = 0; ry < h; ry++)
+        for (int rx = 0; rx < w; rx++) {
+            int inside = in_rrect(rx, ry, w, h, cr);
+            int inner  = (rx >= t && ry >= t && rx < w - t && ry < h - t) &&
+                         in_rrect(rx - t, ry - t, w - 2 * t, h - 2 * t, cr - t);
+            b[ry * w + rx] = (inside && !inner) ? col : bg;
+        }
+    board_lcd_blit(x, y, w, h, b); free(b);
+}
+
+/* O/X button: a SPHERICAL radial shade + a thin coloured ring + a clean vector glyph on top. */
+static void disc_sphere(int cx, int cy, int r, uint16_t ring, uint16_t bg, char label, uint16_t lbl) {
+    int s = 2 * r + 1, rr = r * r, hy = r * 35 / 100;   /* highlight sits above centre */
+    uint16_t *b = (uint16_t *)malloc((size_t)s * s * 2); if (!b) return;
+    for (int dy = -r; dy <= r; dy++)
+        for (int dx = -r; dx <= r; dx++) {
+            int d2 = dx * dx + dy * dy;
+            uint16_t c = bg;
+            if (d2 <= rr) {
+                int hdy = dy + hy;                        /* distance from the highlight point (0,-hy) */
+                int t = (dx * dx + hdy * hdy) * 95 / rr;  /* squared falloff reads as a soft sphere */
+                c = lerp565(0x2f, 0x37, 0x43, 0x16, 0x1b, 0x23, t, 95);
+                if (d2 >= (r - 2) * (r - 2)) c = ring;    /* thin coloured ring */
+            }
+            b[(dy + r) * s + (dx + r)] = c;
+        }
+    int th = r / 9; if (th < 1) th = 1;                   /* glyph stroke half-thickness */
+    if (label == 'O') {
+        int rg = r * 42 / 100;                            /* glyph ring radius */
+        for (int dy = -rg - th; dy <= rg + th; dy++)
+            for (int dx = -rg - th; dx <= rg + th; dx++) {
+                int d2 = dx * dx + dy * dy;
+                if (d2 <= (rg + th) * (rg + th) && d2 >= (rg - th) * (rg - th))
+                    b[(dy + r) * s + (dx + r)] = lbl;
+            }
+    } else if (label == 'X') {
+        int len = r * 40 / 100;
+        for (int u = -len; u <= len; u++)
+            for (int w2 = -th; w2 <= th; w2++) {
+                int y1 = r + u + w2, x1 = r + u;          /* '\' diagonal */
+                int y2 = r - u + w2, x2 = r + u;          /* '/' diagonal */
+                if (x1 >= 0 && x1 < s && y1 >= 0 && y1 < s) b[y1 * s + x1] = lbl;
+                if (x2 >= 0 && x2 < s && y2 >= 0 && y2 < s) b[y2 * s + x2] = lbl;
+            }
+    }
+    board_lcd_blit(cx - r, cy - r, s, s, b); free(b);
+}
+
+/* D-pad: two vertically-graded rounded bars forming a cross, four soft-blue chevrons, a dark hub. */
+static void draw_dpad(void) {
+    int cx = L.dpad_cx, cy = L.dpad_cy, reach = L.reach;
+    int top = cy - reach, bot = cy + reach;             /* gradient spans the whole cross */
+    uint16_t chev = board_lcd_rgb565(0x7f, 0xa8, 0xe6);
+    uint16_t bg = deck_bg();
+    int chh = L.barH / 5; if (chh < 3) chh = 3;         /* chevron height (apex -> base) */
+    int chw = L.barH * 4 / 25; if (chw < 2) chw = 2;    /* chevron half-base width */
+    int inset = L.barH * 8 / 25;                        /* chevron apex inset from each arm tip */
+
+    /* horizontal bar (rounded) + left/right chevrons */
+    { int x0 = cx - reach, y0 = cy - L.barH / 2, w = 2 * reach, h = L.barH;
+      int cr = h * 2 / 5;
+      uint16_t *b = (uint16_t *)malloc((size_t)w * h * 2); if (!b) return;
+      for (int ry = 0; ry < h; ry++) {
+          uint16_t col = lerp565(0x33, 0x3c, 0x4b, 0x1a, 0x20, 0x29, (y0 + ry) - top, bot - top);
+          for (int rx = 0; rx < w; rx++) b[ry * w + rx] = in_rrect(rx, ry, w, h, cr) ? col : bg;
+      }
+      chevron(b, w, h, 2, inset, h / 2, chw, chh, chev);            /* left  (apex at left tip)  */
+      chevron(b, w, h, 3, w - 1 - inset, h / 2, chw, chh, chev);    /* right (apex at right tip) */
+      board_lcd_blit(x0, y0, w, h, b); free(b);
+    }
+    /* vertical bar (rounded) + up/down chevrons + hub (drawn 2nd so it caps the cross centre) */
+    { int x0 = cx - L.barW / 2, y0 = cy - reach, w = L.barW, h = 2 * reach;
+      int cr = w * 2 / 5;
+      uint16_t *b = (uint16_t *)malloc((size_t)w * h * 2); if (!b) return;
+      for (int ry = 0; ry < h; ry++) {
+          uint16_t col = lerp565(0x33, 0x3c, 0x4b, 0x1a, 0x20, 0x29, (y0 + ry) - top, bot - top);
+          for (int rx = 0; rx < w; rx++) b[ry * w + rx] = in_rrect(rx, ry, w, h, cr) ? col : bg;
+      }
+      chevron(b, w, h, 0, w / 2, inset, chw, chh, chev);            /* up   (apex at top tip)    */
+      chevron(b, w, h, 1, w / 2, h - 1 - inset, chw, chh, chev);    /* down (apex at bottom tip) */
+      uint16_t hubc = board_lcd_rgb565(0x14, 0x19, 0x22);          /* subtle dark hub */
+      int hub = L.dead * 7 / 8;
+      for (int dy = -hub; dy <= hub; dy++) for (int dx = -hub; dx <= hub; dx++)
+          if (dx * dx + dy * dy <= hub * hub) {
+              int px = w / 2 + dx, py = h / 2 + dy;
+              if (px >= 0 && px < w && py >= 0 && py < h) b[py * w + px] = hubc;
+          }
+      board_lcd_blit(x0, y0, w, h, b); free(b);
+    }
+}
+
+static const char *const *glyph(char c) {
+    if (c >= 'a' && c <= 'z') c = (char)(c - 32);
+    for (size_t i = 0; i < sizeof(PICO8_FONT_GLYPHS) / sizeof(PICO8_FONT_GLYPHS[0]); i++)
+        if (PICO8_FONT_GLYPHS[i].c == c) return PICO8_FONT_GLYPHS[i].rows;
+    return NULL;
+}
+static void text(int cx, int cy, const char *s, uint16_t fg, uint16_t bg, int sc) {
+    int n = (int)strlen(s), cw = 4 * sc, tw = n * cw, th = 5 * sc;
+    if (tw <= 0) return;
+    uint16_t *b = (uint16_t *)malloc((size_t)tw * th * 2); if (!b) return;
+    for (int i = 0; i < tw * th; i++) b[i] = bg;
+    for (int ci = 0; ci < n; ci++) {
+        const char *const *rows = glyph(s[ci]); if (!rows) continue;
+        int ox = ci * cw;
+        for (int ry = 0; ry < 5; ry++)
+            for (int rx = 0; rx < 3; rx++)
+                if (rows[ry][rx] == '#')
+                    for (int yy = 0; yy < sc; yy++)
+                        for (int xx = 0; xx < sc; xx++)
+                            b[(ry * sc + yy) * tw + (ox + rx * sc + xx)] = fg;
+    }
+    board_lcd_blit(cx - tw / 2, cy - th / 2, tw, th, b); free(b);
+}
+
+static void draw_deck(void) {
+    uint16_t bg    = deck_bg();
+    uint16_t orng  = board_lcd_rgb565(0xe7, 0x9a, 0xa0);
+    uint16_t xrng  = board_lcd_rgb565(0x5f, 0xc4, 0xbb);
+    uint16_t menu  = board_lcd_rgb565(0x4a, 0x55, 0x66);
+    uint16_t olbl  = board_lcd_rgb565(0xf3, 0xd6, 0xd8);
+    uint16_t xlbl  = board_lcd_rgb565(0xcf, 0xee, 0xea);
+    uint16_t mlbl  = board_lcd_rgb565(0x9a, 0xa6, 0xb6);
+    draw_dpad();
+    disc_sphere(L.o_cx, L.o_cy, L.btn_r, orng, bg, 'O', olbl);
+    disc_sphere(L.x_cx, L.x_cy, L.btn_r, xrng, bg, 'X', xlbl);
+    int mt = 1 + L.menu_h / 16;
+    rrect_outline(L.menu_cx - L.menu_w / 2, L.menu_cy - L.menu_h / 2, L.menu_w, L.menu_h,
+                  L.menu_h / 2, mt, menu, bg);
+    text(L.menu_cx, L.menu_cy, "MENU", mlbl, bg, L.lbl > 1 ? L.lbl - 1 : 1);
+    ESP_LOGI(TAG, "deck drawn (P4): dpad(%d,%d) O(%d,%d) X(%d,%d) menu(%d,%d) r=%d",
+             L.dpad_cx, L.dpad_cy, L.o_cx, L.o_cy, L.x_cx, L.x_cy, L.menu_cx, L.menu_cy, L.btn_r);
+}
+
+/* One touch point (display coords) -> a single button bit (0 if it hits nothing). */
+static uint8_t point_to_button(int x, int y) {
+    int dx = x - L.dpad_cx, dy = y - L.dpad_cy;
+    if (dx > -L.reach && dx < L.reach && dy > -L.reach && dy < L.reach) {
+        if (sq(dx) + sq(dy) < sq(L.dead)) return 0;             /* dead hub */
+        int ax = dx < 0 ? -dx : dx, ay = dy < 0 ? -dy : dy;     /* dominant axis picks the direction */
+        if (ax > ay) return dx < 0 ? INPUT_LEFT : INPUT_RIGHT;
+        return dy < 0 ? INPUT_UP : INPUT_DOWN;
+    }
+    int hit = L.btn_r + L.btn_r / 6;                            /* hit radius a touch larger than drawn */
+    if (sq(x - L.o_cx) + sq(y - L.o_cy) < sq(hit)) return INPUT_O;
+    if (sq(x - L.x_cx) + sq(y - L.x_cy) < sq(hit)) return INPUT_X;
+    if (x >= L.menu_cx - L.menu_w / 2 && x <= L.menu_cx + L.menu_w / 2 &&
+        y >= L.menu_cy - L.menu_h / 2 && y <= L.menu_cy + L.menu_h / 2) return INPUT_PAUSE;
+    return 0;
+}
+
+} // namespace
+
+extern "C" void    board_draw_touch_deck(void)        { layout_init(); draw_deck(); }
+extern "C" uint8_t board_touch_hittest(int x, int y)  { return point_to_button(x, y); }
+
+/* ===================== ES8311 audio output (GP-6) =====================
+ * Onboard ES8311 codec over the shared touch I2C bus (0x18) + an I2S standard TX channel. Output only
+ * (PICO-8 playback): 22050 Hz, 16-bit, stereo. Pins from docs/hardware/pico-e32-guition-jc4880p443c-p4.md:
+ * MCLK13 / BCLK12 / WS(LRCLK)10 / DOUT(spk)9. Driven via the vendored esp_codec_dev component. */
+#define AUDIO_MCLK   GPIO_NUM_13
+#define AUDIO_BCLK   GPIO_NUM_12
+#define AUDIO_WS     GPIO_NUM_10
+#define AUDIO_DOUT   GPIO_NUM_9
+#define AUDIO_PA     GPIO_NUM_11   /* speaker power-amp enable, active-high — WITHOUT this the DAC plays but
+                                    * the amp is off and nothing is audible (giltal/RetroESP32-P4 pins_config.h) */
+#define AUDIO_SR     22050
+
+static i2s_chan_handle_t      s_i2s_tx = NULL;
+static esp_codec_dev_handle_t s_codec  = NULL;
+
+extern "C" esp_err_t board_audio_init(void) {
+    if (ensure_i2c_bus() != ESP_OK) { ESP_LOGE(TAG, "audio: I2C bus"); return ESP_FAIL; }
+
+    /* I2S standard TX channel (ESP is the master clock). */
+    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+    ESP_RETURN_ON_ERROR(i2s_new_channel(&chan_cfg, &s_i2s_tx, NULL), TAG, "audio: i2s channel");
+    i2s_std_config_t std = {};
+    std.clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(AUDIO_SR);
+    std.clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_256;
+    std.slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO);
+    std.gpio_cfg.mclk = AUDIO_MCLK;
+    std.gpio_cfg.bclk = AUDIO_BCLK;
+    std.gpio_cfg.ws   = AUDIO_WS;
+    std.gpio_cfg.dout = AUDIO_DOUT;
+    std.gpio_cfg.din  = I2S_GPIO_UNUSED;
+    ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(s_i2s_tx, &std), TAG, "audio: i2s std");
+    ESP_RETURN_ON_ERROR(i2s_channel_enable(s_i2s_tx), TAG, "audio: i2s enable");
+
+    /* ES8311 control (I2C) + data (I2S) interfaces via esp_codec_dev. */
+    audio_codec_i2c_cfg_t i2c_cfg = {};
+    i2c_cfg.port       = I2C_NUM_0;
+    i2c_cfg.addr       = ES8311_CODEC_DEFAULT_ADDR;   /* 0x18 << 1 */
+    i2c_cfg.bus_handle = s_i2c_bus;
+    const audio_codec_ctrl_if_t *ctrl_if = audio_codec_new_i2c_ctrl(&i2c_cfg);
+    if (!ctrl_if) { ESP_LOGE(TAG, "audio: i2c ctrl"); return ESP_FAIL; }
+
+    audio_codec_i2s_cfg_t i2s_data = {};
+    i2s_data.port      = I2S_NUM_0;
+    i2s_data.tx_handle = s_i2s_tx;
+    const audio_codec_data_if_t *data_if = audio_codec_new_i2s_data(&i2s_data);
+    if (!data_if) { ESP_LOGE(TAG, "audio: i2s data"); return ESP_FAIL; }
+
+    es8311_codec_cfg_t es_cfg = {};
+    es_cfg.ctrl_if     = ctrl_if;
+    es_cfg.gpio_if     = audio_codec_new_gpio();
+    es_cfg.codec_mode  = ESP_CODEC_DEV_WORK_MODE_DAC;   /* output only */
+    es_cfg.master_mode = false;                         /* ESP drives BCLK/WS */
+    es_cfg.use_mclk    = true;
+    es_cfg.pa_pin      = AUDIO_PA;                      /* the es8311 driver drives this high to enable the amp */
+    es_cfg.pa_reverted = false;                         /* active-high */
+    es_cfg.mclk_div    = 256;
+    const audio_codec_if_t *es_if = es8311_codec_new(&es_cfg);
+    if (!es_if) { ESP_LOGE(TAG, "audio: es8311 new"); return ESP_FAIL; }
+
+    esp_codec_dev_cfg_t dev_cfg = {};
+    dev_cfg.dev_type = ESP_CODEC_DEV_TYPE_OUT;
+    dev_cfg.codec_if = es_if;
+    dev_cfg.data_if  = data_if;
+    s_codec = esp_codec_dev_new(&dev_cfg);
+    if (!s_codec) { ESP_LOGE(TAG, "audio: codec dev"); return ESP_FAIL; }
+
+    esp_codec_dev_sample_info_t si = {};
+    si.bits_per_sample = 16;
+    si.channel         = 2;
+    si.channel_mask    = 0x03;
+    si.sample_rate     = AUDIO_SR;
+    if (esp_codec_dev_open(s_codec, &si) != ESP_CODEC_DEV_OK) { ESP_LOGE(TAG, "audio: codec open"); return ESP_FAIL; }
+    esp_codec_dev_set_out_vol(s_codec, 40);   /* 0..100 — 70 clipped/too loud on the onboard speaker */
+    ESP_LOGI(TAG, "ES8311 audio up: %d Hz S16 stereo (MCLK%d BCLK%d WS%d DOUT%d PA%d)",
+             AUDIO_SR, AUDIO_MCLK, AUDIO_BCLK, AUDIO_WS, AUDIO_DOUT, AUDIO_PA);
+    return ESP_OK;
+}
+
+/* Play `frames` stereo S16 frames (4 bytes each). esp_codec_dev_write blocks until the I2S DMA accepts it,
+ * which self-paces the caller (fake-08's game loop) to the 22050 Hz audio clock. */
+/* Play `frames` stereo S16 frames (4 bytes each). esp_codec_dev_write blocks until the I2S DMA accepts it,
+ * which self-paces the caller — the core-1 audio_task — to the 22050 Hz audio clock. */
+extern "C" void board_audio_write(const int16_t *stereo, size_t frames) {
+    if (!s_codec || !stereo || frames == 0) return;
+    esp_codec_dev_write(s_codec, (void *)stereo, frames * 4);
 }
