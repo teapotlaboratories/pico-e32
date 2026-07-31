@@ -61,6 +61,19 @@ esp_err_t board_touch_init(void);
  * NOTE (GP-5): touch<->display axis alignment is not yet HITL-confirmed — coords are passed through raw. */
 int board_touch_read(int *xs, int *ys, int max);
 
+/* On-screen touch control deck — the BOARD owns both the layout (where the d-pad / O / X / MENU sit on
+ * this panel) and the rendering. The P4 rasterises the deck into its DPI framebuffer via board_lcd_blit
+ * (parity-agnostic — no i80 DMA quirk). The shared input layer (components/input/input_touch.c) just
+ * calls these; screen geometry never leaks into it. */
+void    board_draw_touch_deck(void);          /* paint the static deck once (after board_touch_init) */
+uint8_t board_touch_hittest(int x, int y);    /* map a touch (display coords) to an INPUT_* bit; 0 = none */
+
+/* This board HAS audio output: an ES8311 codec (I2C 0x18 on the shared touch bus) + I2S. board_audio_init()
+ * brings up the codec + I2S TX; board_audio_write() plays `frames` stereo S16 frames, blocking until queued. */
+#define BOARD_HAS_AUDIO 1
+esp_err_t board_audio_init(void);
+void      board_audio_write(const int16_t *stereo, size_t frames);
+
 #ifdef __cplusplus
 }
 #endif
