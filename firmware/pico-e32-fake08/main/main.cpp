@@ -24,7 +24,10 @@
 #include "logger.h"
 
 #include "sdcard_spi.h"   /* the board-agnostic SD component (components/sdcard_spi) */
-#include "driver/uart.h"  /* TELEMETRY_HOST_CFG (dev/HITL only): read a startup telemetry-tail command from UART0 */
+#include "driver/uart.h"  /* TELEMETRY_HOST_CFG (dev/HITL only): read a startup telemetry-tail command from the console */
+#if defined(TELEMETRY_HOST_CFG) && CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+#include "driver/usb_serial_jtag.h"  /* P4 board: the console is native USB-Serial-JTAG, not UART0 */
+#endif
 #include "input.h"        /* input_set_frame — hand the fc-scheduled input backend the frame clock (dev/HITL) */
 
 #include <vector>
@@ -182,12 +185,28 @@ extern "C" void app_main(void) {
     const char *tele_tail = TELEMETRY_DEFAULT_TAIL;
     static char tele_tail_buf[1280];   /* a rich tail (curve + object-queue reads) can run ~750 chars */
     {
-        uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0);
+        /* Read the host's TT<expr> from the SAME console the host is wired to — UART0 on the S3 (CP2104
+         * bridge), native USB-Serial-JTAG on the P4. Reading UART0 on a USB-JTAG board gets nothing, so the
+         * board would silently fall back to the (Celeste) default tail — wrong for any other cart. Mirror the
+         * serial input backend (components/input/input_serial.c), which branches on the same console macro. */
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+        /* RX ring must hold the WHOLE TT<tail> line: the host writes it in one fast USB burst (unlike the S3's
+         * UART, where the bytes trickle in at line rate and a small ring drains fine), so a 256-byte ring would
+         * overflow and silently truncate the tail -> the __tele def fails to parse. Size it well past the tail. */
+        usb_serial_jtag_driver_config_t ujcfg = { .tx_buffer_size = 256, .rx_buffer_size = 2048 };
+        usb_serial_jtag_driver_install(&ujcfg);   /* idempotent: already-installed returns INVALID_STATE */
+#else
+        if (!uart_is_driver_installed(UART_NUM_0)) uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0);
+#endif
         printf("CFG?\n"); fflush(stdout);
         char line[1280]; int li = 0; int64_t tcfg0 = esp_timer_get_time();
         while (esp_timer_get_time() - tcfg0 < 4000000) {          /* 4s window for the host to answer */
             uint8_t c;
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+            if (usb_serial_jtag_read_bytes(&c, 1, pdMS_TO_TICKS(50)) != 1) continue;
+#else
             if (uart_read_bytes(UART_NUM_0, &c, 1, pdMS_TO_TICKS(50)) != 1) continue;
+#endif
             if (c == '\n' || c == '\r') { if (li > 0) break; else continue; }
             if (li < (int)sizeof(line) - 1) line[li++] = (char)c;
         }
@@ -200,10 +219,11 @@ extern "C" void app_main(void) {
             ESP_LOGW(TAG, "TELEMETRY: no host tail within 4s; using the fallback (Celeste)");
         }
     }
-#ifdef TELEMETRY_BAUD
+#if defined(TELEMETRY_BAUD) && !CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
     /* Bump the console UART to a higher baud for the run (the CFG handshake above stays at the safe default).
      * Announce it, let the line flush, then switch; the host reads "BAUD <n>" and switches to match. Halving
-     * the per-frame serialization time (and its jitter) tightens the closed-loop control latency. */
+     * the per-frame serialization time (and its jitter) tightens the closed-loop control latency. UART-only:
+     * a USB-Serial-JTAG console (the P4) has no wire baud, so this is compiled out there — no bogus announce. */
     printf("BAUD %d\n", TELEMETRY_BAUD); fflush(stdout);
     vTaskDelay(pdMS_TO_TICKS(40));
     uart_set_baudrate(UART_NUM_0, TELEMETRY_BAUD);
@@ -363,7 +383,13 @@ extern "C" void app_main(void) {
                 uint16_t su = (uint16_t)step_us, du = (uint16_t)draw_us;
                 memcpy(pkt + 6, &su, 2); memcpy(pkt + 8, &du, 2);
                 memcpy(pkt + 10, memory->data + 0x4300, TELEMETRY_BINARY_BYTES);
+                /* Ship on the SAME console the host reads — USB-Serial-JTAG on the P4, UART0 on the S3.
+                 * Writing UART0 on a USB-JTAG board goes to the (unconnected) UART pins and errors. */
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+                usb_serial_jtag_write_bytes((const char *)pkt, sizeof(pkt), portMAX_DELAY);
+#else
                 uart_write_bytes(UART_NUM_0, (const char *)pkt, sizeof(pkt));
+#endif
             }
 #elif defined(TELEMETRY_HOST_CFG)
             /* Cart-agnostic + FAST (text): compile the telemetry line into a Lua function ONCE (its object-queue
