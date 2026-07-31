@@ -24,8 +24,9 @@ REQUIRED FIRMWARE (build + flash first, from the repo root):
     make flash APP=pico-e32-fake08 BOARD=makerfabs-ili9488-r1 PORT=<board> \\
          DEFS='-D CELESTE=1 -D FORCE_FLASH_CART=1 -D PLAYTEST=1'
     (PLAYTEST=1 is the play-test build: serial input + per-frame telemetry + frame-exact input hold + fps
-     HUD. Same flush-to-top game layout as the touch build — it just has no on-screen deck. It expands to
-     the old flag soup in the app CMakeLists. Omit it — or pass -D PLAYTEST=0 — for the normal touch build.)
+     HUD. Same flush-to-top layout AND the same on-screen deck as the touch build — the deck is cosmetic here
+     (input arrives over serial; the panel isn't read). It expands to the old flag soup in the app CMakeLists.
+     Omit it — or pass -D PLAYTEST=0 — for the normal touch build.)
 
 RUN:
     python3 test/playtest/celeste/celeste_playtest.py <board-port>

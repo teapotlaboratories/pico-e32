@@ -109,7 +109,9 @@ python3 test/playtest/celeste/celeste_playtest.py <board>   # -> CLEARED 100 M -
 The game is ALWAYS flush to the top of the panel (`ESP32Host.cpp`'s `s_oy = 0`), centred horizontally when
 the integer upscale is narrower than the glass. The `CENTER_GAME` flag (which used to centre it vertically for
 the deck-less serial builds) was removed, so every build — touch, serial play-test, closed-loop — shares one
-layout and no build can overlap the game with the touch control-deck's band below.
+layout and no build can overlap the game with the touch control-deck's band below. The serial backend also
+paints the same on-screen control deck (`board_draw_touch_deck`) as the touch build, so the play-test build
+shows the identical button layout — it's cosmetic there (input arrives over the wire; the panel isn't read).
 
 See [`docs/worklog/2026-07-18-celeste-playtest-clear.md`](../worklog/2026-07-18-celeste-playtest-clear.md).
 
