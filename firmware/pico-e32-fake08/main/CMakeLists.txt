@@ -46,6 +46,21 @@ if(DEFINED SHOW_FPS)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE SHOW_FPS=${SHOW_FPS})
 endif()
 
+# Opt-in dev diagnostic (`... DEFS='-D SPIKE_HEAP_LOG=1'`, needs TELEMETRY): on a slow Step (>20 ms) print the
+# heap free before->after that Step, so a GC pause (heap jumps UP) is distinguishable from pure cart compute.
+if(DEFINED SPIKE_HEAP_LOG)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE SPIKE_HEAP_LOG=${SPIKE_HEAP_LOG})
+endif()
+
+# Opt-in perf experiment (`... DEFS='-D GC_MANUAL=1'`, needs TELEMETRY; add `-D GC_CORE1=1` to offload to core 1):
+# disable z8lua's auto collector and drive it in a bounded time slice each frame, so a big collection spreads
+# (and, with GC_CORE1, hides behind the Lua-free blit). Tunables: GC_BUDGET_US, GC_STEP_KB, GC_GUARD_KB.
+foreach(gcflag GC_MANUAL GC_CORE1 GC_BUDGET_US GC_STEP_KB GC_GUARD_KB GC_GEN GC_MAJORINC)
+    if(DEFINED ${gcflag})
+        target_compile_definitions(${COMPONENT_LIB} PRIVATE ${gcflag}=${${gcflag}})
+    endif()
+endforeach()
+
 # Opt-in dev/demo flag: `... DEFS='-D FORCE_FLASH_CART=1'` ignores any SD cart and runs the flash cart
 # (e.g. the input-reactive test cart) even when the microSD holds a .p8. Off by default.
 if(DEFINED FORCE_FLASH_CART)
