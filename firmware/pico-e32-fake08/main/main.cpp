@@ -113,6 +113,41 @@ static const char TELEMETRY_DEFAULT_TAIL[] =
     "else return 'x x '..room.x..' '..room.y..' x x x' end end)()";
 #endif
 
+#if defined(GC_MANUAL)
+/* ── Manual / core-1-offloaded Lua GC (perf experiment, `-D GC_MANUAL=1` [+ `-D GC_CORE1=1`]) ─────────────
+ * The Pico Racer cart churns ~5-6 KB of Lua tables per frame; z8lua's automatic collector answers with
+ * incremental work on the allocating frames plus periodic stop-the-world collections (measured Step spikes to
+ * ~65 ms). Here the host disables the auto collector and drives it in a BOUNDED time slice each frame, so one
+ * big collection spreads over several frames — the peak drops. With GC_CORE1 that slice runs on core 1 WHILE
+ * core 0 blits: drawFrame touches no Lua and z8lua's GC is non-moving (mark-sweep), so the framebuffer it
+ * reads stays put — the collection is hidden behind the ~6 ms draw. Barrier before the next Step (which
+ * mutates the heap). Auto-GC is re-enabled only if the live set climbs past a guard (OOM safety). */
+#include "freertos/semphr.h"
+#ifndef GC_BUDGET_US
+#define GC_BUDGET_US 6000            /* per-frame GC time slice */
+#endif
+#ifndef GC_STEP_KB
+#define GC_STEP_KB   4               /* lua_gc(GCSTEP) work unit per call */
+#endif
+#ifndef GC_GUARD_KB
+#define GC_GUARD_KB  1024            /* if live Lua memory exceeds this, catch up hard (avoid runaway growth) */
+#endif
+static Vm *s_gc_vm = nullptr;
+static inline int gc_run_slice(int budget_us) {   /* step until a cycle completes or the budget is spent */
+    int64_t g0 = esp_timer_get_time();
+    while ((int)(esp_timer_get_time() - g0) < budget_us) { if (s_gc_vm->GcStep(GC_STEP_KB)) break; }
+    if (s_gc_vm->GcCountKb() > GC_GUARD_KB) while (!s_gc_vm->GcStep(64)) { }   /* guard: finish a cycle now */
+    return (int)(esp_timer_get_time() - g0);
+}
+#ifdef GC_CORE1
+static SemaphoreHandle_t s_gc_go, s_gc_done;
+static volatile int s_gc_us_out;
+static void gc_task(void *) {
+    for (;;) { xSemaphoreTake(s_gc_go, portMAX_DELAY); s_gc_us_out = gc_run_slice(GC_BUDGET_US); xSemaphoreGive(s_gc_done); }
+}
+#endif
+#endif
+
 extern "C" void app_main(void) {
     ESP_LOGI(TAG, "fake-08 port: draw-only milestone booting");
 
@@ -333,6 +368,28 @@ extern "C" void app_main(void) {
         double hud_ach_sum = 0; int hud_ach_n = 0;         /* rolling mean of achieved fps over the display window */
         int64_t hud_t0 = esp_timer_get_time();
 #endif
+#if defined(GC_GEN)
+        /* Generational GC (`-D GC_GEN=1`): keep the AUTOMATIC collector but switch it to generational mode —
+         * frequent CHEAP minor collections of young garbage, rare (costly) major ones. A good fit for a cart
+         * that churns short-lived objects (the racer's traffic spawns + dies each frame), which the incremental
+         * collector pays for with a big atomic mark. GC_MAJORINC raises the heap-growth gate before a major. */
+        vm->GcSetGenerational();
+#ifdef GC_MAJORINC
+        vm->GcSetMajorInc(GC_MAJORINC);
+#endif
+        ESP_LOGI(TAG, "GC: generational mode (automatic)");
+#endif
+#if defined(GC_MANUAL)
+        s_gc_vm = vm;
+        vm->GcSetAuto(false);          /* drive the collector manually in bounded slices (see block above) */
+#ifdef GC_CORE1
+        s_gc_go = xSemaphoreCreateBinary(); s_gc_done = xSemaphoreCreateBinary();
+        xTaskCreatePinnedToCore(gc_task, "gc", 4096, nullptr, 5, nullptr, 1);
+        ESP_LOGI(TAG, "GC: manual bounded stepping on CORE 1, overlapped with the blit (budget %d us)", GC_BUDGET_US);
+#else
+        ESP_LOGI(TAG, "GC: manual bounded stepping on core 0, sequential (budget %d us)", GC_BUDGET_US);
+#endif
+#endif
         while (true) {
             host->waitForTargetFps();
             /* fc-scheduled input (INPUT_BACKEND=scheduled): hand the backend the fc THIS Step will emit.
@@ -341,13 +398,41 @@ extern "C" void app_main(void) {
              * The backend applies fc-tagged commands when its clock reaches that fc. A no-op for every other
              * backend. Kept out of the t0..t1 window so step_us stays the cart's. */
             input_set_frame((uint32_t)vm->GetFrameCount() + 1u);
+#ifdef SPIKE_HEAP_LOG
+            uint32_t h0_spike = esp_get_free_heap_size();   /* dev diag: heap free right before this Step */
+#endif
             int64_t t0 = esp_timer_get_time();
             vm->Step();
             int64_t t1 = esp_timer_get_time();
+            int gc_us = 0; (void)gc_us;
+#if defined(GC_MANUAL) && defined(GC_CORE1)
+            s_gc_us_out = 0;
+            xSemaphoreGive(s_gc_go);                                             /* core 1: GC this frame's slice */
+            host->drawFrame(vm->GetPicoInteralFb(), vm->GetScreenPaletteMap(), 0); /* core 0: blit (no Lua) */
+            xSemaphoreTake(s_gc_done, portMAX_DELAY);                            /* barrier before the next Step */
+            gc_us = s_gc_us_out;
+#elif defined(GC_MANUAL)
+            gc_us = gc_run_slice(GC_BUDGET_US);                                  /* sequential on core 0 */
             host->drawFrame(vm->GetPicoInteralFb(), vm->GetScreenPaletteMap(), 0);
+#else
+            host->drawFrame(vm->GetPicoInteralFb(), vm->GetScreenPaletteMap(), 0);
+#endif
             int64_t t2 = esp_timer_get_time();
             int fc = vm->GetFrameCount();
-            int step_us = (int)(t1 - t0), draw_us = (int)(t2 - t1);
+            int step_us = (int)(t1 - t0), draw_us = (int)(t2 - t1);   /* draw_us = post-step wall time (incl. GC/overlap) */
+#ifdef SPIKE_HEAP_LOG
+            /* Dev diag (`-D SPIKE_HEAP_LOG=1`): on a slow frame, print the step/GC/post-step split + heap free
+             * before->after. Baseline (auto GC): a spike shows in `step` with heap JUMPING UP (a collector pause);
+             * with GC_MANUAL the collection moves into `gc` (and, with GC_CORE1, hides inside `post`). Interleaves
+             * as text in the telemetry stream; the host's binary reader skips it. `lua` = live Lua memory. */
+            if (step_us + draw_us > 20000) {
+                uint32_t h1_spike = esp_get_free_heap_size();
+                ESP_LOGW(TAG, "SPIKE fc%d step=%d gc=%d post=%d | heap %u->%u (%+d B) | int-free %u | lua %d KB",
+                         fc, step_us, gc_us, draw_us, (unsigned)h0_spike, (unsigned)h1_spike,
+                         (int)(h1_spike - h0_spike), (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                         vm->GcCountKb());
+            }
+#endif
             char snip[1024]; (void)snip;
 #ifdef SHOW_FPS
             hud_compute += step_us + draw_us;
@@ -454,6 +539,38 @@ extern "C" void app_main(void) {
                 }
             }
             host->waitForTargetFps();
+        }
+    }
+#elif defined(GC_MANUAL)
+    /* Shipped-style loop (touch / no telemetry) WITH the bounded GC — a faithful copy of Vm::GameLoop() (which
+     * stays byte-identical to upstream, so we don't edit it) plus the collector driven in a bounded slice each
+     * frame; with GC_CORE1 the slice runs on core 1 overlapped with the Lua-free blit. The on-screen fps HUD is
+     * the board's generic meter (g_hud_owned_by_app stays 0 here). See the GC block above app_main. */
+    s_gc_vm = vm;
+    vm->GcSetAuto(false);
+#ifdef GC_CORE1
+    s_gc_go = xSemaphoreCreateBinary(); s_gc_done = xSemaphoreCreateBinary();
+    xTaskCreatePinnedToCore(gc_task, "gc", 4096, nullptr, 5, nullptr, 1);
+    ESP_LOGI(TAG, "entering GameLoop (bounded GC on core 1, budget %d us)", GC_BUDGET_US);
+#else
+    ESP_LOGI(TAG, "entering GameLoop (bounded GC on core 0, budget %d us)", GC_BUDGET_US);
+#endif
+    while (host->shouldRunMainLoop()) {
+        host->waitForTargetFps();
+        if (host->shouldQuit()) break;
+        host->changeStretch();
+        vm->Step();
+#ifdef GC_CORE1
+        xSemaphoreGive(s_gc_go);                                                 /* GC on core 1 ... */
+        host->drawFrame(vm->GetPicoInteralFb(), vm->GetScreenPaletteMap(), 0);   /* ... while core 0 blits */
+        xSemaphoreTake(s_gc_done, portMAX_DELAY);
+#else
+        gc_run_slice(GC_BUDGET_US);
+        host->drawFrame(vm->GetPicoInteralFb(), vm->GetScreenPaletteMap(), 0);
+#endif
+        if (host->shouldFillAudioBuff()) {
+            vm->FillAudioBuffer(host->getAudioBufferPointer(), 0, host->getAudioBufferSize());
+            host->playFilledAudioBuffer();
         }
     }
 #else
