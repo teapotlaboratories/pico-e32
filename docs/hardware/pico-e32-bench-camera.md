@@ -39,19 +39,28 @@ no V4L2 focus control; sharpen by distance or a physical lens ring, not software
 
 ## Boards on the bench
 
-| role | board | chip |
-|------|-------|------|
-| **device under test** | Makerfabs ILI9488 (ESP32-S3 N16R2) | ESP32-S3 |
-| **bench camera** | M5Stack Timer Camera F (OV3660, fisheye) | ESP32-D0WDQ6-V3 |
+| role | board | chip | port | how to identify |
+|------|-------|------|------|-----------------|
+| **device under test (S3)** | Makerfabs ILI9488 (ESP32-S3 N16R2) | ESP32-S3 | `/dev/ttyUSB*` | CP2104 bridge — `ID_USB_DRIVER=cp210x` |
+| **device under test (P4)** | Guition JC4880P443C | ESP32-P4 | `/dev/ttyACM*` | native USB-Serial-JTAG (`303a:1001`), MAC `80:F1:B2:D3:7E:CA` |
+| **bench camera** | USB (UVC) webcam via `tools/usb_cam_relay.py` (see above) | — | `/dev/video*` | — |
 
-> Both boards enumerate as `/dev/ttyUSB*` and **the numbering is not stable** — it depends on
-> plug order. Confirm which is which before flashing, so you don't flash the camera firmware
-> onto the board under test:
+> **A second ESP32-P4 (another Guition JC4880P443C), MAC `80:F1:B2:D3:61:2C`, was used ONLY for final human
+> playtesting** (a person holding the handheld). It is otherwise out of scope — treat it as removed: don't wait
+> for it and don't automate against it. When plugged in it just shows up as an extra `/dev/ttyACM*`.
+>
+> **Ports are NOT stable** (they depend on plug order) — confirm which board is which before flashing so you
+> never cross-flash:
 > ```sh
-> esptool.py -p /dev/ttyUSB0 flash_id | grep 'Chip is'
-> # ESP32-D0WDQ6-V3 -> the bench camera
-> # ESP32-S3        -> the board under test
+> # S3 (CP2104 on ttyUSB*) vs P4 (USB-JTAG on ttyACM*):
+> udevadm info -q property -n /dev/ttyUSB0 | grep ID_USB_DRIVER    # cp210x        -> the S3
+> # the two P4s share USB id 303a:1001, so tell them apart by MAC:
+> udevadm info -q property -n /dev/ttyACM0 | grep ID_SERIAL_SHORT  # ...:7E:CA     -> bench/automated P4
+> #                                                                # ...:61:2C     -> the (removed) human-test P4
 > ```
+
+> Historical: the "bench camera" row was an **M5Stack Timer Camera F** (OV3660, ESP32-D0WDQ6-V3) on
+> `/dev/ttyUSB*` until it was replaced by the USB webcam on 2026-07-30 — see the note at the top of this doc.
 
 ## One-time setup
 
