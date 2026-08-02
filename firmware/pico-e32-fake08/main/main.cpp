@@ -211,6 +211,32 @@ extern "C" void app_main(void) {
     }
     vm->vm_run(); /* starts the cart coroutine */
 
+#if defined(LUABENCH)
+    /* Dev micro-benchmark (`-D LUABENCH=1`): a deterministic, table-and-global-heavy Lua loop timed in C, to
+     * isolate VM changes (e.g. the OP_GETTABLE/GETTABUP fast-get) from noisy game measurements. Runs in the
+     * cart sandbox (so field reads + PICO-8 API globals resolve exactly as in a cart), reports us over serial,
+     * then halts. Not compiled into any normal build. */
+    {
+        for (int i = 0; i < 60; i++) vm->Step();   /* let the cart coroutine build __cart_sandbox + the API */
+        /* Nested loops (each count <= 32767, fix32's integer range) => ~90k iterations, each doing 8 field
+         * reads (OP_GETTABLE) + 4 global calls (OP_GETTABUP) — exactly what fast-get targets. */
+        const char *bench =
+            "local t={a=1,b=2,c=3,d=4,e=5,f=6,g=7,h=8} local s=0 local n=0\n"
+            "for j=1,300 do for i=1,300 do n=n+1\n"
+            "  s = s + t.a+t.b+t.c+t.d+t.e+t.f+t.g+t.h + abs(t.a)+flr(t.b)+abs(t.c)+flr(t.d)\n"
+            "end end printh('BENCH n='..n..' s='..s) return s";
+        for (int rep = 0; rep < 5; rep++) {
+            int64_t b0 = esp_timer_get_time();
+            vm->ExecuteLua(bench, "");
+            int64_t b1 = esp_timer_get_time();
+            printf("LUABENCH: %lld us\n", (long long)(b1 - b0));
+            fflush(stdout);
+        }
+        printf("LUABENCH: done\n"); fflush(stdout);
+        for (;;) vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+#endif
+
 #if defined(TELEMETRY_HOST_CFG) && !defined(MEASURE_FPS)
     /* Dev/HITL only — `-D TELEMETRY_HOST_CFG=1` (never in production; TELEMETRY itself is dev-only). Let the
      * host set the telemetry TAIL at startup so the firmware carries no per-cart state: install UART0 RX

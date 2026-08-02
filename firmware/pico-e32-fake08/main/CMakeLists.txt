@@ -55,7 +55,7 @@ endif()
 # Opt-in perf experiment (`... DEFS='-D GC_MANUAL=1'`, needs TELEMETRY; add `-D GC_CORE1=1` to offload to core 1):
 # disable z8lua's auto collector and drive it in a bounded time slice each frame, so a big collection spreads
 # (and, with GC_CORE1, hides behind the Lua-free blit). Tunables: GC_BUDGET_US, GC_STEP_KB, GC_GUARD_KB.
-foreach(gcflag GC_MANUAL GC_CORE1 GC_BUDGET_US GC_STEP_KB GC_GUARD_KB GC_GEN GC_MAJORINC)
+foreach(gcflag GC_MANUAL GC_CORE1 GC_BUDGET_US GC_STEP_KB GC_GUARD_KB GC_GEN GC_MAJORINC LUABENCH)
     if(DEFINED ${gcflag})
         target_compile_definitions(${COMPONENT_LIB} PRIVATE ${gcflag}=${${gcflag}})
     endif()
