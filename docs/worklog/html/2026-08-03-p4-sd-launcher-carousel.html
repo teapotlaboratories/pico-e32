@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SD cart launcher + cover-art carousel (P4 + S3) — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8;
+        --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  :root[data-theme="light"]{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;--ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  :root[data-theme="dark"]{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;--border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)} .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;font-family:var(--mono)}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:9px;padding:.9rem 1.05rem;overflow-x:auto;font-size:.82rem;line-height:1.5;font-family:var(--mono)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left}
+  th{background:var(--codebg);font-family:var(--mono);font-size:.82rem}
+  td.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .bad{color:var(--bad);font-weight:600} .ok{color:var(--ok);font-weight:600} .warn{color:var(--warn);font-weight:600}
+  .diag{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.3rem;margin:1.3rem 0}
+  .diag h3{margin:.1rem 0 .4rem;font-size:.95rem}
+  .diag .sub{color:var(--muted);font-size:.82rem;margin:0 0 1rem}
+  .legend{font-size:.78rem;color:var(--muted);margin-top:.7rem}
+  .foot{margin-top:2.6rem;padding-top:1rem;border-top:1px solid var(--border);color:var(--muted);font-size:.85rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <h1>SD cart launcher · native cover-art carousel</h1>
+  <p class="date">2026-08-03 · boot into a browser of the microSD's PICO-8 library and launch a cart by selecting it — built on the P4, then made panel-agnostic and confirmed on the S3</p>
+
+  <div class="tldr">
+    Both handhelds now <b class="ok">boot into a cart launcher</b>. The P4's TF slot works over SDMMC once the
+    card's rail is powered from the <b>on-chip LDO (VO4)</b> — the whole blocker; the pins were right all along.
+    A new native <b>cover-art carousel</b> (<code>carousel_launcher.cpp</code>) decodes each <code>.p8.png</code>
+    label with lodepng, browses the SD folder tree, and launches into the VM. Layout comes from a per-board seam
+    (<code>board_carousel_layout()</code>), so the <b>same code runs on the S3</b> (320×480) and the P4 (480×800).
+    One dead end recorded: framebuffer-screenshot-over-serial is unreliable on the P4 USB-JTAG — the bench camera
+    is the capture path.
+  </div>
+
+  <nav aria-label="Contents" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:.85rem 1.1rem;margin:1.4rem 0">
+    <div style="font:600 .74rem/1 var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:.55rem">On this page</div>
+    <ol style="margin:0;padding-left:1.2rem;columns:2;column-gap:2rem;font-size:.92rem">
+      <li><a href="#s1">SDMMC — the LDO blocker</a></li>
+      <li><a href="#s2">Folder navigation (listdirs)</a></li>
+      <li><a href="#s3">The carousel</a></li>
+      <li><a href="#s4">Dead end: FB over serial</a></li>
+      <li><a href="#s5">Board-relative layout → S3</a></li>
+      <li><a href="#play">Playtest — 30 fps + a HUD bug</a></li>
+      <li><a href="#state">Measurements + state</a></li>
+    </ol>
+  </nav>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:.8rem;margin:1.6rem 0">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">LDO VO4</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">the P4 SD blocker — power the rail via the on-chip LDO <b>before</b> mount (pins 43/44/39-42 were right)</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--ok);font-variant-numeric:tabular-nums">both boards</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">one code path, per-board layout via <code>board_carousel_layout()</code> — P4 + S3 <b class="ok">confirmed live</b></div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">3 145</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35"><code>.p8.png</code> carts in <b>19</b> genre folders on the P4 card (~92 MB)</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--ok);font-variant-numeric:tabular-nums">31.7 MB</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">PSRAM free with the carousel up (376 KB internal) — negligible footprint</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--bad);font-variant-numeric:tabular-nums">FB_DUMP ✗</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">framebuffer-over-serial stalls at a random 65–685 KB on the P4 USB-JTAG — camera is the capture path</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--ok);font-variant-numeric:tabular-nums">1 method</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">folder nav needed only <code>Host::listdirs()</code> — the <code>__cd</code>/<code>__listdirs</code> chain was already in fake-08</div>
+    </div>
+  </div>
+
+  <h2 id="s1">1. P4 SDMMC — the on-chip LDO was the blocker</h2>
+  <p>The TF slot is on the P4 SDMMC slot-0 IO_MUX pins (4-bit), but the first mount failed identically every time
+     — <code>send_op_cond (1) returned 0x107</code> (<code>ESP_ERR_TIMEOUT</code>), the ACMD41 command-line
+     handshake never answered. That signature reads as <em>wrong pins / dead slot</em>; it wasn't.</p>
+  <pre>E sdmmc_common: sdmmc_init_ocr: send_op_cond (1) returned 0x107
+E vfs_fat_sdmmc: sdmmc_card_init failed (0x107)
+W board.p4: SD mount failed (ESP_ERR_TIMEOUT)          <span style="color:var(--muted)"># before the LDO fix</span>
+...
+I board.p4: SD mounted at /sdcard (29820MB, 4-bit, CLK43 CMD44 D0-3=39/40/41/42, LDO VO4)   <span style="color:var(--muted)"># after</span></pre>
+
+  <div class="diag">
+    <h3>Diagnosis → fix — the failure looked like pins, but it was power</h3>
+    <p class="sub">Ruled out pins and bus width; the card's 3.3&nbsp;V rail is fed by the on-chip LDO, which esp-idf doesn't bring up for you (Arduino's SD_MMC does).</p>
+    <svg viewBox="0 0 820 250" width="100%" role="img" aria-label="send_op_cond 0x107 timeout; pins confirmed by a reference; 1-bit fallback also times out; enabling on-chip LDO VO4 before mount succeeds">
+      <defs>
+        <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L7,3 L0,6 z" style="fill:var(--line)"/>
+        </marker>
+      </defs>
+      <rect x="14" y="30" width="200" height="54" rx="9" style="fill:var(--surface);stroke:var(--bad);stroke-width:1.8"/>
+      <text x="114" y="52" style="fill:var(--fg);text-anchor:middle;font:700 11px var(--mono)">send_op_cond → 0x107</text>
+      <text x="114" y="69" style="fill:var(--bad);text-anchor:middle;font:10px var(--mono)">CMD-line timeout, every try</text>
+
+      <line x1="214" y1="57" x2="252" y2="57" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah)"/>
+      <rect x="254" y="16" width="240" height="40" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.6"/>
+      <text x="374" y="34" style="fill:var(--fg);text-anchor:middle;font:700 10.5px var(--mono)">pins CLK43/CMD44/D0-3=39-42</text>
+      <text x="374" y="49" style="fill:var(--ok);text-anchor:middle;font:9.5px var(--mono)">✓ confirmed (buccaneer-jak ref)</text>
+
+      <rect x="254" y="64" width="240" height="40" rx="9" style="fill:var(--surface);stroke:var(--warn);stroke-width:1.6"/>
+      <text x="374" y="82" style="fill:var(--fg);text-anchor:middle;font:700 10.5px var(--mono)">1-bit fallback</text>
+      <text x="374" y="97" style="fill:var(--warn);text-anchor:middle;font:9.5px var(--mono)">also times out → not data width</text>
+
+      <line x1="494" y1="57" x2="532" y2="57" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah)"/>
+      <rect x="534" y="30" width="272" height="54" rx="9" style="fill:var(--surface);stroke:var(--accent);stroke-width:1.8"/>
+      <text x="670" y="52" style="fill:var(--fg);text-anchor:middle;font:700 11px var(--mono)">enable on-chip LDO VO4</text>
+      <text x="670" y="69" style="fill:var(--accent);text-anchor:middle;font:9.5px var(--mono)">host.pwr_ctrl_handle, before mount</text>
+
+      <line x1="670" y1="84" x2="670" y2="140" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah)"/>
+      <rect x="500" y="142" width="320" height="56" rx="10" style="fill:var(--codebg);stroke:var(--ok);stroke-width:1.8"/>
+      <text x="660" y="166" style="fill:var(--fg);text-anchor:middle;font:700 12px var(--mono)">SD mounted at /sdcard — 29820 MB</text>
+      <text x="660" y="185" style="fill:var(--ok);text-anchor:middle;font:10px var(--mono)">4-bit, LDO VO4 — reliable</text>
+
+      <text x="250" y="176" style="fill:var(--muted);font:10px var(--mono)">source: giltal/RetroESP32-P4</text>
+      <text x="250" y="191" style="fill:var(--muted);font:10px var(--mono)">odroid_sdcard.c · ldo_chan_id = 4</text>
+    </svg>
+    <p class="legend"><b>Takeaway for all P4 SDMMC here:</b> the SD rail is powered by on-chip LDO <b>VO4</b>
+       (<code>sd_pwr_ctrl_new_on_chip_ldo</code>, <code>ldo_chan_id = 4</code>) — bring it up as
+       <code>host.pwr_ctrl_handle</code> before <code>esp_vfs_fat_sdmmc_mount</code>. Pins + channel are in the
+       <a href="../../hardware/pico-e32-guition-jc4880p443c-p4.md">P4 board doc</a>.</p>
+  </div>
+
+  <h2 id="s2">2. Folder navigation — one Host method</h2>
+  <p>Carts live in genre folders, so the launcher walks subdirectories. That machinery was <b>already in
+     fake-08</b>: the browser calls <code>__listdirs()</code>→<code>Vm::GetDirList()</code>→<code>Host::listdirs()</code>,
+     and <code>__cd()</code>→<code>Vm::ChangeDirectory()</code> (handles <code>..</code>, absolute, relative). The
+     only gap was the esp32 <code>Host::listdirs()</code>, a <code>return {}</code> stub — filled by porting the
+     gcw0 version (<code>opendir</code>-probe each entry, since FatFs doesn't set <code>dirent.d_type</code>).
+     Recorded in the <a href="../../runtime/pico-e32-fake08-codemap.md">port code map</a>.</p>
+
+  <h2 id="s3">3. The native cover-art carousel</h2>
+  <p>A <code>.p8.png</code> is a 160×205 PNG whose visible pixels are the cart's label art. The launcher
+     (<code>firmware/pico-e32-fake08/main/carousel_launcher.cpp</code>, new) decodes it with lodepng — the same
+     decoder fake-08's <code>Cart</code> loader uses — and renders a centred cover thumbnail, breadcrumb, a
+     position bar, and two neighbour "peek" slices, <b>all confined to the game's on-screen column</b>. It polls
+     the shared <code>input_poll()</code> seam (touch when shipped, serial for headless tests) and, on select,
+     hands the chosen cart's path to the VM. Repaint is split (full only on a directory change; in-place on an
+     item move) to avoid flicker.</p>
+  <p><b>Deliberate divergence (flagged):</b> this is a native launcher, not fake-08's built-in
+     <code>DefaultCart</code> Lua browser — but it lives in the app, not the <code>components/fake08</code>
+     runtime, so the 1-to-1 port is untouched. Native buys full panel resolution + colour and board-driven layout.</p>
+
+  <h2 id="s4">4. Dead end — framebuffer screenshot over serial</h2>
+  <p>Tried the existing <code>FB_DUMP</code> path for crisp camera-free captures. It <b class="bad">does not work
+     reliably</b> on the P4 USB-Serial-JTAG and is recorded so nobody re-runs it:</p>
+  <ul>
+    <li>A raw 768 KB blob <b class="bad">hard-stops at a random point</b> — 65 KB, 170 KB, 632 KB, 685 KB across
+       attempts. Chunking made it <em>worse</em> (consistent ~685 KB). Same family as the known P4 "USB-JTAG
+       drops long reads" note.</li>
+    <li>Compressing to get under the stall floor hit a miniz <code>tdefl</code> wall: <code>MINIZ_NO_ZLIB_APIS</code>
+       removes <code>mz_compress2</code>; the one-call helper <code>MZ_MALLOC</code>s a ~300 KB compressor in
+       <b>internal RAM</b> (exhausted → returns 0). Fixed by putting the <code>tdefl_compressor</code> in PSRAM +
+       the callback streaming path (with <code>TDEFL_COMPUTE_ADLER32</code>) — a flat carousel screen then
+       crushes to ~8 KB and transfers cleanly, but the game still tears and the whole thing is fragile.</li>
+    <li><b>Conclusion:</b> the bench <b>camera</b> is the capture path (the primary HIL evidence anyway).
+       <code>FB_DUMP</code> stays as a dev-only aid, off by default.</li>
+  </ul>
+
+  <h2 id="s5">5. Board-relative layout → S3 port</h2>
+  <p>The layout was hardcoded to the P4 panel (a 384-wide game column) — on the S3's 320-wide panel that gives a
+     negative offset. Moved it into a per-board seam <code>board_carousel_layout()</code> (declared in each
+     <code>board.h</code>, implemented in each <code>board.cpp</code>); the carousel reads it once.</p>
+  <table>
+    <tr><th>field</th><th>P4 (480×800)</th><th>S3 (320×480)</th></tr>
+    <tr><td><code>game_x, game_w</code></td><td class="n">48, 384</td><td class="n">32, 256</td></tr>
+    <tr><td><code>thumb_w × thumb_h</code></td><td class="n">236 × 302</td><td class="n">148 × 190</td></tr>
+    <tr><td><code>thumb_y</code></td><td class="n">46</td><td class="n">30</td></tr>
+    <tr><td><code>side_w</code></td><td class="n">64</td><td class="n">34</td></tr>
+    <tr><td><code>crumb_y</code></td><td class="n">16</td><td class="n">8</td></tr>
+  </table>
+  <p><code>game_x/game_w</code> match where the fake-08 host renders the game (<code>pico_scale</code>,
+     <code>s_ox</code>). The S3 boots the same firmware and comes up correctly:</p>
+  <pre>I sdcard_spi: SD mounted at /sdcard   Name: SD32G  Type: SDHC
+I carousel: carousel layout: game 32+256, thumb 148x190 @y30, side 34
+I board-lcd: FT6236 touch up … touch deck drawn (S3 …)
+I carousel: carousel up: 3 entries in /sdcard</pre>
+
+  <h2 id="play">6. Playtest — carts launch and play, at 30 fps</h2>
+  <p>End-to-end on the P4, driven headlessly over serial (a temporary <code>INPUT_BACKEND=serial</code> build),
+     camera-recorded: carousel → <code>[Racing]</code> → launch the first cart (<b>"Don't Fear the Wormhole"</b>,
+     a space racer) → accelerate + steer <b class="ok">registered</b> (accrued distance) → ran to
+     <b>"GAME OVER — NEW HIGH SCORE! 3.00.18 LI'YRS"</b>. A first attempt hit <code>[RPG]</code> not
+     <code>[Racing]</code> (off-by-one: <code>[RPG]</code> sorts before <code>[Racing]</code> — uppercase
+     <code>P</code> &lt; lowercase <code>a</code>) — a free confirmation that a different cart type launches too.</p>
+  <p><b>On-screen FPS — and a HUD bug it surfaced.</b> With <code>-D SHOW_FPS=1</code> the generic meter
+     (<code>ESP32Host::waitForTargetFps</code>) repainted the HUD <b>only on value change</b>, assuming it "lives
+     outside the game blit region." True on the S3, <b class="bad">not the P4</b>: the game fills the panel width
+     (384 @ x48) and blits over the HUD spot (panel <code>(8,8)</code>) every frame — so at steady fps it was
+     drawn once, overwritten, invisible. <b class="ok">Fixed</b> to repaint every tick (tiny box, negligible
+     cost); the racing cart then reads <b>~30 fps</b> in play (36 on the menu). Small <code>fake08</code>
+     submodule change, <b>off by default</b>.</p>
+
+  <h2 id="state">7. Measurements + state</h2>
+  <ul>
+    <li><b>P4 heap, carousel up (touch build):</b> <code>376 KB internal, 31 738 KB PSRAM</code> free of 32 MB.
+       Carousel PSRAM use (a ~143 KB scratch + a small cover LRU) is negligible. No frame-time meter for the
+       carousel — it's an event-driven UI (repaints on input), not a 30/60 fps loop; the per-item repaint is a few
+       localised blits. The launched <b>racing cart runs at ~30 fps</b> (measured by the on-screen HUD, §6).</li>
+    <li><b>Boards:</b> P4 (<code>/dev/ttyACM0</code>) currently on the <b>serial + SHOW_FPS demo build</b> (for the
+       headless playtests) — <b class="warn">restore the clean touch shipping build before closing the session</b>.
+       S3 (<code>/dev/ttyUSB0</code>) on <code>-D LAUNCHER=1 -D INPUT_BACKEND=touch</code> (known-good); its card
+       has only stray folders.</li>
+    <li><b>Tree — all uncommitted</b> (code change ⇒ branch + PR when landing; commit <b>held</b> until after the
+       weekday 9–5 Pacific window). New <code>carousel_launcher.{cpp,h}</code>; board seams
+       (<code>board_sd_mount</code>, <code>board_carousel_layout</code>) on both boards; <code>main.cpp</code> +
+       <code>CMakeLists.txt</code>; and <b>two</b> <code>fake08</code> submodule changes — <code>Host::listdirs()</code>
+       and the <code>SHOW_FPS</code> per-tick HUD repaint (needs a submodule commit + gitlink bump).</li>
+    <li><b>Process gap (honest):</b> this shipped without a prior TODO or an as-you-go worklog — both required by
+       <code>.ai/AGENTS.md</code>. This render + the markdown are the retroactive record; the backlog item is now
+       in the master TODO + the P4 board doc.</li>
+  </ul>
+
+  <div class="foot">pico-e32 · worklog 2026-08-03 · SD cart launcher + cover-art carousel (P4 + S3) · <a href="index.html">← index</a></div>
+</div>
+</body>
+</html>

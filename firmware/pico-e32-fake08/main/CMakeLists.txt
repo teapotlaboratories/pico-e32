@@ -1,9 +1,9 @@
 # app_main boots fake-08's runtime (components/fake08) and drives its own Vm::GameLoop; the board owns
 # the display. board.cpp (selected by BOARD_DIR) is compiled into main, same as the other apps.
 idf_component_register(
-    SRCS "main.cpp" "${BOARD_DIR}/board.cpp"
+    SRCS "main.cpp" "carousel_launcher.cpp" "${BOARD_DIR}/board.cpp"
     INCLUDE_DIRS "." "${BOARD_DIR}" "${CMAKE_CURRENT_LIST_DIR}/../../../assets"
-    REQUIRES fake08 z8lua LovyanGFX esp_driver_uart esp_driver_gpio esp_driver_ledc esp_driver_i2c esp_timer sdcard_spi input esp_lcd esp_mm
+    REQUIRES fake08 z8lua LovyanGFX esp_driver_uart esp_driver_gpio esp_driver_ledc esp_driver_i2c esp_timer sdcard_spi fatfs sdmmc esp_driver_sdmmc input esp_lcd esp_mm
 )
 # esp_lcd + esp_mm are for the ESP32-P4 board.cpp (MIPI-DSI panel: esp_lcd DSI bus/DBI/DPI + esp_cache_msync
 # for the PSRAM framebuffer). The S3 board.cpp doesn't use them (LovyanGFX i80), but linking them there is
@@ -52,6 +52,12 @@ if(DEFINED SPIKE_HEAP_LOG)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE SPIKE_HEAP_LOG=${SPIKE_HEAP_LOG})
 endif()
 
+# Opt-in bench utility (`... DEFS='-D LCD_FILL=1'` for white, or `-D LCD_FILL=0xRRGGBB`): flood the panel one
+# solid colour then idle forever, turning an idle board into a fill light for the bench camera. See main.cpp.
+if(DEFINED LCD_FILL)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE LCD_FILL=${LCD_FILL})
+endif()
+
 # Opt-in perf experiment (`... DEFS='-D GC_MANUAL=1'`, needs TELEMETRY; add `-D GC_CORE1=1` to offload to core 1):
 # disable z8lua's auto collector and drive it in a bounded time slice each frame, so a big collection spreads
 # (and, with GC_CORE1, hides behind the Lua-free blit). Tunables: GC_BUDGET_US, GC_STEP_KB, GC_GUARD_KB.
@@ -65,6 +71,13 @@ endforeach()
 # (e.g. the input-reactive test cart) even when the microSD holds a .p8. Off by default.
 if(DEFINED FORCE_FLASH_CART)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE FORCE_FLASH_CART=${FORCE_FLASH_CART})
+endif()
+
+# Opt-in launcher/menu: `... DEFS='-D LAUNCHER=1'` boots fake-08's built-in cart browser (the DefaultCart)
+# when an SD card is mounted, so the user navigates the card's carts/folders and picks one, instead of
+# auto-loading. Pairs with INPUT_BACKEND=touch (the deck drives the browser). Off by default.
+if(DEFINED LAUNCHER)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE LAUNCHER=${LAUNCHER})
 endif()
 
 # Opt-in serial position telemetry: `... DEFS='-D CELESTE=1 -D TELEMETRY=1'` runs a GameLoop variant that
