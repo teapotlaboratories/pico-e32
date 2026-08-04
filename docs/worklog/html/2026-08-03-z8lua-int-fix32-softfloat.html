@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Killing the soft-float int(fix32) in the z8lua hot path — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8;
+        --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  :root[data-theme="light"]{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;--ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  :root[data-theme="dark"]{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;--border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)} .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;font-family:var(--mono)}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:9px;padding:.9rem 1.05rem;overflow-x:auto;font-size:.82rem;line-height:1.5;font-family:var(--mono)}
+  pre b.bad{color:var(--bad)} pre b.ok{color:var(--ok)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left}
+  th{background:var(--codebg);font-family:var(--mono);font-size:.82rem}
+  td.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .bad{color:var(--bad);font-weight:600} .ok{color:var(--ok);font-weight:600} .warn{color:var(--warn);font-weight:600}
+  .diag{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.3rem;margin:1.3rem 0}
+  .diag h3{margin:.1rem 0 .4rem;font-size:.95rem}
+  .diag .sub{color:var(--muted);font-size:.82rem;margin:0 0 1rem}
+  .legend{font-size:.78rem;color:var(--muted);margin-top:.7rem}
+  .foot{margin-top:2.6rem;padding-top:1rem;border-top:1px solid var(--border);color:var(--muted);font-size:.85rem}
+  .twocol{display:grid;grid-template-columns:1fr 1fr;gap:.9rem;margin:1rem 0}
+  @media (max-width:620px){.twocol{grid-template-columns:1fr}}
+  .twocol .lab{font:600 .72rem/1 var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:.4rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <h1>Killing the soft-float <code>int(fix32)</code> in the z8lua hot path</h1>
+  <p class="date">2026-08-03 · "is there an assembly-level optimization left in z8lua?" → disassemble the built interpreter, act on what it shows</p>
+
+  <div class="tldr">
+    The fixed-point VM was doing <b class="bad">double-precision soft-float</b> to extract an integer.
+    Every <code>int(fix32)</code> — peek/poke addresses, shift counts, string indexing — compiled to a
+    three-call <code>double</code> round-trip (<code>__floatsidf → __muldf3 → __fixdfsi</code>) instead of a
+    single <code>srai</code>, because <code>fix32</code>'s only <em>non-explicit</em> conversion is
+    <code>operator double()</code> and a bare <code>int(x)</code> is ambiguous among its explicit integer casts.
+    A <b class="ok">one-line <code>operator int()</code></b> fixes it everywhere.
+    Measured <b class="ok">2.48× (P4)</b> / <b class="ok">2.23× (S3)</b> on an <code>int(fix32)</code>-saturated
+    micro-benchmark, output byte-identical.
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:.8rem;margin:1.6rem 0">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--ok);font-variant-numeric:tabular-nums">2.48×</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">P4 (RISC-V) on the saturated bench — <b>450,631 → 181,356 µs</b></div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--ok);font-variant-numeric:tabular-nums">2.23×</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">S3 (Xtensa) — <b>667,313 → 299,831 µs</b>, output identical</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">3 → 1</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">soft-float calls → one <code>srai</code> per <code>int(fix32)</code></div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">1 line</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">the fix — an explicit <code>operator int()</code> in <code>fix32.h</code></div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--warn);font-variant-numeric:tabular-nums">missed</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">the 2026-08-01 "fix32 already optimal" audit didn't catch integer <em>extraction</em></div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--ok);font-variant-numeric:tabular-nums">0 Δ</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">behavior byte-identical (floor vs trunc differ only for negative fractionals — never on these paths)</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--accent);font-variant-numeric:tabular-nums">−2.5%</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">whole-cart: Pico Racer interpreter step (mul/div-bound → small)</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.05rem">
+      <div style="font:800 1.4rem/1.05 var(--mono);color:var(--ok);font-variant-numeric:tabular-nums">−9.0%</div>
+      <div style="color:var(--muted);font-size:.78rem;margin-top:.4rem;line-height:1.35">Wolfenstein 3D raycaster step — the peek/<code>t[i]</code>-heavy FPS class benefits ~3.5× the racer</div>
+    </div>
+  </div>
+
+  <h2 id="found">1. How it was found</h2>
+  <p>Disassembled the built interpreter object on both targets
+     (<code>…/z8lua/CMakeFiles/__idf_z8lua.dir/lvm.c.obj</code>), attributing every libgcc soft-float / soft-divide
+     call to its enclosing function and source line (<code>objdump -drl</code> + <code>addr2line -i</code>, vendored
+     toolchains). The hot dispatch loop carried a cluster of <b>double-precision</b> calls that has no business in a
+     <em>fixed-point</em> VM:</p>
+
+  <table>
+    <thead><tr><th>function</th><th><code>__muldf3</code></th><th><code>__floatsidf</code></th><th><code>__fixdfsi</code></th><th><code>__divdi3</code></th></tr></thead>
+    <tbody>
+      <tr><td><code>luaV_execute</code></td><td class="n bad">9</td><td class="n bad">8</td><td class="n bad">7</td><td class="n warn">3</td></tr>
+      <tr><td><code>luaV_gettable</code></td><td class="n bad">1</td><td class="n bad">1</td><td class="n bad">1</td><td class="n">—</td></tr>
+      <tr><td><code>luaV_peek</code></td><td class="n bad">1</td><td class="n bad">1</td><td class="n bad">1</td><td class="n">—</td></tr>
+    </tbody>
+  </table>
+
+  <p>Every one of those <code>__fixdfsi</code> / <code>__floatsidf</code> sites mapped to <code>fix32.h:34</code> —
+     <code>operator double()</code> — arranged as a <code>fix32 → double → int</code> round-trip, i.e.
+     <code>int( double(fix32) )</code>. It fires wherever the VM extracts an integer from a number:</p>
+  <ul>
+    <li><b>integer-keyed table access <code>t[i]</code></b> — <code>luaH_get</code>/<code>arrayindex</code>
+        (<code>ltable.c:131,488</code>) convert the fix32 key via <code>lua_number2int</code> →
+        <code>(int)(n)</code>. <b>The hottest one</b>, and it lives in <code>ltable.c</code>, not
+        <code>lvm.c</code> — found only in the second pass (see §6).</li>
+    <li><b><code>luaV_peek</code></b> (<code>lvm.c:251</code>, <code>int(a) &amp; 0xffff</code>) — every <code>peek</code>/<code>poke</code> and the <code>@</code>/<code>%</code>/<code>$</code> operators</li>
+    <li><b><code>OP_SHL/SHR/LSHR/ROTL/ROTR</code></b> (<code>luaconf.h:582-586</code>, the <code>int((b))</code> shift/rotate count)</li>
+    <li><b><code>luaV_gettable</code></b> (<code>lvm.c:140</code>, the PICO-8 <code>str[pos]</code> string-index shortcut)</li>
+  </ul>
+  <p>Ordinary arithmetic (<code>+ - * &lt; &gt;</code>, <code>band/bor/bxor</code>) is already pure integer and was
+     untouched. The residual double in <code>OP_POW</code> (<code>fix32::pow</code> = <code>fix32(std::pow(double,double))</code>)
+     is legitimate — transcendental and cold. The 3 <code>__divdi3</code> are the known fix32 divide, previously
+     measured as low-value under the 30&nbsp;fps display cap. Both left alone.</p>
+
+  <h2 id="cause">2. Root cause — an ambiguous cast falling back to <code>double</code></h2>
+  <p><code>fix32</code> has eight <code>explicit</code> integer conversion operators
+     (<code>int8_t</code>…<code>uint64_t</code>) but <b>no <code>operator int()</code></b>, and <code>int</code> is a
+     <em>distinct</em> type from all of them — <code>int32_t</code> is <code>long</code> on both ESP toolchains. So
+     <code>int(x)</code> matches none exactly, overload resolution finds the <code>int8_t</code>/<code>int16_t</code>
+     promotions equally ranked (ambiguous), and silently falls back to the only <em>non-explicit</em> conversion:
+     <code>operator double()</code>.</p>
+
+  <div class="diag">
+    <h3>What <code>int(fix32)</code> resolves to</h3>
+    <p class="sub">No exact <code>int</code> match → the explicit integer operators tie → the lone implicit path wins, and it's the expensive one.</p>
+    <svg viewBox="0 0 820 250" width="100%" role="img" aria-label="int(fix32) has no exact operator; the integer casts are ambiguous; the only non-explicit conversion is operator double, so it is chosen, producing a soft-float round-trip; adding an explicit operator int gives an exact match and one shift">
+      <defs>
+        <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L7,3 L0,6 z" style="fill:var(--line)"/>
+        </marker>
+      </defs>
+      <rect x="14" y="98" width="150" height="52" rx="9" style="fill:var(--surface);stroke:var(--accent);stroke-width:1.8"/>
+      <text x="89" y="120" style="fill:var(--fg);text-anchor:middle;font:700 12px var(--mono)">int(fix32)</text>
+      <text x="89" y="137" style="fill:var(--muted);text-anchor:middle;font:9.5px var(--mono)">wants an int</text>
+
+      <line x1="164" y1="124" x2="202" y2="124" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah)"/>
+
+      <rect x="204" y="14" width="270" height="46" rx="9" style="fill:var(--surface);stroke:var(--bad);stroke-width:1.5"/>
+      <text x="339" y="32" style="fill:var(--fg);text-anchor:middle;font:700 10px var(--mono)">explicit int8_t / int16_t / int32_t…</text>
+      <text x="339" y="49" style="fill:var(--bad);text-anchor:middle;font:9.5px var(--mono)">✗ int ≠ int32_t (=long); promotions tie → ambiguous</text>
+
+      <rect x="204" y="100" width="270" height="48" rx="9" style="fill:var(--surface);stroke:var(--warn);stroke-width:1.8"/>
+      <text x="339" y="120" style="fill:var(--fg);text-anchor:middle;font:700 10.5px var(--mono)">operator double()  (non-explicit)</text>
+      <text x="339" y="137" style="fill:var(--warn);text-anchor:middle;font:9.5px var(--mono)">only unambiguous path → chosen</text>
+
+      <rect x="204" y="188" width="270" height="46" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.8"/>
+      <text x="339" y="206" style="fill:var(--fg);text-anchor:middle;font:700 10.5px var(--mono)">+ explicit operator int()  [the fix]</text>
+      <text x="339" y="223" style="fill:var(--ok);text-anchor:middle;font:9.5px var(--mono)">exact match → wins outright</text>
+
+      <line x1="474" y1="124" x2="512" y2="124" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah)"/>
+      <rect x="514" y="96" width="292" height="56" rx="9" style="fill:var(--surface);stroke:var(--bad);stroke-width:1.6"/>
+      <text x="660" y="116" style="fill:var(--bad);text-anchor:middle;font:700 10.5px var(--mono)">__floatsidf → __muldf3 → __fixdfsi</text>
+      <text x="660" y="133" style="fill:var(--muted);text-anchor:middle;font:9.5px var(--mono)">soft-float round-trip, ~100 cyc + stack frame</text>
+      <text x="660" y="147" style="fill:var(--muted);text-anchor:middle;font:9px var(--mono)">(what happened before the fix)</text>
+
+      <line x1="474" y1="211" x2="512" y2="211" style="stroke:var(--line);stroke-width:2" marker-end="url(#ah)"/>
+      <rect x="514" y="188" width="292" height="46" rx="9" style="fill:var(--surface);stroke:var(--ok);stroke-width:1.8"/>
+      <text x="660" y="209" style="fill:var(--ok);text-anchor:middle;font:700 12px var(--mono)">srai a0, a0, 16</text>
+      <text x="660" y="225" style="fill:var(--muted);text-anchor:middle;font:9px var(--mono)">one instruction</text>
+    </svg>
+    <p class="legend">This is the exact mirror of a committed 2026-07-14 local patch — a <code>fix32(int)</code>
+       <em>constructor</em> for the <code>int → fix32</code> direction, whose comment already notes "int32_t is
+       'long', leaving plain 'int' uncovered so int→fix32 is ambiguous." Same disease, other direction.</p>
+  </div>
+
+  <h2 id="fix">3. The fix</h2>
+  <p>One line in <code>components/z8lua/fix32.h</code>, alongside the other cast operators, gives <code>int(x)</code>
+     an exact match:</p>
+  <pre>inline explicit operator int() const { return m_bits >> 16; }</pre>
+
+  <div class="twocol">
+    <div>
+      <div class="lab">before — <span class="bad">int(fix32)</span></div>
+      <pre>call  <b class="bad">__floatsidf</b>
+lui   a5,%hi(.LC0)
+lw    a2,%lo(.LC0)(a5)
+lw    a3,%lo(.LC0+4)(a5)
+call  <b class="bad">__muldf3</b>
+call  <b class="bad">__fixdfsi</b>
+<span style="color:var(--muted)"># + stack frame (sp, ra)</span></pre>
+    </div>
+    <div>
+      <div class="lab">after — <span class="ok">int(fix32)</span></div>
+      <pre><b class="ok">srai  a0,a0,16</b>
+ret</pre>
+    </div>
+  </div>
+  <p>Verified at the compiler level (isolated <code>.cpp</code>, <code>-O2 -march=rv32imafc</code>) and in the rebuilt
+     interpreter objects: <code>__fixdfsi</code> is <b class="ok">gone</b> from <code>luaV_execute</code>/<code>peek</code>/<code>gettable</code>
+     on both P4 and S3; the only <code>double</code> left is <code>OP_POW</code>'s <code>std::pow</code>.</p>
+  <p><b>Correctness.</b> <code>m_bits &gt;&gt; 16</code> is arithmetic-shift floor; the old <code>double</code> path
+     truncated toward zero. They differ <em>only for negative fractional</em> inputs — which never occur for shift
+     counts, peek addresses, or string indices (all non-negative integers). The benchmark's result is byte-identical
+     before/after on each board, confirming no behavioral change on the exercised paths.</p>
+
+  <h2 id="measure">4. Measurement</h2>
+  <p>Dev-only <code>LUABENCH</code> temporarily pointed at a shift/peek-saturated loop — 90,000 iterations ×
+     (5 shifts + 1 <code>@</code> peek) = 540k <code>int(fix32)</code> conversions, timed in C over serial
+     (<code>-D LUABENCH=1 -D FORCE_FLASH_CART=1</code>). Bench body (reverted after; kept here for repro):</p>
+  <pre>s = s + (i&lt;&lt;3) + (i&gt;&gt;2) + (i&gt;&gt;&gt;1) + (i&lt;&lt;&gt;4) + (i&gt;&gt;&lt;2) + @i</pre>
+  <table>
+    <thead><tr><th>board</th><th>baseline (double round-trip)</th><th>with fix (<code>srai</code>)</th><th>speedup</th><th>result <code>s</code></th></tr></thead>
+    <tbody>
+      <tr><td><b>P4</b> · RISC-V · /dev/ttyACM0</td><td class="n">450,631 µs</td><td class="n ok">181,356 µs</td><td class="n ok">2.48×</td><td class="n">20564 (both)</td></tr>
+      <tr><td><b>S3</b> · Xtensa · /dev/ttyUSB0</td><td class="n">667,313 µs</td><td class="n ok">299,831 µs</td><td class="n ok">2.23×</td><td class="n">−30108 (both)</td></tr>
+    </tbody>
+  </table>
+  <p class="legend">Medians of 5. <code>s</code> differs across boards (a pre-existing cross-arch difference in the
+     peeked flash-cart memory, unrelated to this change); identical <em>within</em> each board = behavior preserved.</p>
+
+  <h3 style="margin:1.8rem 0 .5rem">Whole-cart check — Pico Racer (P4)</h3>
+  <p>To see the effect on a real interpreter-bound cart, measured the racer under
+     <code>-D RACER=1 -D MEASURE_FPS=1</code> (times raw <code>Step()</code> compute, unpaced). The reproducible
+     state is the <b>idle title/attract</b> (mode-7 running, dead-stable step); active racing swings 5.5–40&nbsp;ms
+     by scene and is too noisy to A/B cleanly.</p>
+  <table>
+    <thead><tr><th>racer state (P4)</th><th>baseline</th><th>with fix</th><th>Δ</th></tr></thead>
+    <tbody>
+      <tr><td>idle title <code>step</code> (n=24 each, non-overlapping)</td><td class="n">5.680 ms</td><td class="n ok">5.540 ms</td><td class="n ok">−2.5%</td></tr>
+      <tr><td><code>draw</code></td><td class="n">~3.05 ms</td><td class="n">~3.02 ms</td><td class="n">unaffected</td></tr>
+    </tbody>
+  </table>
+  <p><b>~2.5% off the interpreter step</b> — the expected "small" outcome: the racer is mode-7
+     <b>mul/div + draw</b>-bound, so <code>int(fix32)</code> (peek/shift) is only a minor share (≈4% of Step). And
+     at the title the cart is compute-bound at ~116&nbsp;fps vs the 30&nbsp;fps display cap (≈4× headroom), so this
+     is <b>CPU-time / power headroom, not observable fps</b> — exactly the caveat below. This is the honest
+     whole-cart figure; the 2.2–2.5× above is the isolated-op upper bound.</p>
+  <div class="diag" style="border-left:4px solid var(--warn)">
+    <h3>Build-system gotcha found here</h3>
+    <p class="sub" style="margin-bottom:.3rem">The <code>make</code> wrapper passes <code>DEFS</code> as CMake
+       <em>cache</em> variables, so a <code>-D</code> from one build <b>persists</b> into the next until
+       <code>fullclean</code>. An earlier <code>-D LUABENCH</code> had stuck, silently running the halt-bench in
+       place of later builds (including the "shipping" reflashes). Fix: <code>make fullclean</code> before a build
+       whose define set shrinks. Both boards were rebuilt clean afterward.</p>
+  </div>
+
+  <h3 style="margin:1.8rem 0 .5rem">Gun-FPS playtest — the cart class that benefits most (P4)</h3>
+  <p>A raycaster FPS is the ideal real-world test: CPU-heavy <em>and</em> <code>peek</code>/<code>t[i]</code>-heavy
+     (map + texture sampling) — exactly the fix's hot paths, unlike the racer's mul/div mode-7.</p>
+  <ul>
+    <li><b>POOM</b> (Doom demake) — boots but <b class="bad">hangs at level-load</b> ("ENTERING HANGAR", steady
+        ~16 ms). POOM's <code>reload()</code>-based level decompression is a known emulator pain point; not
+        playable on fake-08 as-is. (Also the genuinely heavy one — ~37 ms/frame during load.)</li>
+    <li><b>Wolfenstein 3D</b> — <b class="ok">plays</b>: title → <code>🅾️</code> starts it → the 3D raycasted
+        maze renders with the gun HUD (SCORE/HEALTH/AMMO), driven over serial, confirmed on the bench camera.
+        Moving ≈ 14 ms step + 3 ms draw ≈ <b>59 fps compute-bound</b> (smooth at the 30 fps cap).</li>
+  </ul>
+  <table>
+    <thead><tr><th>Wolf3D raycaster step (P4)</th><th>baseline</th><th>with fix</th><th>Δ</th></tr></thead>
+    <tbody>
+      <tr><td>standing, pure raycast (n=20/23)</td><td class="n">12.770 ms</td><td class="n ok">11.620 ms</td><td class="n ok">−9.0%</td></tr>
+    </tbody>
+  </table>
+  <p><b>~9% — about 3.5× the racer's 2.5%.</b> A raycaster leans on <code>peek</code>/integer-keyed
+     <code>t[i]</code> for every column it samples, so removing the soft-float round-trip hits far harder than on
+     the mul/div-bound racer. Not <em>observable</em> as fps here (Wolf3D has headroom at the 30 fps cap), but a
+     heavier raycaster (POOM's ~37 ms/frame) would cross into observable territory — the strongest evidence the
+     fix is worth more than the racer alone suggested.</p>
+
+  <h2 id="scope">5. Scope &amp; honesty</h2>
+  <p>This bench is <b>deliberately <code>int(fix32)</code>-saturated</b>, so 2.2–2.5× is the <em>upper bound for that
+     operation</em>, not a whole-cart number. Real-cart gain is proportional to a cart's peek/poke and bit-shift
+     density and — because the display is 30&nbsp;fps-capped — is only <em>observable</em> as fps when a cart is
+     CPU-bound. A memory-tricks / blitter cart hammering <code>peek</code> will feel it; the racer and Celeste
+     won't.</p>
+  <p>Still worth landing: a one-line, strictly-better-codegen fix for a genuine "soft-float in a fixed-point VM"
+     defect, lower CPU load/power across the board, and de-risked for any future CPU-bound cart. The divide hand-roll
+     remains not-worth-it.</p>
+
+  <h2 id="pass2">6. Second adversarial pass — no new lever</h2>
+  <p>Swept <b>every</b> libgcc soft-float/soft-div/soft-mod call across <em>all</em> z8lua objects (not just
+     <code>lvm.c</code>) on the fixed P4 build, attributing each to a function and source line:</p>
+  <ul>
+    <li><b>Hot machinery is clean:</b> <code>ltable</code>, <code>lstring</code>, <code>ldo</code>,
+        <code>lgc</code>, <code>lfunc</code> have <b class="ok">zero</b> soft-float/div/mod sites.</li>
+    <li><b><code>ltable</code> being clean is the headline</b> — the fix already de-soft-floated
+        <code>lua_number2int</code>, i.e. integer-keyed table indexing <code>t[i]</code>, the hottest op in
+        gameplay carts. (The earlier table bench used <em>string</em> keys <code>t.a</code> — the hash path —
+        so it never exercised this.)</li>
+    <li><b>Remaining soft-float is cold or assessed:</b> <code>OP_POW</code> (<code>std::pow</code>, rare);
+        <code>luaO_arith</code> (arithmetic <em>fallback</em>, not the inlined fast path);
+        <code>luaV_tostring</code>/<code>luaO_str2d</code> (number↔string, needs <code>double</code> for
+        <code>%f</code>); and the fix32 divide (low-value under the 30 fps cap).</li>
+    <li><b>fix32 primitives optimal:</b> <code>*</code> → <code>mul</code>/<code>mulh</code>, <code>%</code> →
+        hardware <code>rem</code>.</li>
+  </ul>
+  <p><b>Conclusion:</b> no further worthwhile assembly-level lever in the interpreter. The one real hot-path
+     soft-float defect was <code>int(fix32)</code>, now fixed, and its reach includes the hottest op.</p>
+
+  <h2 id="state">7. State</h2>
+  <ul>
+    <li><b>P4 + S3 reflashed to their shipping launcher/touch builds</b> (with the fix baked in) — known-good.</li>
+    <li>Change on submodule branch <code>fix32-int-conv-no-softfloat</code>; superproject <code>z8lua-fix32-int-conv</code>. Working tree holds only the one-line deliverable (temporary bench reverted).</li>
+    <li><b>Not committed</b> — weekday 9–5 Pacific no-commit window. When landing: z8lua submodule commit + gitlink bump, branch → PR → <code>/review</code> (rebase). No behavior change → low review risk.</li>
+    <li>Full narrative: <code>docs/worklog/2026-08-03-z8lua-int-fix32-softfloat.md</code>. Corrects the <code>z8lua-interpreter-pinned-o0</code> record (the 2026-08-01 audit's "fix32 already optimal" claim missed integer extraction).</li>
+  </ul>
+
+  <div class="foot">pico-e32 · worklog 2026-08-03 · soft-float <code>int(fix32)</code> → single <code>srai</code> · <a href="index.html">← index</a></div>
+</div>
+</body>
+</html>
