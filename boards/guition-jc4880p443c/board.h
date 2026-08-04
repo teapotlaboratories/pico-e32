@@ -8,8 +8,9 @@
  *
  * GP-3: board.cpp implements the display over MIPI-DSI (ST7701S), hardware-verified. GP-5: GT911
  * capacitive touch (I2C). The pins/timing/init are sourced from ESPHome's board model + confirmed on
- * hardware — see board.cpp's header. This board has no microSD slot, so BOARD_HAS_SD is not defined and
- * an app's SD path compiles out. ES8311 audio comes next. See docs/hardware/pico-e32-guition-jc4880p443c-p4.md.
+ * hardware — see board.cpp's header. This board has a TF/microSD slot wired to the ESP32-P4 SDMMC
+ * peripheral (slot 0, 4-bit) — BOARD_HAS_SDMMC below; SD-over-SPI (BOARD_HAS_SD) is a different seam the
+ * S3 uses. ES8311 audio too. See docs/hardware/pico-e32-guition-jc4880p443c-p4.md.
  */
 #pragma once
 
@@ -73,6 +74,27 @@ uint8_t board_touch_hittest(int x, int y);    /* map a touch (display coords) to
 #define BOARD_HAS_AUDIO 1
 esp_err_t board_audio_init(void);
 void      board_audio_write(const int16_t *stereo, size_t frames);
+
+/* This board HAS a TF/microSD slot on the ESP32-P4 SDMMC peripheral (slot 0, 4-bit, IO_MUX). Unlike the S3's
+ * SD-over-SPI (BOARD_HAS_SD, sdcard_spi), SDMMC is a native host with its own mount path, so the board owns
+ * the WHOLE mount (esp_vfs_fat_sdmmc_mount) behind this one seam — the app just asks for a mount point and
+ * gets a FAT VFS. ESP_OK on success; any error means "no card / mount failed" and the app falls back to the
+ * flash cart. Idempotent-ish: a second call while mounted returns ESP_ERR_INVALID_STATE. */
+#define BOARD_HAS_SDMMC 1
+esp_err_t board_sd_mount(const char *mount_point);
+
+/* Carousel-launcher layout for THIS panel (display pixels). The launcher reads these instead of hardcoding
+ * positions, so the same UI code lays out correctly on any board. The game column [game_x, game_x+game_w)
+ * must match where the fake-08 host actually renders the game (128 * integer upscale, horizontally centred),
+ * so launcher content stays inside the game's on-screen footprint. */
+typedef struct {
+    int game_x, game_w;    /* game column (content is confined here) */
+    int thumb_w, thumb_h;  /* centre cover thumbnail (portrait, ~160:205) */
+    int thumb_y;           /* thumbnail top */
+    int side_w;            /* side peek width */
+    int crumb_y;           /* breadcrumb top */
+} board_carousel_layout_t;
+void board_carousel_layout(board_carousel_layout_t *out);
 
 #ifdef __cplusplus
 }

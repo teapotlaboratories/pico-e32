@@ -30,6 +30,39 @@
       linked from this index (see <a href="../../../.ai/AGENTS.md">.ai/AGENTS.md</a> → Worklogs).</p>
     <ul class="entries">
       <li>
+        <span class="d">2026-08-03</span>
+        <a class="t" href="2026-08-03-z8lua-int-fix32-softfloat.html">z8lua · soft-float <code>int(fix32)</code> → single <code>srai</code></a>
+        <span class="s">Disassembling the built interpreter turned up a defect the "-O0→-O2" audit missed: the
+          <strong>fixed-point VM was doing double-precision soft-float to extract an integer</strong>. Every
+          <code>int(fix32)</code> — peek/poke addresses, shift/rotate counts, <code>str[pos]</code> — compiled to a
+          three-call <code>double</code> round-trip (<code>__floatsidf → __muldf3 → __fixdfsi</code>) instead of one
+          <code>srai</code>, because <code>fix32</code>'s only non-explicit conversion is <code>operator double()</code>
+          and a bare <code>int(x)</code> is ambiguous among its explicit integer casts (<code>int ≠ int32_t</code>).
+          Fix = <strong>one line</strong>, an explicit <code>operator int()</code> in <code>fix32.h</code> (mirror of the
+          committed <code>fix32(int)</code> constructor patch). Verified <code>__fixdfsi</code> gone from the hot
+          functions on both archs; measured <strong>2.48× (P4)</strong> / <strong>2.23× (S3)</strong> on an
+          <code>int(fix32)</code>-saturated micro-bench, output byte-identical. Upper bound for the op, not a whole-cart
+          number (display 30 fps-capped). <strong>Uncommitted</strong> (weekday no-commit window); both boards reflashed
+          known-good with it baked in.</span>
+      </li>
+      <li>
+        <span class="d">2026-08-03</span>
+        <a class="t" href="2026-08-03-p4-sd-launcher-carousel.html">SD cart launcher · native cover-art carousel (P4 + S3)</a>
+        <span class="s">Both handhelds now <strong>boot into a cart launcher</strong>. The P4's TF slot works over
+          SDMMC once the card's rail is powered from the <strong>on-chip LDO (VO4)</strong> — the whole blocker
+          (pins 43/44/39-42 were right; the timeout looked like a dead slot). A new native <strong>cover-art
+          carousel</strong> (<code>carousel_launcher.cpp</code>) decodes each <code>.p8.png</code> label with
+          lodepng, browses the SD folder tree (needed only the esp32 <code>Host::listdirs()</code> — the
+          <code>__cd</code>/<code>__listdirs</code> chain was already in fake-08), and launches into the VM.
+          Layout comes from a per-board seam <code>board_carousel_layout()</code>, so the <strong>same code runs
+          on the S3</strong> (320×480) and the P4 (480×800), both confirmed live. Dead end recorded:
+          framebuffer-screenshot-over-serial stalls at a random 65–685 KB on the P4 USB-JTAG — the bench camera
+          is the capture path. <strong>Playtested</strong> a racing cart end-to-end (carousel → launch → drive →
+          game over) at <strong>~30 fps</strong> — which surfaced + fixed an FPS-HUD bug (repainted only on value
+          change, so the P4's full-width game overwrote it). <strong>Uncommitted; process gap (no prior
+          TODO/as-you-go worklog) noted.</strong></span>
+      </li>
+      <li>
         <span class="d">2026-07-29</span>
         <a class="t" href="2026-07-29-gp3-p4-display-research.html">P4 bring-up day — display, input, and real Celeste (GP-3→GP-7)</a>
         <span class="s">The ESP32-P4 board went from dark to running <strong>real Celeste</strong> in one session.

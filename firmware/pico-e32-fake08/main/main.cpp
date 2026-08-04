@@ -18,6 +18,9 @@
 
 #include "board.h"    /* board_lcd_init() — the app owns board bring-up */
 #include "host.h"
+#if defined(LAUNCHER) || defined(FB_DUMP)
+#include "carousel_launcher.h"   /* native cover-art carousel + the shared compressed FB_DUMP helper */
+#endif
 #include "vm.h"
 #include "PicoRam.h"
 #include "Audio.h"
@@ -156,6 +159,18 @@ extern "C" void app_main(void) {
         return;
     }
 
+#ifdef LCD_FILL
+    /* Bench utility (NOT a game build): flood the panel one solid colour, then idle forever. Used to
+     * turn an idle board into a fill light for the bench camera. -D LCD_FILL=1 = white; or pass a
+     * 0xRRGGBB value, e.g. -D LCD_FILL=0xffffff. No SD / VM / host bring-up happens past this point. */
+    {
+        unsigned rgb = ((LCD_FILL) == 1) ? 0xffffffu : (unsigned)(LCD_FILL);
+        board_lcd_fill(board_lcd_rgb565((rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff));
+        ESP_LOGI(TAG, "LCD_FILL: solid 0x%06x, idling as a fill light", rgb);
+        for (;;) vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+#endif
+
     /* Mount the SD for carts. The board owns the wiring (board_sd_config); the app owns the policy
      * (mount point, no-format). Non-fatal: no card / no SD slot / mount failure -> the flash cart. */
     esp_err_t sd_ret = ESP_ERR_NOT_FOUND;      /* "no SD this boot" until a mount proves otherwise */
@@ -166,6 +181,10 @@ extern "C" void app_main(void) {
     if (board_sd_config(&sdcfg)) {               /* board fills host / pins / owns_bus */
         sd_ret = sdcard_spi_mount(&sdcfg);
     }
+#elif BOARD_HAS_SDMMC
+    /* Native SDMMC boards (the P4) own the whole mount behind board_sd_mount — SPI's config/mount seam
+     * doesn't apply. Same non-fatal contract: non-ESP_OK just means "run the flash cart". */
+    sd_ret = board_sd_mount(SD_MOUNT_POINT);
 #endif
 
     /* fake-08 boot sequence (mirrors source/main.cpp:39-51). Pass the board's panel size so the host
@@ -192,11 +211,27 @@ extern "C" void app_main(void) {
 
     bool loaded = false;
 #ifndef FORCE_FLASH_CART
+#ifdef LAUNCHER
+    /* Launcher build (`-D LAUNCHER=1`): if the SD mounted, run the native cover-art carousel over the card
+     * (decodes each .p8.png's label art, 3-up carousel, deck-driven folder navigation). It returns the cart
+     * the user chose; we load that. If the user exits without choosing (or it errors), fall back to fake-08's
+     * built-in text browser, then the flash cart. */
+    if (sd_ret == ESP_OK) {
+        std::string pick = carousel_launcher_run(host, SD_MOUNT_POINT);
+        if (!pick.empty()) {
+            ESP_LOGI(TAG, "LAUNCHER: loading %s", pick.c_str());
+            loaded = vm->LoadCart(pick, false);
+            if (!loaded) ESP_LOGW(TAG, "chosen cart failed to load; falling back");
+        }
+        if (!loaded) loaded = vm->LoadBiosCart();   /* exited/failed -> the text browser */
+    }
+#else
     if (sd_ret == ESP_OK && !carts.empty()) {
         ESP_LOGI(TAG, "loading SD cart: %s", carts[0].c_str());
         loaded = vm->LoadCart(carts[0], false); /* std::string overload -> reads the file over VFS */
         if (!loaded) ESP_LOGW(TAG, "SD cart failed to load; falling back to the flash cart");
     }
+#endif
 #else
     ESP_LOGW(TAG, "FORCE_FLASH_CART: ignoring any SD cart, running the flash cart"); /* dev/demo only */
     (void)sd_ret;
@@ -544,25 +579,17 @@ extern "C" void app_main(void) {
     ESP_LOGI(TAG, "FB_DUMP: streaming the framebuffer after warmup");
     {
         const int target = 120;   /* ~2 s at 60 Hz resume: deck drawn (frame-0 scanInput) + game settled */
+        const int period = 90;    /* then re-dump every ~1.5 s so a headless driver can catch gameplay frames */
         for (int f = 0;; f++) {
             vm->Step();
             host->drawFrame(vm->GetPicoInteralFb(), vm->GetScreenPaletteMap(), 0);
-            if (f == target) {
+            if (f >= target && (f - target) % period == 0) {
                 int w = 0, h = 0;
                 const uint16_t *fb = board_lcd_framebuffer(&w, &h);
-                if (fb && w > 0 && h > 0) {
-                    esp_log_level_set("*", ESP_LOG_NONE);      /* silence logs during the binary blob */
-                    vTaskDelay(pdMS_TO_TICKS(60));
-                    uint8_t hdr[12] = { 0xFB, 0xFB, 0xFB, 0xFB, 'S', 'H', 'O', 'T',
-                                        (uint8_t)(w & 0xff), (uint8_t)(w >> 8),
-                                        (uint8_t)(h & 0xff), (uint8_t)(h >> 8) };
-                    fwrite(hdr, 1, sizeof(hdr), stdout);
-                    fwrite(fb, 2, (size_t)w * h, stdout);      /* raw RGB565, little-endian */
-                    fflush(stdout);
-                    vTaskDelay(pdMS_TO_TICKS(60));
-                    esp_log_level_set("*", ESP_LOG_INFO);
-                    ESP_LOGI(TAG, "FB_DUMP: sent %dx%d framebuffer (%u bytes)", w, h, (unsigned)(w * h * 2));
-                }
+                /* Deflate + stream the full-res framebuffer (shared helper in carousel_launcher.cpp). Raw
+                 * 768 KB writes stall at a random point over the P4 USB-JTAG; the compressed blob is small
+                 * enough to clear the transfer reliably. */
+                fb_dump_compressed(fb, w, h);
             }
             host->waitForTargetFps();
         }

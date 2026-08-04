@@ -190,6 +190,14 @@ extern "C" uint16_t board_lcd_rgb565(uint8_t r, uint8_t g, uint8_t b) {
 extern "C" int board_lcd_width(void)  { return BOARD_LCD_H_RES; }
 extern "C" int board_lcd_height(void) { return BOARD_LCD_V_RES; }
 
+/* 320x480 panel; the fake-08 host runs the game at 128*2 = 256, centred (x=32). A smaller portrait thumbnail
+ * fits in the top region (game area is 256 tall) with room for the breadcrumb + position bar above the deck. */
+extern "C" void board_carousel_layout(board_carousel_layout_t *out) {
+    out->game_x = 32;  out->game_w = 256;
+    out->thumb_w = 148; out->thumb_h = 190; out->thumb_y = 30;
+    out->side_w = 34;  out->crumb_y = 8;
+}
+
 extern "C" void board_lcd_selftest(void) {
     if (!s_lcd) { ESP_LOGE(TAG, "selftest: not initialised"); return; }
     const uint32_t cols[3] = { 0xFF0000u, 0x00FF00u, 0x0000FFu };

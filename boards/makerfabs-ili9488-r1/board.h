@@ -89,6 +89,18 @@ void      board_audio_write(const int16_t *stereo, size_t frames);
 /* NOTE: board_lcd_draw_fps() is no longer a board function — the FPS HUD is now portable and lives in
  * firmware/pico-e32-fake08/main/fps_hud.cpp (rendered via board_lcd_blit). See that file. */
 
+/* Carousel-launcher layout for THIS panel (display pixels). The launcher reads these instead of hardcoding
+ * positions, so the same UI code lays out correctly on any board. The game column [game_x, game_x+game_w)
+ * must match where the fake-08 host renders the game (128 * integer upscale, horizontally centred). */
+typedef struct {
+    int game_x, game_w;    /* game column (content is confined here) */
+    int thumb_w, thumb_h;  /* centre cover thumbnail (portrait, ~160:205) */
+    int thumb_y;           /* thumbnail top */
+    int side_w;            /* side peek width */
+    int crumb_y;           /* breadcrumb top */
+} board_carousel_layout_t;
+void board_carousel_layout(board_carousel_layout_t *out);
+
 #ifdef __cplusplus
 }
 #endif
