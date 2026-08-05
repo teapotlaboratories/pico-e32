@@ -44,6 +44,7 @@
 #include "driver/i2c_master.h"   /* FT6236 touch (new IDF I2C master API) */
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"          /* FB_DUMP shadow framebuffer in PSRAM */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -166,6 +167,30 @@ extern "C" esp_err_t board_lcd_init(void) {
     return ESP_OK;
 }
 
+#ifdef FB_DUMP
+/* Host-side shadow of the panel for a camera-free "screenshot over serial" (FB_DUMP): this GRAM panel can't
+ * be read back (readRect returns garbage here), so instead every board_lcd_blit mirrors its region into this
+ * full-screen buffer — exactly what the P4's persistent DPI framebuffer gives for free. board_lcd_framebuffer
+ * hands it to the FB_DUMP path. Only compiled under FB_DUMP, so normal builds carry no shadow / no per-blit
+ * copy. Stores what's pushed to the panel (SWAP_COLOR_BYTES order); board_lcd_framebuffer un-swaps on read. */
+static uint16_t *s_shadow = nullptr;
+static void shadow_blit(int x, int y, int w, int h, const uint16_t *src) {
+    if (!s_shadow) {
+        s_shadow = (uint16_t *)heap_caps_malloc((size_t)BOARD_LCD_H_RES * BOARD_LCD_V_RES * 2, MALLOC_CAP_SPIRAM);
+        if (!s_shadow) return;
+    }
+    /* Faithful copy of the logical framebuffer: each blit lands at its own (x,y). This is exactly what the
+     * launcher drew, i.e. what's on screen (the panel draws logical coords straight; it does not mirror). */
+    for (int r = 0; r < h; r++) {
+        int yy = y + r;
+        if (yy < 0 || yy >= BOARD_LCD_V_RES) continue;
+        int x0 = x < 0 ? 0 : x, x1 = (x + w > BOARD_LCD_H_RES) ? BOARD_LCD_H_RES : x + w;
+        if (x1 <= x0) continue;
+        memcpy(s_shadow + (size_t)yy * BOARD_LCD_H_RES + x0, src + (size_t)r * w + (x0 - x), (size_t)(x1 - x0) * 2);
+    }
+}
+#endif
+
 extern "C" void board_lcd_blit(int x, int y, int w, int h, const uint16_t *src) {
     /* One transaction per blit, so the unnested endWrite() drains it — the blit blocks until the
      * transfer completes and `src` is reusable. Do NOT wrap several blits in an outer
@@ -173,6 +198,9 @@ extern "C" void board_lcd_blit(int x, int y, int w, int h, const uint16_t *src) 
      * queueing-rate measurement. See docs/worklog/2026-07-16-yflip-and-gate1-fps.md. */
     if (SWAP_COLOR_BYTES) s_lcd->pushImage(x, y, w, h, (const lgfx::swap565_t *)src);
     else                  s_lcd->pushImage(x, y, w, h, (const lgfx::rgb565_t  *)src);
+#ifdef FB_DUMP
+    shadow_blit(x, y, w, h, src);
+#endif
 }
 
 extern "C" void board_lcd_fill(uint16_t color) {
@@ -190,12 +218,32 @@ extern "C" uint16_t board_lcd_rgb565(uint8_t r, uint8_t g, uint8_t b) {
 extern "C" int board_lcd_width(void)  { return BOARD_LCD_H_RES; }
 extern "C" int board_lcd_height(void) { return BOARD_LCD_V_RES; }
 
+#ifdef FB_DUMP
+/* FB_DUMP screenshot source: the host-side shadow (this GRAM panel can't be read back). Returns a copy with
+ * the bytes un-swapped to standard RGB565 (the shadow holds SWAP_COLOR_BYTES order), so the wire format
+ * matches the P4 and the host decoder. NULL before anything is blitted / on OOM. */
+extern "C" const uint16_t *board_lcd_framebuffer(int *w, int *h) {
+    if (w) *w = BOARD_LCD_H_RES;
+    if (h) *h = BOARD_LCD_V_RES;
+    if (!s_shadow) return nullptr;
+    static uint16_t *out = nullptr;
+    if (!out) out = (uint16_t *)heap_caps_malloc((size_t)BOARD_LCD_H_RES * BOARD_LCD_V_RES * 2, MALLOC_CAP_SPIRAM);
+    if (!out) return nullptr;
+    size_t n = (size_t)BOARD_LCD_H_RES * BOARD_LCD_V_RES;
+    for (size_t i = 0; i < n; i++) out[i] = SWAP_COLOR_BYTES ? __builtin_bswap16(s_shadow[i]) : s_shadow[i];
+    return out;
+}
+#endif
+
 /* 320x480 panel; the fake-08 host runs the game at 128*2 = 256, centred (x=32). A smaller portrait thumbnail
  * fits in the top region (game area is 256 tall) with room for the breadcrumb + position bar above the deck. */
 extern "C" void board_carousel_layout(board_carousel_layout_t *out) {
     out->game_x = 32;  out->game_w = 256;
     out->thumb_w = 148; out->thumb_h = 190; out->thumb_y = 30;
     out->side_w = 34;  out->crumb_y = 8;
+    out->title_y = 40; out->title_scale = 4; out->body_y = 110; out->body_dy = 34;
+    out->body_scale = 3;   /* 320px panel: scale-3 menu items sit comfortably (scale 4 was too big) */
+    out->info_scale = 2;   /* 320px panel: scale-2 Settings/About body text */
 }
 
 extern "C" void board_lcd_selftest(void) {
@@ -307,9 +355,9 @@ struct DeckGeom {
 static inline int sq_(int v) { return v * v; }
 } // namespace
 
-extern "C" void board_draw_touch_deck(void) {
-    if (!s_lcd) return;
-    auto &g = *s_lcd;
+/* Paint the control deck with vector primitives into ANY LovyanGFX target. Normally that's the panel; under
+ * FB_DUMP it is also rendered into an offscreen sprite so the (otherwise blit-only) shadow screenshot shows it. */
+static void draw_deck_into(lgfx::LovyanGFX &g) {
     typedef DeckGeom D;
     g.startWrite();
     /* deck surface — subtle dark blue-grey (matches ESP32Host's one-time fill + the P4 deck), not black */
@@ -351,9 +399,46 @@ extern "C" void board_draw_touch_deck(void) {
     g.setTextColor(g.color888(0x9a, 0xa6, 0xb6));
     g.drawString("MENU", D::MENU_X + D::MENU_W / 2 - 12, D::MENU_Y + D::MENU_H / 2 - 4);
     g.endWrite();
+}
+
+#ifdef FB_DUMP
+/* Mirror the vector-drawn deck into the shadow framebuffer. The deck is painted straight to the panel with
+ * vector calls (never board_lcd_blit), so it is absent from the shadow screenshot. Re-render it into an
+ * offscreen sprite, then copy the deck region into s_shadow with each pixel re-encoded through
+ * board_lcd_rgb565 so it matches the shadow's byte order (board_lcd_framebuffer un-swaps it on read). */
+static void deck_into_shadow(void) {
+    if (!s_shadow) return;
+    static lgfx::LGFX_Sprite *spr = nullptr;
+    if (!spr) {
+        spr = new lgfx::LGFX_Sprite(s_lcd);
+        spr->setPsram(true);
+        spr->setColorDepth(16);
+        if (!spr->createSprite(BOARD_LCD_H_RES, BOARD_LCD_V_RES)) { delete spr; spr = nullptr; return; }
+    }
+    spr->fillScreen(0);
+    draw_deck_into(*spr);
+    static lgfx::bgr888_t *row = nullptr;   /* readRectRGB returns RGB888 (order-independent), .r/.g/.b members */
+    if (!row) row = (lgfx::bgr888_t *)heap_caps_malloc(sizeof(lgfx::bgr888_t) * BOARD_LCD_H_RES, MALLOC_CAP_SPIRAM);
+    if (!row) return;
+    for (int y = DeckGeom::GAME_H; y < BOARD_LCD_V_RES; y++) {
+        spr->readRectRGB(0, y, BOARD_LCD_H_RES, 1, row);
+        uint16_t *drow = s_shadow + (size_t)y * BOARD_LCD_H_RES;
+        for (int x = 0; x < BOARD_LCD_H_RES; x++)
+            drow[x] = board_lcd_rgb565(row[x].r, row[x].g, row[x].b);
+    }
+}
+#endif
+
+extern "C" void board_draw_touch_deck(void) {
+    if (!s_lcd) return;
+    typedef DeckGeom D;
+    draw_deck_into(*s_lcd);
     ESP_LOGI(TAG, "touch deck drawn (S3 LovyanGFX-native): dpad(%d,%d) O(%d,%d) X(%d,%d) menu(%d,%d) r=%d",
              D::DPAD_CX, D::DPAD_CY, D::O_CX, D::O_CY, D::X_CX, D::X_CY,
              D::MENU_X + D::MENU_W / 2, D::MENU_Y + D::MENU_H / 2, D::BTN_R);
+#ifdef FB_DUMP
+    deck_into_shadow();
+#endif
 }
 
 /* One touch point (display coords) -> a single INPUT_* bit (0 if it hits nothing). Same geometry as the

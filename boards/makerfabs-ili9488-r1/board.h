@@ -74,6 +74,12 @@ int board_touch_read(int *xs, int *ys, int max);
 int board_lcd_width(void);
 int board_lcd_height(void);
 
+#ifdef FB_DUMP
+/* FB_DUMP screenshot source. This GRAM panel can't be read back, so it's a host-side shadow that mirrors
+ * every board_lcd_blit (built up under FB_DUMP only). Standard RGB565, w/h out (may be NULL). See board.cpp. */
+const uint16_t *board_lcd_framebuffer(int *w, int *h);
+#endif
+
 /* On-screen touch control deck — the BOARD owns both the layout (where the d-pad / O / X / MENU sit on
  * this panel) and the rendering, drawn with primitives suited to this display (S3: LovyanGFX vector calls,
  * which avoid the i80 DMA's odd-pixel-count hang that a rasterised buffer blit would hit). The shared
@@ -97,7 +103,12 @@ typedef struct {
     int thumb_w, thumb_h;  /* centre cover thumbnail (portrait, ~160:205) */
     int thumb_y;           /* thumbnail top */
     int side_w;            /* side peek width */
-    int crumb_y;           /* breadcrumb top */
+    int crumb_y;           /* breadcrumb / screen-header top */
+    /* Main-menu + settings/about layout (all kept ABOVE the touch deck, whose position is board-specific). */
+    int title_y, title_scale;  /* main-menu big "PICO-E32" title: top + glyph scale */
+    int body_y, body_dy;       /* menu items / settings rows: first-row top + row spacing */
+    int body_scale;            /* menu-item (Games/Settings/About) glyph scale — sized to the panel */
+    int info_scale;            /* Settings/About body-text glyph scale — sized to the panel */
 } board_carousel_layout_t;
 void board_carousel_layout(board_carousel_layout_t *out);
 

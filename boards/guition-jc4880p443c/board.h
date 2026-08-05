@@ -92,7 +92,12 @@ typedef struct {
     int thumb_w, thumb_h;  /* centre cover thumbnail (portrait, ~160:205) */
     int thumb_y;           /* thumbnail top */
     int side_w;            /* side peek width */
-    int crumb_y;           /* breadcrumb top */
+    int crumb_y;           /* breadcrumb / screen-header top */
+    /* Main-menu + settings/about layout (all kept ABOVE the touch deck, whose position is board-specific). */
+    int title_y, title_scale;  /* main-menu big "PICO-E32" title: top + glyph scale */
+    int body_y, body_dy;       /* menu items / settings rows: first-row top + row spacing */
+    int body_scale;            /* menu-item (Games/Settings/About) glyph scale — sized to the panel */
+    int info_scale;            /* Settings/About body-text glyph scale — sized to the panel */
 } board_carousel_layout_t;
 void board_carousel_layout(board_carousel_layout_t *out);
 

@@ -685,6 +685,9 @@ extern "C" void board_carousel_layout(board_carousel_layout_t *out) {
     out->game_x = 48;  out->game_w = 384;
     out->thumb_w = 236; out->thumb_h = 302; out->thumb_y = 46;
     out->side_w = 64;  out->crumb_y = 16;
+    out->title_y = 96; out->title_scale = 6; out->body_y = 200; out->body_dy = 62;
+    out->body_scale = 6;   /* big MIPI panel: match the title weight so the items read large on the tall 800px screen */
+    out->info_scale = 3;   /* big MIPI panel: scale-3 Settings/About body text (scale 2 read too small) */
 }
 
 extern "C" esp_err_t board_sd_mount(const char *mount_point) {
