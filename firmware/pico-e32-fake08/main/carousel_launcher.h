@@ -12,9 +12,9 @@ class Host;
 std::string carousel_launcher_run(Host *host, const std::string &start_dir);
 
 #ifdef FB_DUMP
-/* Dev screenshot: deflate the full-res RGB565 framebuffer with miniz and stream it framed as
- * `FB FB FB FB 'S' 'H' 'T' 'Z' w(2) h(2) complen(4)` + complen zlib bytes. Compression keeps the blob far
- * under the P4 USB-Serial-JTAG bulk-transfer stall floor (a raw 768 KB write dies at a random point).
- * Host side: tools/fb_shot.py. Used by carousel_fb_dump() and main.cpp's FB_DUMP loop. */
-void fb_dump_compressed(const unsigned short *fb, int w, int h);
+/* Dev "screenshot over serial" (P4 only — needs board_lcd_framebuffer): deflate the live DPI framebuffer and
+ * stream it framed as `FB FB FB FB 'S' 'H' 'T' 'Z' w(2) h(2) clen(4)` + clen zlib bytes over the USB-JTAG
+ * console, for a camera-free host-side PNG. Host: tools/fb_menu_shot.py. (The S3's GRAM panel can't be read
+ * back cleanly, so it has no board_lcd_framebuffer and FB_DUMP is not built there — use the camera.) */
+void carousel_fb_dump(void);
 #endif

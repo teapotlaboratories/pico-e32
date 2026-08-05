@@ -22,6 +22,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_app_desc.h"   /* main-menu About screen: version / IDF / build date */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -36,6 +37,7 @@ static const char *TAG = "carousel";
 static int s_gx, s_gw;          /* game column (x, width) — content confined here to match the game footprint */
 static int s_tw, s_th, s_ty;    /* centre cover thumbnail size + top */
 static int s_sidew, s_crumb_y;  /* side peek width, breadcrumb top */
+static int s_title_y, s_title_scale, s_body_y, s_body_dy, s_body_scale, s_info_scale;   /* main-menu / settings layout (per board) */
 #define SIDE_DIM 120           /* /256 brightness for the two side peeks */
 
 static int      s_W = 480, s_H = 800;
@@ -78,8 +80,11 @@ static int draw_text(int x, int y, const char *str, int scale, uint16_t fg, uint
     return tw;
 }
 static void draw_text_centered(int cx, int y, const char *str, int scale, uint16_t fg, uint16_t bg) {
-    int tw = (int)strlen(str) * 4 * scale;
-    draw_text(cx - tw / 2, y, str, scale, fg, bg);
+    int len = (int)strlen(str);
+    /* Centre on the visible ink, not the cell box: each cell carries a trailing 1px inter-glyph gap, and the
+     * last one has no glyph after it — counting it (len*4) biases the whole string half a cell to the left. */
+    int ink = len > 0 ? (len * 4 - 1) * scale : 0;
+    draw_text(cx - ink / 2, y, str, scale, fg, bg);
 }
 
 /* ---------- cover cache (decoded RGBA in PSRAM, small LRU) ---------- */
@@ -381,7 +386,21 @@ static void render(const std::vector<Entry> &entries, int sel, const std::string
 
 /* ---------- dev screenshot: dump the live framebuffer over the console (same 0xFB SHOT framing as main.cpp's
  * FB_DUMP), triggered by the PAUSE button, so the carousel can be captured crisply at any state. ---------- */
+/* FB_DUMP needs board_lcd_framebuffer: the P4 has a persistent DPI framebuffer; the S3 mirrors every blit into
+ * a host-side shadow (its GRAM panel can't be read back). The two console types differ, so the dump splits:
+ * the P4 (USB-JTAG) deflates first (the bulk endpoint stalls on big raw writes); the S3 (UART) streams raw
+ * (no miniz — LovyanGFX bundles a colliding copy — and UART drains a big transfer fine, just slower). */
 #ifdef FB_DUMP
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+#include "driver/usb_serial_jtag_vfs.h"   /* set_tx_line_endings: disable the LF->CRLF mangling that corrupts binary */
+#include "driver/usb_serial_jtag.h"       /* usb_serial_jtag_wait_tx_done: force the final TX packet out */
+#elif CONFIG_ESP_CONSOLE_UART
+#include "esp_rom_serial_output.h"        /* UART console (S3): push bytes straight to the FIFO, bypassing the VFS */
+#endif
+static void fb_write_raw(const void *p, size_t n) { fwrite(p, 1, n, stdout); fflush(stdout); }
+
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+/* ---- P4 (USB-JTAG): compressed SHTZ dump (miniz; only linked here — the S3's LovyanGFX has a colliding copy) ---- */
 #include "miniz.h"
 /* put-buffer sink for tdefl's callback mode: append each compressed chunk into a caller buffer. */
 struct FbOutState { uint8_t *buf; size_t len, cap; };
@@ -392,29 +411,23 @@ static mz_bool fb_put_cb(const void *p, int len, void *user) {
     o->len += (size_t)len;
     return MZ_TRUE;
 }
-/* Deflate the full-res framebuffer and stream it compressed — see the declaration in carousel_launcher.h.
- * A flat carousel screen crushes to tens of KB, so the transfer stays well under the ~165 KB USB-JTAG stall
- * floor while keeping full 480x800 resolution. Reused by main.cpp's FB_DUMP game loop. */
-void fb_dump_compressed(const unsigned short *fb, int w, int h) {
+/* Deflate the full-res framebuffer and stream it framed as `FB FB FB FB 'S' 'H' 'T' 'Z' w(2) h(2) clen(4)` +
+ * clen zlib bytes. Compression keeps the blob well under the P4 USB-JTAG bulk stall floor. Host: fb_menu_shot.py.
+ * The two real gotchas (which made FB_DUMP look like a dead end): the console mapped \n->\r\n and corrupted the
+ * binary (fixed by ESP_LINE_ENDINGS_LF around the write), and the driver held the final TX packet (fixed by a
+ * trailing pad + usb_serial_jtag_wait_tx_done). */
+static void fb_dump_compressed(const unsigned short *fb, int w, int h) {
     if (!fb || w <= 0 || h <= 0) return;
     size_t raw = (size_t)w * h * 2;
     size_t bound = raw + raw / 2 + 256;
     static uint8_t *cbuf = nullptr; static size_t cap = 0;
     if (cap < bound) { if (cbuf) heap_caps_free(cbuf); cbuf = (uint8_t *)heap_caps_malloc(bound, MALLOC_CAP_SPIRAM); cap = bound; }
     if (!cbuf) return;
-    /* Stream through a caller-owned tdefl_compressor in PSRAM. The one-call helpers (tdefl_compress_mem_to_mem)
-     * MZ_MALLOC the ~300 KB compressor in INTERNAL RAM, which is exhausted here -> they silently return 0.
-     * TDEFL_WRITE_ZLIB_HEADER gives a zlib stream Python zlib.decompress reads directly; low 12 bits = probes. */
+    /* caller-owned tdefl_compressor in PSRAM: the one-call helpers MZ_MALLOC ~300 KB in exhausted internal RAM. */
     static tdefl_compressor *comp = nullptr;
     if (!comp) comp = (tdefl_compressor *)heap_caps_malloc(sizeof(tdefl_compressor), MALLOC_CAP_SPIRAM);
     if (!comp) return;
-    /* Flags for a valid zlib stream = the level-6 probe count (128) | zlib header | ADLER32. The one-call
-     * wrappers OR in TDEFL_COMPUTE_ADLER32 (miniz.c:198); omitting it leaves the checksum uncomputed and
-     * Python zlib rejects the stream. (tdefl_create_comp_flags_from_zip_params is compiled out here.) */
-    /* Callback mode: tdefl flushes its internal output buffer to fb_put_cb as it goes. This is the tested path
-     * (what tdefl_compress_mem_to_output uses) — the direct pOut_buf mode produced a stream that broke ~4 KB in
-     * here. We supply `comp` in PSRAM so nothing is MZ_MALLOC'd in the exhausted internal RAM. */
-    int flags = TDEFL_WRITE_ZLIB_HEADER | TDEFL_COMPUTE_ADLER32 | 128;
+    int flags = TDEFL_WRITE_ZLIB_HEADER | TDEFL_COMPUTE_ADLER32 | 128;   /* valid zlib stream + level-6 probes */
     FbOutState os = { cbuf, 0, cap };
     if (tdefl_init(comp, fb_put_cb, &os, flags) != TDEFL_STATUS_OKAY) return;
     if (tdefl_compress_buffer(comp, (const void *)fb, raw, TDEFL_FINISH) != TDEFL_STATUS_DONE) return;
@@ -425,18 +438,261 @@ void fb_dump_compressed(const unsigned short *fb, int w, int h) {
                         (uint8_t)(w & 0xff), (uint8_t)(w >> 8), (uint8_t)(h & 0xff), (uint8_t)(h >> 8),
                         (uint8_t)(clen & 0xff), (uint8_t)((clen >> 8) & 0xff),
                         (uint8_t)((clen >> 16) & 0xff), (uint8_t)((clen >> 24) & 0xff) };
-    fwrite(hdr, 1, sizeof hdr, stdout);
-    fwrite(cbuf, 1, clen, stdout);
-    fflush(stdout);
+    usb_serial_jtag_vfs_set_tx_line_endings(ESP_LINE_ENDINGS_LF);   /* binary: no \n -> \r\n */
+    fb_write_raw(hdr, sizeof hdr);
+    fb_write_raw(cbuf, clen);
+    static const uint8_t pad[256] = { 0 };
+    fb_write_raw(pad, sizeof pad);                                  /* flush the held final packet */
+    usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(2000));
     vTaskDelay(pdMS_TO_TICKS(60));
+    usb_serial_jtag_vfs_set_tx_line_endings(ESP_LINE_ENDINGS_CRLF); /* restore for readable logs */
     esp_log_level_set("*", ESP_LOG_INFO);
 }
-static void carousel_fb_dump() {
+void carousel_fb_dump(void) {
     int w = 0, h = 0;
     const uint16_t *fb = board_lcd_framebuffer(&w, &h);
     fb_dump_compressed(fb, w, h);
 }
+#else   /* non-USB-JTAG console (S3 UART): raw SHOT dump, no miniz */
+/* Stream the shadow framebuffer raw, framed as `FB FB FB FB 'S' 'H' 'O' 'T' w(2) h(2)` + w*h*2 RGB565 bytes.
+ * No compression (avoids the LovyanGFX miniz collision); a UART console drains the whole ~300 KB fine (just
+ * slower, ~27 s at 115200). Host: tools/fb_menu_shot_raw.py.
+ *
+ * Two hazards corrupt a naive binary dump here, both by injecting bytes MID-STREAM (which shears every row
+ * after the injection point, so the image looks progressively rolled):
+ *   1. The console VFS maps \n -> \r\n. Bytes go straight to the ROM console FIFO (esp_rom_output_tx_one_char),
+ *      NOT through stdout, so no translation touches the data.
+ *   2. The ~27 s stream is long enough to starve the idle task and trip the Task Watchdog, whose backtrace
+ *      print lands in the middle of the pixel data. So yield briefly every few KB: the delay lets the FIFO
+ *      drain and, crucially, lets the idle task run and feed the WDT. */
+static void fb_rom_write(const void *p, size_t n) {
+    const uint8_t *b = (const uint8_t *)p;
+    for (size_t i = 0; i < n; i++) {
+        esp_rom_output_tx_one_char(b[i]);
+        if ((i & 0xFFF) == 0xFFF) vTaskDelay(1);   /* every 4 KB: yield so the WDT is fed mid-dump */
+    }
+}
+static void fb_dump_raw(const unsigned short *fb, int w, int h) {
+    if (!fb || w <= 0 || h <= 0) return;
+    uint8_t hdr[12] = { 0xFB, 0xFB, 0xFB, 0xFB, 'S', 'H', 'O', 'T',
+                        (uint8_t)(w & 0xff), (uint8_t)(w >> 8), (uint8_t)(h & 0xff), (uint8_t)(h >> 8) };
+    esp_log_level_set("*", ESP_LOG_NONE);
+    fflush(stdout);                                  /* drain any pending log text before the binary frame */
+    vTaskDelay(pdMS_TO_TICKS(60));
+    fb_rom_write(hdr, sizeof hdr);
+    fb_rom_write(fb, (size_t)w * h * 2);
+    esp_rom_output_tx_wait_idle(CONFIG_ESP_CONSOLE_UART_NUM);   /* let the last bytes clock out */
+    vTaskDelay(pdMS_TO_TICKS(60));
+    esp_log_level_set("*", ESP_LOG_INFO);
+}
+void carousel_fb_dump(void) {
+    int w = 0, h = 0;
+    const uint16_t *fb = board_lcd_framebuffer(&w, &h);
+    fb_dump_raw(fb, w, h);
+}
+#endif  /* CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG */
+#endif  /* FB_DUMP */
+
+/* ================= main menu (Games / Settings / About) ================= */
+
+static const char *const MENU_ITEMS[] = { "GAMES", "SETTINGS", "ABOUT" };
+#define MENU_N 3
+
+/* Launcher accent theme — the one live Settings knob (self-contained, no board API). */
+static const struct { uint8_t r, g, b; const char *name; } ACCENTS[] = {
+    {  90, 162, 255, "BLUE"  },
+    {  80, 200, 140, "GREEN" },
+    { 240, 180,  70, "AMBER" },
+    { 235, 120, 180, "PINK"  },
+};
+#define ACCENT_N (int)(sizeof(ACCENTS) / sizeof(ACCENTS[0]))
+static int s_accent_idx = 0;
+static void apply_accent(void) {
+    s_accent = board_lcd_rgb565(ACCENTS[s_accent_idx].r, ACCENTS[s_accent_idx].g, ACCENTS[s_accent_idx].b);
+}
+
+/* The SD games carousel — the former whole launcher. Returns the chosen cart's path, or "" if the user
+ * pressed X at the root (back to the main menu). Uses the file-scope layout/scratch set up in the run fn. */
+static std::string run_carousel(Host *host, const std::string &start_dir) {
+    std::string curdir = start_dir;
+    std::vector<Entry> entries = build_entries(host, curdir, start_dir);
+    int sel = 0;
+    bool dirty = true, full = true;
+    uint8_t prev = 0;
+    ESP_LOGI(TAG, "games: %d entries in %s", (int)entries.size(), curdir.c_str());
+    for (;;) {
+        if (dirty) { render(entries, sel, curdir, start_dir, full); dirty = false; full = false; }
+        uint8_t m = input_poll();
+        uint8_t pressed = (uint8_t)(m & ~prev);
+        prev = m;
+        int N = (int)entries.size();
+#ifdef FB_DUMP
+        if (pressed & INPUT_PAUSE) carousel_fb_dump();
 #endif
+        if (pressed & (INPUT_RIGHT | INPUT_DOWN)) {
+            if (N) { sel = (sel + 1) % N; dirty = true; }
+        } else if (pressed & (INPUT_LEFT | INPUT_UP)) {
+            if (N) { sel = (sel - 1 + N) % N; dirty = true; }
+        } else if (pressed & INPUT_O) {
+            if (N) {
+                Entry &e = entries[sel];
+                if (e.isDir) {
+                    curdir = e.path;
+                    cache_clear();
+                    entries = build_entries(host, curdir, start_dir);
+                    sel = 0; dirty = true; full = true;
+                    ESP_LOGI(TAG, "cd %s (%d entries)", curdir.c_str(), (int)entries.size());
+                } else {
+                    ESP_LOGI(TAG, "launch %s", e.path.c_str());
+                    return e.path;                      /* -> app_main loads this cart */
+                }
+            }
+        } else if (pressed & INPUT_X) {
+            if (curdir != start_dir) {                  /* up a level */
+                curdir = curdir.substr(0, curdir.find_last_of('/'));
+                if (curdir.size() < start_dir.size()) curdir = start_dir;
+                cache_clear();
+                entries = build_entries(host, curdir, start_dir);
+                sel = 0; dirty = true; full = true;
+            } else {
+                cache_clear();
+                return "";                              /* at root -> back to main menu */
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(40));
+    }
+}
+
+/* All menu/settings/about content is laid out from the per-board layout (title_y/body_y/body_dy + the
+ * [s_ty, s_ty+s_th] band), so it stays above the board's touch deck on any panel — no hardcoded positions. */
+#define CB_BOT (s_ty + s_th)   /* band bottom = the "above the deck" content floor (board-provided) */
+
+/* Redraw one menu row in place (no full-screen clear -> no flicker on move). */
+static void draw_menu_row(int i, int sel) {
+    int y = s_body_y + i * s_body_dy;
+    int py = y - 6;                                    /* pill / clear-band top */
+    int bh = s_body_dy * 80 / 100;                     /* pill height */
+    int gh = 5 * s_body_scale;                         /* label glyph height at the board's menu scale */
+    int ty = py + (bh - gh) / 2;                        /* vertically centre the label inside the pill/band */
+    /* Clear the full column width so moving the selection erases the previous (possibly wider) pill cleanly. */
+    fill_rect(s_scratch, s_gw - 40, bh + 12, s_bg);
+    board_lcd_blit(s_gx + 20, py, s_gw - 40, bh + 12, s_scratch);
+    if (i == sel) {
+        int ink = ((int)strlen(MENU_ITEMS[i]) * 4 - 1) * s_body_scale;
+        int pw = ink + 2 * gh;                          /* snug pill: text + ~one glyph-height of padding each side */
+        if (pw > s_gw - 40) pw = s_gw - 40;
+        blit_round_rect(s_W / 2 - pw / 2, py, pw, bh, bh / 2, s_accent);   /* centred full-radius pill */
+        draw_text_centered(s_W / 2, ty, MENU_ITEMS[i], s_body_scale, s_bg, s_accent);
+    } else {
+        draw_text_centered(s_W / 2, ty, MENU_ITEMS[i], s_body_scale, s_fg, s_bg);
+    }
+}
+
+static void render_menu(int sel, bool full) {
+    if (full) {
+        board_lcd_fill(s_bg);
+        draw_text_centered(s_W / 2, s_title_y, "PICO-E32", s_title_scale, s_accent, s_bg);
+        draw_text_centered(s_W / 2, s_title_y + s_title_scale * 8, "PICO-8 HANDHELD", 2, s_dim, s_bg);
+        board_draw_touch_deck();
+    }
+    for (int i = 0; i < MENU_N; i++) draw_menu_row(i, sel);
+}
+
+/* Small helper: a labelled info/setting row (label left, value right) inside the game column. Label and value
+ * carry independent scales (the value is usually a touch smaller); the value is vertically centred on the label. */
+static void draw_kv(int y, const char *label, const char *value, int lscale, int vscale, uint16_t lcol, uint16_t vcol) {
+    int bandh = 8 * (lscale > vscale ? lscale : vscale);
+    fill_rect(s_scratch, s_gw - 40, bandh, s_bg);              /* clear band */
+    board_lcd_blit(s_gx + 20, y - 4, s_gw - 40, bandh, s_scratch);
+    draw_text(s_gx + 24, y, label, lscale, lcol, s_bg);
+    if (value && *value) {
+        int vy = y + (lscale - vscale) * 5 / 2;               /* centre the (shorter) value on the label */
+        draw_text(s_gx + s_gw - 24 - (int)strlen(value) * 4 * vscale, vy, value, vscale, vcol, s_bg);
+    }
+}
+
+static void run_settings(void) {
+    const int HS = s_info_scale + 1;   /* header title */
+    const int LS = s_info_scale + 1;   /* row label */
+    const int VS = s_info_scale;       /* subtitle + row value */
+    board_lcd_fill(s_bg);
+    draw_text_centered(s_W / 2, s_crumb_y, "SETTINGS", HS, s_fg, s_bg);
+    blit_round_rect(s_W / 2 - 26, s_crumb_y + HS * 8, 52, 3, 1, s_accent);
+    draw_text_centered(s_W / 2, s_crumb_y + HS * 8 + 12, "L/R CHANGE   X BACK", VS, s_dim, s_bg);
+    board_draw_touch_deck();
+    int y0 = s_crumb_y + HS * 8 + VS * 8 + 34;   /* rows sit just under the header, not down at the menu row */
+    int dy = LS * 12;                            /* row pitch scaled to the text */
+    auto draw_rows = [&]() {
+        /* ACCENT (live) — name at right, colour swatch just left of it */
+        draw_kv(y0, "ACCENT", ACCENTS[s_accent_idx].name, LS, VS, s_accent, s_fg);
+        int vw = (int)strlen(ACCENTS[s_accent_idx].name) * 4 * VS;
+        int sw = LS * 13, sh = LS * 7;
+        blit_round_rect(s_gx + s_gw - 24 - vw - 14 - sw, y0 + (LS * 5 - sh) / 2, sw, sh, 5, s_accent);
+        /* planned, greyed */
+        draw_kv(y0 + dy, "BRIGHTNESS", "SOON", LS, VS, s_dim, s_dim);
+        draw_kv(y0 + dy * 2, "VOLUME", "SOON", LS, VS, s_dim, s_dim);
+    };
+    draw_rows();
+    uint8_t prev = 0;
+    for (;;) {
+        uint8_t m = input_poll();
+        uint8_t p = (uint8_t)(m & ~prev);
+        prev = m;
+#ifdef FB_DUMP
+        if (p & INPUT_PAUSE) carousel_fb_dump();
+#endif
+        if (p & INPUT_X) return;
+        if (p & (INPUT_RIGHT | INPUT_DOWN)) { s_accent_idx = (s_accent_idx + 1) % ACCENT_N; apply_accent(); draw_rows(); }
+        else if (p & (INPUT_LEFT | INPUT_UP)) { s_accent_idx = (s_accent_idx + ACCENT_N - 1) % ACCENT_N; apply_accent(); draw_rows(); }
+        vTaskDelay(pdMS_TO_TICKS(40));
+    }
+}
+
+static void run_about(void) {
+    const esp_app_desc_t *d = esp_app_get_description();
+    const char *boardname =
+#ifdef BOARD_HAS_SDMMC
+        "ESP32-P4";
+#else
+        "ESP32-S3";
+#endif
+    const int HS = s_info_scale + 1;   /* ABOUT header */
+    const int VS = s_info_scale;       /* info rows */
+    const int PS = s_info_scale + 2;   /* PICO-E32 wordmark */
+    board_lcd_fill(s_bg);
+    draw_text_centered(s_W / 2, s_crumb_y, "ABOUT", HS, s_fg, s_bg);
+    blit_round_rect(s_W / 2 - 26, s_crumb_y + HS * 8, 52, 3, 1, s_accent);
+    int top = s_crumb_y + HS * 8 + 16;
+    draw_text_centered(s_W / 2, top, "PICO-E32", PS, s_accent, s_bg);
+    draw_text_centered(s_W / 2, top + PS * 7, "FAKE-08 ON Z8LUA", VS, s_dim, s_bg);
+    board_draw_touch_deck();
+
+    /* 7 info rows evenly packed between the subtitle and the band bottom (above the deck) — fits any panel. */
+    char panel[24];  snprintf(panel, sizeof panel, "%dX%d", s_W, s_H);
+    char psram[24];  snprintf(psram, sizeof psram, "%uMB FREE",
+                              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / (1024 * 1024)));
+    int y = top + PS * 7 + VS * 8 + 16, dy = (CB_BOT - y) / 7; if (dy < VS * 8) dy = VS * 8;
+    draw_kv(y, "BOARD",      boardname,               VS, VS, s_fg, s_fg);  y += dy;
+    draw_kv(y, "PANEL",      panel,                    VS, VS, s_fg, s_fg);  y += dy;
+    draw_kv(y, "VERSION",    d ? d->version : "?",     VS, VS, s_fg, s_fg);  y += dy;
+    draw_kv(y, "IDF",        d ? d->idf_ver : "?",     VS, VS, s_fg, s_fg);  y += dy;
+    draw_kv(y, "BUILT",      d ? d->date : "?",        VS, VS, s_fg, s_fg);  y += dy;
+    draw_kv(y, "PSRAM",      psram,                    VS, VS, s_fg, s_fg);  y += dy;
+    /* maintainer as one centered line — label+value won't both fit the column side by side (kept small: it's long) */
+    draw_text_centered(s_W / 2, y, "MAINTAINER: ALDWIN HERMANUDIN", 2, s_dim, s_bg);
+
+    uint8_t prev = 0;
+    for (;;) {
+        uint8_t m = input_poll();
+        uint8_t p = (uint8_t)(m & ~prev);
+        prev = m;
+#ifdef FB_DUMP
+        if (p & INPUT_PAUSE) carousel_fb_dump();
+#endif
+        if (p & INPUT_X) return;
+        vTaskDelay(pdMS_TO_TICKS(40));
+    }
+}
 
 std::string carousel_launcher_run(Host *host, const std::string &start_dir) {
     s_W = board_lcd_width();
@@ -456,6 +712,8 @@ std::string carousel_launcher_run(Host *host, const std::string &start_dir) {
     s_gx = L.game_x; s_gw = L.game_w;
     s_tw = L.thumb_w; s_th = L.thumb_h; s_ty = L.thumb_y;
     s_sidew = L.side_w; s_crumb_y = L.crumb_y;
+    s_title_y = L.title_y; s_title_scale = L.title_scale; s_body_y = L.body_y; s_body_dy = L.body_dy;
+    s_body_scale = L.body_scale; s_info_scale = L.info_scale;
     ESP_LOGI(TAG, "carousel layout: game %d+%d, thumb %dx%d @y%d, side %d",
              s_gx, s_gw, s_tw, s_th, s_ty, s_sidew);
 
@@ -465,62 +723,39 @@ std::string carousel_launcher_run(Host *host, const std::string &start_dir) {
 
     input_init();   /* the selected backend (touch when shipped, serial for headless HITL) — same seam the game uses */
 
-    std::string curdir = start_dir;
-    std::vector<Entry> entries = build_entries(host, curdir, start_dir);
-    int sel = 0;
-    bool dirty = true, full = true;   /* full = repaint everything (dir change / first frame); else in-place */
-    uint8_t prev = 0;
+    apply_accent();
+
+    /* Top-level menu: Games (the SD carousel) / Settings / About. Games returns a cart path to launch;
+     * Settings and About return here on X. Nav: up/down move, O select. */
+    int menu_sel = 0;
     std::string result;
-
-    ESP_LOGI(TAG, "carousel up: %d entries in %s (free heap: %uK internal, %uK PSRAM)",
-             (int)entries.size(), curdir.c_str(),
-             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
-             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
-
     for (;;) {
-        if (dirty) { render(entries, sel, curdir, start_dir, full); dirty = false; full = false; }
-
-        uint8_t m = input_poll();
-        uint8_t pressed = (uint8_t)(m & ~prev);   /* act on the rising edge only */
-        prev = m;
-        int N = (int)entries.size();
-
+        render_menu(menu_sel, true);
+        uint8_t prev = 0;
+        bool chosen = false;
+        while (!chosen) {
+            uint8_t m = input_poll();
+            uint8_t pressed = (uint8_t)(m & ~prev);
+            prev = m;
 #ifdef FB_DUMP
-        if (pressed & INPUT_PAUSE) carousel_fb_dump();   /* dev: snapshot the current carousel screen */
+            if (pressed & INPUT_PAUSE) carousel_fb_dump();
 #endif
-
-        if (pressed & (INPUT_RIGHT | INPUT_DOWN)) {
-            if (N) { sel = (sel + 1) % N; dirty = true; }
-        } else if (pressed & (INPUT_LEFT | INPUT_UP)) {
-            if (N) { sel = (sel - 1 + N) % N; dirty = true; }
-        } else if (pressed & INPUT_O) {
-            if (N) {
-                Entry &e = entries[sel];
-                if (e.isDir) {                                  /* enter folder / go up */
-                    curdir = e.path;
-                    cache_clear();
-                    entries = build_entries(host, curdir, start_dir);
-                    sel = 0; dirty = true; full = true;         /* breadcrumb + list change -> full repaint */
-                    ESP_LOGI(TAG, "cd %s (%d entries)", curdir.c_str(), (int)entries.size());
-                } else {                                        /* launch this cart */
-                    result = e.path;
-                    ESP_LOGI(TAG, "launch %s", result.c_str());
-                    break;
-                }
-            }
-        } else if (pressed & INPUT_X) {
-            if (curdir != start_dir) {                          /* back / up a level */
-                curdir = curdir.substr(0, curdir.find_last_of('/'));
-                if (curdir.size() < start_dir.size()) curdir = start_dir;
-                cache_clear();
-                entries = build_entries(host, curdir, start_dir);
-                sel = 0; dirty = true; full = true;             /* breadcrumb + list change -> full repaint */
-            }
+            if (pressed & (INPUT_DOWN | INPUT_RIGHT)) { menu_sel = (menu_sel + 1) % MENU_N; render_menu(menu_sel, false); }
+            else if (pressed & (INPUT_UP | INPUT_LEFT)) { menu_sel = (menu_sel + MENU_N - 1) % MENU_N; render_menu(menu_sel, false); }
+            else if (pressed & INPUT_O) chosen = true;
+            vTaskDelay(pdMS_TO_TICKS(40));
         }
-        vTaskDelay(pdMS_TO_TICKS(40));
+        if (menu_sel == 0) {
+            result = run_carousel(host, start_dir);
+            if (!result.empty()) break;      /* a cart was chosen -> launch it */
+            /* else: backed out at the root -> the loop repaints the menu */
+        } else if (menu_sel == 1) {
+            run_settings();
+        } else {
+            run_about();
+        }
     }
 
-    cache_clear();
     heap_caps_free(s_scratch); s_scratch = nullptr;
     board_lcd_fill(s_bg);   /* clear before the game boots */
     return result;

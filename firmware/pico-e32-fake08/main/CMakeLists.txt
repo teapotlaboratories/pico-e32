@@ -3,7 +3,7 @@
 idf_component_register(
     SRCS "main.cpp" "carousel_launcher.cpp" "${BOARD_DIR}/board.cpp"
     INCLUDE_DIRS "." "${BOARD_DIR}" "${CMAKE_CURRENT_LIST_DIR}/../../../assets"
-    REQUIRES fake08 z8lua LovyanGFX esp_driver_uart esp_driver_gpio esp_driver_ledc esp_driver_i2c esp_timer sdcard_spi fatfs sdmmc esp_driver_sdmmc input esp_lcd esp_mm
+    REQUIRES fake08 z8lua LovyanGFX esp_driver_uart esp_driver_gpio esp_driver_ledc esp_driver_i2c esp_timer sdcard_spi fatfs sdmmc esp_driver_sdmmc input esp_lcd esp_mm esp_app_format esp_driver_usb_serial_jtag
 )
 # esp_lcd + esp_mm are for the ESP32-P4 board.cpp (MIPI-DSI panel: esp_lcd DSI bus/DBI/DPI + esp_cache_msync
 # for the PSRAM framebuffer). The S3 board.cpp doesn't use them (LovyanGFX i80), but linking them there is

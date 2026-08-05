@@ -584,12 +584,7 @@ extern "C" void app_main(void) {
             vm->Step();
             host->drawFrame(vm->GetPicoInteralFb(), vm->GetScreenPaletteMap(), 0);
             if (f >= target && (f - target) % period == 0) {
-                int w = 0, h = 0;
-                const uint16_t *fb = board_lcd_framebuffer(&w, &h);
-                /* Deflate + stream the full-res framebuffer (shared helper in carousel_launcher.cpp). Raw
-                 * 768 KB writes stall at a random point over the P4 USB-JTAG; the compressed blob is small
-                 * enough to clear the transfer reliably. */
-                fb_dump_compressed(fb, w, h);
+                carousel_fb_dump();   /* board-appropriate FB dump (compressed on P4 / raw on S3), shared helper */
             }
             host->waitForTargetFps();
         }
