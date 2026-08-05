@@ -12,9 +12,12 @@ class Host;
 std::string carousel_launcher_run(Host *host, const std::string &start_dir);
 
 #ifdef FB_DUMP
-/* Dev "screenshot over serial" (P4 only — needs board_lcd_framebuffer): deflate the live DPI framebuffer and
- * stream it framed as `FB FB FB FB 'S' 'H' 'T' 'Z' w(2) h(2) clen(4)` + clen zlib bytes over the USB-JTAG
- * console, for a camera-free host-side PNG. Host: tools/fb_menu_shot.py. (The S3's GRAM panel can't be read
- * back cleanly, so it has no board_lcd_framebuffer and FB_DUMP is not built there — use the camera.) */
+/* Dev "screenshot over serial" (both boards): capture board_lcd_framebuffer and stream it framed over the
+ * console for a camera-free host-side PNG. The transport differs by console:
+ *   - P4 (USB-JTAG): zlib-compressed `FB FB FB FB 'S' 'H' 'T' 'Z' w(2) h(2) clen(4)` + clen bytes (the bulk
+ *     endpoint stalls on big raw writes, so it compresses first). Host: tools/fb_menu_shot.py.
+ *   - S3 (UART): raw `FB FB FB FB 'S' 'H' 'O' 'T' w(2) h(2)` + w*h*2 RGB565 (its GRAM panel can't be read
+ *     back, so board_lcd_framebuffer serves a per-blit shadow buffer). Host: tools/fb_menu_shot_raw.py.
+ * See carousel_launcher.cpp for the two gotchas (console LF->CRLF; watchdog backtrace injection). */
 void carousel_fb_dump(void);
 #endif

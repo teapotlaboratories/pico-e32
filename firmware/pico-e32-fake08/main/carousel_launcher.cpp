@@ -397,10 +397,10 @@ static void render(const std::vector<Entry> &entries, int sel, const std::string
 #elif CONFIG_ESP_CONSOLE_UART
 #include "esp_rom_serial_output.h"        /* UART console (S3): push bytes straight to the FIFO, bypassing the VFS */
 #endif
-static void fb_write_raw(const void *p, size_t n) { fwrite(p, 1, n, stdout); fflush(stdout); }
 
 #if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
 /* ---- P4 (USB-JTAG): compressed SHTZ dump (miniz; only linked here — the S3's LovyanGFX has a colliding copy) ---- */
+static void fb_write_raw(const void *p, size_t n) { fwrite(p, 1, n, stdout); fflush(stdout); }
 #include "miniz.h"
 /* put-buffer sink for tdefl's callback mode: append each compressed chunk into a caller buffer. */
 struct FbOutState { uint8_t *buf; size_t len, cap; };
@@ -756,6 +756,7 @@ std::string carousel_launcher_run(Host *host, const std::string &start_dir) {
         }
     }
 
+    cache_clear();          /* free the decoded cover cache (up to CACHE_MAX PSRAM RGBAs) before the VM boots */
     heap_caps_free(s_scratch); s_scratch = nullptr;
     board_lcd_fill(s_bg);   /* clear before the game boots */
     return result;
