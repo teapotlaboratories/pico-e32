@@ -107,7 +107,51 @@ launcher's `wifi_mgr_init`, not the pre-`app_main` constructor. Launcher framebu
 compressed `SHTZ`). Driver-level connect was proven earlier with a standalone probe
 (`firmware/pico-e32-p4-wifi`, joined `Tukang Ketoprak`, IP 192.168.7.212); nothing on the radio side changed since.
 
-## 6. Commands run (reproduce)
+## 6. Review pass — measurements and fixes
+
+Code review of the PR surfaced six issues; all are fixed on the branch, and one was a measurement rather than a
+change.
+
+**SD throughput after the move to SPI (measured).** Instrumented `cover_rgba()` (temporarily) to time the
+read+decode of a `.p8.png` cover, and scrolled the carousel to force uncached loads:
+
+| SPI clock | cover load (n=9) | result |
+|---|---|---|
+| **20 MHz** (shipped) | min 49.4 / **median 64.0** / mean 65.9 / max 82.6 ms | works |
+| 40 MHz | — | **card init fails**: `sdmmc_enable_hs_mode_and_check: send_csd returned 0x108`, mount returns `ESP_ERR_INVALID_RESPONSE` |
+
+So **20 MHz is the practical ceiling** on this wiring — the TF pins run through the GPIO matrix with no external
+pull-ups, and the card won't negotiate at 40 MHz. Two things follow. First, the throughput lost relative to
+SDMMC 4-bit can't be bought back by raising the clock. Second, it doesn't matter much: SDMMC *cannot* coexist
+with the C6 radio at all, so the comparison is moot — the real choice was "SD over SPI" vs "no WiFi". 64 ms to
+reveal a not-yet-cached cover is acceptable for a browse UI, and covers are cached after first view. Worth
+revisiting only if a future board adds pull-ups. Also confirmed: a failed mount degrades gracefully
+(`continuing without SD`) rather than panicking.
+
+**Behavioural fixes.**
+
+- **P4 boot no longer waits on the radio.** `wifi_mgr_init()` was called inline on the launcher thread, and on
+  the P4 it blocks ~2.3 s in the esp-hosted handshake — so the menu appeared that much later on every boot, for
+  a feature most sessions never touch. Moved into the existing background task. Measured: deck drawn at
+  **1775 ms**, down from **4068 ms**; the C6 still finishes at ~4.0 s, just off the critical path.
+- **WiFi no longer dies permanently after 3 drops.** The retry counter served both the modal connect *and* the
+  steady-state link, and only reset on `GOT_IP` — so an AP reboot or a walk out of range left the handheld
+  offline until a manual reconnect. Split into two policies: bounded retries while `wifi_mgr_connect()` is
+  waiting (so the menu still gets a definite answer), and an indefinite slow retry (10 s timer) once a link has
+  actually been established. An explicit disconnect/forget stands the keepalive down so it stays off.
+- **`wifi_mgr_init()` is now thread-safe, not merely idempotent.** Making boot-init async meant the background
+  task and Settings → WIFI could both enter it and each sail past the `s_inited` check, running the whole
+  bring-up twice. Guarded with a statically-initialised spinlock; the loser waits for the winner.
+- **32-byte SSIDs now work.** `strlcpy` into `wifi_config_t.sta.ssid` (32 bytes, not NUL-terminated on the
+  wire) silently dropped the 32nd character, so such networks just failed to join. Now `memcpy` with an
+  explicit length; the passphrase is likewise capped at its protocol maximum of 63, and `WIFI_PASS_MAXLEN`
+  corrected from 64 to 63.
+- **Init failure is reported.** The return value was discarded at both call sites; the WiFi menu now says
+  `RADIO UNAVAILABLE` instead of showing a generic offline state.
+- **Partial-init retry no longer leaks.** A failure after netif creation left `s_inited` false, so a retry
+  would create a second netif and re-register handlers; the one-shot allocations are now guarded.
+
+## 7. Commands run (reproduce)
 
 All builds go through the top-level `make` wrapper (never raw `idf.py` — the board overlay owns
 `CONFIG_IDF_TARGET`, PSRAM and flash size).
@@ -130,7 +174,7 @@ when the build-time transform applies — its absence on a P4 build means the pa
 Boot evidence was captured by pulsing RTS (reset) and reading the console for ~20 s; the P4 screenshot came
 from the `FB_DUMP` build's PAUSE-triggered compressed dump (`SHTZ` frame → zlib → 480×800 RGB565).
 
-## 7. Board state
+## 8. Board state
 
 - **P4** — left on the **shipping touch build** (`-D LAUNCHER=1`, no `FB_DUMP`/serial input), reflashed after
   testing and confirmed booting clean (SD mounted, C6 identified, STA up, launcher rendering). Known-good.
@@ -141,7 +185,7 @@ from the `FB_DUMP` build's PAUSE-triggered compressed dump (`SHTZ` frame → zli
 camera framing/glare/mirror ambiguity — and it now works on both boards. The camera adds nothing this change
 depends on (no new display code); backlight/physical output was confirmed by eye.
 
-## 8. Sources
+## 9. Sources
 
 - **P4↔C6 SDIO pin map + esp-hosted wiring:** GustavoH-Smart/esp32p4 (`README_WIFI`), the CNX Software writeup on the
   P4+C6 module, buccaneer-jak/JC4880P443C-…RS232 (P4↔C6 UART, C6 reset GPIO54, C6 boot IO9, JP1). Confirmed against
@@ -150,7 +194,7 @@ depends on (no new display code); backlight/physical output was confirmed by eye
   (giltal/RetroESP32-P4) for the rail/LDO; SPI-mode pin mapping is the standard TF-in-SPI wiring.
 - **Backends:** Espressif `esp_wifi_remote` (1.6.3) + `esp_hosted` (2.12.12, C6 factory firmware).
 
-## 9. State & next
+## 10. State & next
 
 - **Committed on branch `wifi-connectivity`** (held during the weekday 9–5 Pacific window, landed after 17:00).
   Contents: `components/wifi`, the P4 board SD-over-SPI + `BOARD_HAS_WIFI`, the CMake defer-init transform, the

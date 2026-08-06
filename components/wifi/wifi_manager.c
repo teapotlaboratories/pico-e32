@@ -7,6 +7,7 @@
 #include "esp_netif.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
@@ -25,27 +26,45 @@ static const char *TAG = "wifi";
 #define BIT_GOT_IP  BIT0
 #define BIT_FAILED  BIT1
 #define MAX_RETRY   3
+#define RETRY_DELAY_US (10 * 1000 * 1000)   /* steady-state reconnect probe: slow enough to be free */
 
 static bool               s_inited = false;
 static esp_netif_t       *s_netif  = NULL;
 static EventGroupHandle_t s_events = NULL;
 static SemaphoreHandle_t  s_lock   = NULL;   /* serialises scan/connect (boot autoconnect vs the menu) */
 static int                s_retry  = 0;
+static bool               s_connecting = false;   /* true only while wifi_mgr_connect() is waiting */
+static bool               s_keepalive  = false;   /* true once a link came up: keep it up from then on */
+static esp_timer_handle_t s_retry_timer = NULL;
+static bool               s_handlers = false;    /* event handlers registered once, even across a failed init */
+static volatile bool      s_initing  = false;    /* a bring-up is in flight (see wifi_mgr_init) */
+static portMUX_TYPE       s_init_mux = portMUX_INITIALIZER_UNLOCKED;   /* statically init'd: usable before init */
 
+static void retry_timer_cb(void *arg) { (void)arg; esp_wifi_connect(); }
+
+/* Disconnects mean two different things, so they get two different policies:
+ *   - during a wifi_mgr_connect() call: retry a bounded number of times, then report failure, so the menu
+ *     gets an answer instead of hanging forever on a wrong password or an absent AP;
+ *   - after a link was actually established: keep retrying indefinitely on a slow timer. An AP reboot or a
+ *     walk out of range must not leave the handheld permanently offline — which is exactly what a shared
+ *     bounded counter used to do, since it only reset on GOT_IP. */
 static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
     (void)arg; (void)data;
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (s_retry < MAX_RETRY) { s_retry++; esp_wifi_connect(); }
-        else                     { xEventGroupSetBits(s_events, BIT_FAILED); }
+        if (s_connecting) {
+            if (s_retry < MAX_RETRY) { s_retry++; esp_wifi_connect(); }
+            else                     { xEventGroupSetBits(s_events, BIT_FAILED); }
+        } else if (s_keepalive && s_retry_timer) {
+            esp_timer_start_once(s_retry_timer, RETRY_DELAY_US);   /* INVALID_STATE = already armed; fine */
+        }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
-        s_retry = 0;
+        s_retry     = 0;
+        s_keepalive = true;      /* from here on, a drop is something to recover from, not to give up on */
         xEventGroupSetBits(s_events, BIT_GOT_IP);
     }
 }
 
-esp_err_t wifi_mgr_init(void) {
-    if (s_inited) return ESP_OK;
-
+static esp_err_t wifi_mgr_init_once(void) {
 #if CONFIG_IDF_TARGET_ESP32P4
     /* Bring up the esp-hosted SDIO link to the C6 HERE, from app_main, rather than from esp-hosted's own boot
      * constructor. That constructor (ESP_ERROR_CHECK(esp_hosted_init()) at __attribute__((constructor)) time)
@@ -70,16 +89,25 @@ esp_err_t wifi_mgr_init(void) {
     ESP_ERROR_CHECK(esp_netif_init());
     err = esp_event_loop_create_default();
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return err;   /* a shared loop may already exist */
-    s_netif = esp_netif_create_default_wifi_sta();
+    /* Guard the one-shot allocations: an earlier call that failed *after* this point leaves s_inited false,
+     * so a retry would otherwise create a second netif and register the handlers twice. */
+    if (!s_netif) s_netif = esp_netif_create_default_wifi_sta();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));   /* we own persistence via NVS ourselves */
 
-    s_events = xEventGroupCreate();
-    s_lock   = xSemaphoreCreateMutex();
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_event, NULL, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, NULL, NULL));
+    if (!s_events) s_events = xEventGroupCreate();
+    if (!s_lock)   s_lock   = xSemaphoreCreateMutex();
+    if (!s_retry_timer) {
+        const esp_timer_create_args_t targs = { .callback = retry_timer_cb, .name = "wifi_retry" };
+        esp_timer_create(&targs, &s_retry_timer);   /* NULL on failure -> we simply don't auto-retry */
+    }
+    if (!s_handlers) {
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_event, NULL, NULL));
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, NULL, NULL));
+        s_handlers = true;
+    }
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
@@ -87,6 +115,28 @@ esp_err_t wifi_mgr_init(void) {
     s_inited = true;
     ESP_LOGI(TAG, "STA up");
     return ESP_OK;
+}
+
+/* Idempotent AND thread-safe: the launcher brings the radio up on a background task at boot, while the user
+ * can open Settings->WIFI at any moment and trigger a second call. Without this gate both callers would sail
+ * past the s_inited check and run the whole bring-up twice (two netifs, a second esp_wifi_init). The loser
+ * simply waits for the winner to finish and reports the same result. */
+esp_err_t wifi_mgr_init(void) {
+    if (s_inited) return ESP_OK;
+
+    bool mine = false;
+    portENTER_CRITICAL(&s_init_mux);
+    if (!s_inited && !s_initing) { s_initing = true; mine = true; }
+    portEXIT_CRITICAL(&s_init_mux);
+
+    if (!mine) {                                   /* another task is mid-bring-up — wait it out */
+        while (s_initing) vTaskDelay(pdMS_TO_TICKS(50));
+        return s_inited ? ESP_OK : ESP_FAIL;
+    }
+
+    esp_err_t err = wifi_mgr_init_once();
+    s_initing = false;
+    return err;
 }
 
 int wifi_mgr_scan(wifi_ap_t *out, int max) {
@@ -130,25 +180,37 @@ esp_err_t wifi_mgr_connect(const char *ssid, const char *pass, int timeout_ms) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     esp_err_t ret;
     wifi_config_t wc = { 0 };
-    strlcpy((char *)wc.sta.ssid, ssid, sizeof(wc.sta.ssid));
-    if (pass) strlcpy((char *)wc.sta.password, pass, sizeof(wc.sta.password));
+    /* memcpy, not strlcpy: an SSID may be exactly 32 bytes and is not NUL-terminated in wifi_config_t, so
+     * strlcpy's mandatory terminator would silently drop the 32nd character and the join would just fail.
+     * wc is zero-initialised, so a shorter SSID is already padded. Same reasoning caps the passphrase at its
+     * protocol maximum (63) rather than the field size (64). */
+    memcpy(wc.sta.ssid, ssid, strnlen(ssid, sizeof(wc.sta.ssid)));
+    if (pass) memcpy(wc.sta.password, pass, strnlen(pass, sizeof(wc.sta.password) - 1));
     /* leave threshold.authmode at 0 (OPEN) so it accepts whatever the AP offers (open or WPA/WPA2/WPA3) */
     if (esp_wifi_set_config(WIFI_IF_STA, &wc) != ESP_OK) {
         ret = ESP_FAIL;
     } else {
+        /* Stand down the steady-state reconnector for the duration: this attempt owns the radio, and a failed
+         * *explicit* connect should report failure rather than quietly retry the new credentials forever. */
+        s_keepalive = false;
+        if (s_retry_timer) esp_timer_stop(s_retry_timer);
         esp_wifi_disconnect();
         xEventGroupClearBits(s_events, BIT_GOT_IP | BIT_FAILED);
-        s_retry = 0;
+        s_retry      = 0;
+        s_connecting = true;
         ret = esp_wifi_connect();
         if (ret == ESP_OK) {
             EventBits_t bits = xEventGroupWaitBits(s_events, BIT_GOT_IP | BIT_FAILED,
                                                    pdFALSE, pdFALSE, pdMS_TO_TICKS(timeout_ms));
+            s_connecting = false;             /* modal attempt over; a later drop is the keepalive's business */
             if (bits & BIT_GOT_IP) {
-                ret = ESP_OK;
+                ret = ESP_OK;                 /* GOT_IP already armed s_keepalive */
             } else {
                 esp_wifi_disconnect();        /* give up cleanly on timeout/fail */
                 ret = (bits & BIT_FAILED) ? ESP_FAIL : ESP_ERR_TIMEOUT;
             }
+        } else {
+            s_connecting = false;
         }
     }
     xSemaphoreGive(s_lock);
@@ -200,7 +262,7 @@ void wifi_mgr_forget(void) {
     nvs_erase_key(h, KEY_PASS);
     nvs_commit(h);
     nvs_close(h);
-    if (s_inited) esp_wifi_disconnect();
+    wifi_mgr_disconnect();   /* also stands the keepalive down, so "forget" doesn't silently reconnect */
 }
 
 esp_err_t wifi_mgr_autoconnect(int timeout_ms) {
@@ -211,5 +273,8 @@ esp_err_t wifi_mgr_autoconnect(int timeout_ms) {
 }
 
 void wifi_mgr_disconnect(void) {
-    if (s_inited) esp_wifi_disconnect();
+    if (!s_inited) return;
+    s_keepalive = false;                                  /* an explicit disconnect must STAY disconnected */
+    if (s_retry_timer) esp_timer_stop(s_retry_timer);
+    esp_wifi_disconnect();
 }

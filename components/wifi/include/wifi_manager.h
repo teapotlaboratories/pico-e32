@@ -16,8 +16,11 @@
 extern "C" {
 #endif
 
+/* Protocol maxima, not arbitrary sizes: an 802.11 SSID is up to 32 bytes (and is NOT required to be
+ * NUL-terminated on the wire), and a WPA/WPA2 passphrase is at most 63 characters. Buffers here are
+ * MAXLEN+1 so they can always hold a C string; esp_wifi's own wifi_config_t fields are exactly 32 / 64. */
 #define WIFI_SSID_MAXLEN 32
-#define WIFI_PASS_MAXLEN 64
+#define WIFI_PASS_MAXLEN 63
 
 typedef struct {
     char    ssid[WIFI_SSID_MAXLEN + 1];
