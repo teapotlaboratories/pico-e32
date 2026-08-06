@@ -55,3 +55,53 @@ Design as specced in `WC-4a`. Order of work:
 
 Open question to settle while building: the manifest/image host for bench testing — a self-signed local server
 needs its CA baked in, which is fine for testing but must not become the shipped default.
+
+### 2. Library choice — and a correction
+
+Started by writing `esp_https_ota` into the spec, then read what `esp_https_ota_finish()` actually does before
+committing to it:
+
+```c
+err = esp_ota_end(handle->update_handle);
+...
+err = esp_ota_set_boot_partition(handle->partition.staging);
+```
+
+(`vendor/esp-idf/components/esp_https_ota/src/esp_https_ota.c`) — it finalises the image **and switches the boot
+slot in the same call**. There is no point between the two to compare the image against the manifest hash. The
+only way to keep `esp_https_ota` would be to switch and then revert on mismatch, which is a worse story for a
+brick-safety requirement than never switching at all.
+
+**Decision: `esp_http_client` + `esp_ota_ops` directly.** Hash while streaming, compare, and only then
+`esp_ota_end()` + `esp_ota_set_boot_partition()`. It also avoids a second pass reading ~1.5 MB back out of flash
+to hash it, and there is in-repo precedent — `firmware/pico-e32-p4-c6-ota/components/ota_https/ota_https.c` uses
+the same pattern for the C6 slave.
+
+Recorded because the spec named the other library first: the initial choice was reasonable and wrong, and the
+reason it was wrong is only visible in the implementation, not the docs.
+
+### 3. mbedtls 4.x — the legacy SHA API is gone
+
+`#include "mbedtls/sha256.h"` fails to compile on this tree: **IDF v6.0.2 ships mbedtls 4.1.0**, which is the
+TF-PSA-Crypto split. The legacy low-level hash API moved to `mbedtls/private/sha256.h` and is no longer public;
+the public path is **PSA Crypto** (`psa/crypto.h`, at
+`components/mbedtls/mbedtls/tf-psa-crypto/include/psa/crypto.h`).
+
+So the hashing is `psa_hash_setup(PSA_ALG_SHA_256)` / `psa_hash_update` / `psa_hash_finish`. No
+`psa_crypto_init()` call is needed — IDF runs it during system init
+(`components/mbedtls/port/esp_psa_crypto_init.c`, `ESP_SYSTEM_INIT_FN`). Worth knowing for anything else in this
+repo that reaches for mbedtls hashing later.
+
+A `psa_hash_setup` failure is treated as fatal for the update rather than "skip the check": an image that cannot
+be verified is not flashed.
+
+### 4. State: component builds
+
+`components/ota` (`ota_manager.{h,c}`) compiles and links into the P4 build. Config added to
+`sdkconfig.defaults`: `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` (the anti-brick net) and the mbedTLS certificate
+bundle for TLS against public CAs. Deliberately **not** `BOOTLOADER_APP_ANTI_ROLLBACK` — it burns eFuses, is
+irreversible, and would block flashing an older build on a DIY handheld; it also belongs with a secure-boot
+decision that is out of scope.
+
+Nothing is on hardware yet and no UI exists — next is the SYSTEM UPDATE screen, then a local manifest/image host
+to test against, including the negative cases (corrupted image rejected, power-pull mid-download).

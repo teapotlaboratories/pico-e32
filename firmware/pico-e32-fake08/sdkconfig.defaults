@@ -41,3 +41,14 @@ CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_DISABLE=y
 # Lua coroutine dies (fc frozen at 1, no player spawns). Pin the console to UART-only, matching the validated
 # config the board was actually developed + demoed under.
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# --- OTA (WC-4a) ---------------------------------------------------------------------------------------------
+# Anti-brick net: a freshly-flashed image boots as "pending verify" and must confirm itself
+# (ota_mark_valid, called once the launcher is up). If it panics or hangs before that, the bootloader reverts to
+# the previous slot on the next boot instead of leaving a dead handheld.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+# NOT enabling BOOTLOADER_APP_ANTI_ROLLBACK: it burns eFuses, is irreversible, and would block flashing an older
+# build — a footgun on a DIY handheld, and it belongs with a secure-boot decision that is out of scope here.
+# Validate TLS against the bundled public CA roots rather than embedding a certificate.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
