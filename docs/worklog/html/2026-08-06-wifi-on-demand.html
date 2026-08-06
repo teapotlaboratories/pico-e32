@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WiFi off by default — on-demand only — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8;
+        --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  :root[data-theme="light"]{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;--ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  :root[data-theme="dark"]{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;--border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)} .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;font-family:var(--mono)}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:9px;padding:.9rem 1.05rem;overflow-x:auto;font-size:.82rem;line-height:1.5;font-family:var(--mono)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  .nullres{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--warn);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left;vertical-align:top}
+  th{background:var(--codebg);font-family:var(--mono);font-size:.82rem}
+  td.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .bad{color:var(--bad);font-weight:600} .ok{color:var(--ok);font-weight:600} .warn{color:var(--warn);font-weight:600}
+  .diag{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.3rem;margin:1.3rem 0}
+  .diag h3{margin:.1rem 0 .4rem;font-size:.95rem}
+  .diag .sub{color:var(--muted);font-size:.82rem;margin:0 0 1rem}
+  .legend{font-size:.78rem;color:var(--muted);margin-top:.7rem}
+  .foot{margin-top:2.6rem;padding-top:1rem;border-top:1px solid var(--border);color:var(--muted);font-size:.85rem}
+  svg{max-width:100%;height:auto;display:block}
+  .goal{display:grid;grid-template-columns:auto 1fr;gap:.6rem 1rem;align-items:start;margin:1rem 0}
+  .pill{font:600 .72rem/1.6 var(--mono);padding:.05rem .55rem;border-radius:999px;white-space:nowrap;text-align:center}
+  .p-no{background:rgba(192,57,43,.14);color:var(--bad)}
+  .p-yes{background:rgba(26,127,75,.14);color:var(--ok)}
+  .p-part{background:rgba(168,99,0,.14);color:var(--warn)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <h1>WiFi off by default · on-demand only</h1>
+  <p class="date">2026-08-06 · <code>WC-5</code> — stop the radio being a permanent resident: acquire it, use it, tear it all the way down</p>
+
+  <div class="tldr">
+    The radio no longer comes up at boot on <b>either</b> board. A refcounted <code>wifi_mgr_acquire()</code> /
+    <code>wifi_mgr_release()</code> brings it up only for whoever needs it, and the last release tears the stack
+    <b>completely</b> down — <code>esp_wifi_deinit</code>, netif destroyed, and on the P4
+    <code>esp_hosted_deinit()</code> so the <b>ESP32-C6 stops being linked at all</b>. Launching a cart forces it
+    down regardless. Memory returned when idle: <b class="ok">126.5 KB</b> (P4), <b class="ok">38.0 KB</b> (S3),
+    with no leak across repeated cycles.
+  </div>
+
+  <div class="nullres">
+    <b class="warn">Honest null result:</b> this did <b>not</b> improve loading time. Cover-art load is
+    <b>64.0 ms median with the radio off — identical to with it on</b>. The idle radio was not stealing throughput
+    from the SD path. Of the three goals, only battery and CPU-residency are actually served; see
+    <a href="#s5">§5</a> for how far each is substantiated.
+  </div>
+
+  <nav aria-label="Contents" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:.85rem 1.1rem;margin:1.4rem 0">
+    <div style="font:600 .74rem/1 var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:.55rem">On this page</div>
+    <ol style="margin:0;padding-left:1.2rem;columns:2;column-gap:2rem;font-size:.92rem">
+      <li><a href="#s1">The model</a></li>
+      <li><a href="#s2">What teardown releases</a></li>
+      <li><a href="#s3">Measurements</a></li>
+      <li><a href="#s4">Two bugs found testing</a></li>
+      <li><a href="#s5">Against the three goals</a></li>
+      <li><a href="#s6">Commands · board state</a></li>
+    </ol>
+  </nav>
+
+  <div class="diag">
+    <h3>Lifetime of the radio</h3>
+    <p class="sub">Nothing brings it up implicitly. Every arrow below is a deliberate acquire or release.</p>
+    <svg viewBox="0 0 840 240" role="img" aria-label="Radio lifetime: off at boot, up only while a reference is held, forced down on cart launch">
+      <defs>
+        <marker id="a2" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+          <path d="M0 0 L9 4.5 L0 9 z" fill="var(--line)"/>
+        </marker>
+      </defs>
+      <style>
+        .bx{fill:var(--surface);stroke:var(--border);stroke-width:1.5}
+        .l{font:600 12px var(--mono);fill:var(--fg)}
+        .s{font:10.5px var(--mono);fill:var(--muted)}
+        .w{stroke:var(--line);stroke-width:1.6;fill:none;marker-end:url(#a2)}
+        .offbar{fill:var(--codebg);stroke:var(--border);stroke-width:1.2}
+        .onbar{fill:rgba(53,106,212,.16);stroke:var(--accent);stroke-width:1.4}
+      </style>
+
+      <!-- timeline -->
+      <text class="s" x="20" y="28">radio state over a session</text>
+      <rect class="offbar" x="20" y="40" width="230" height="34" rx="7"/>
+      <text class="l" x="135" y="62" text-anchor="middle">OFF</text>
+      <rect class="onbar" x="250" y="40" width="200" height="34" rx="7"/>
+      <text class="l" x="350" y="62" text-anchor="middle">UP (ref held)</text>
+      <rect class="offbar" x="450" y="40" width="180" height="34" rx="7"/>
+      <text class="l" x="540" y="62" text-anchor="middle">OFF</text>
+      <rect class="offbar" x="630" y="40" width="190" height="34" rx="7"/>
+      <text class="l" x="725" y="62" text-anchor="middle">OFF (playing)</text>
+
+      <!-- events -->
+      <path class="w" d="M250 100 L250 78"/>
+      <text class="s" x="256" y="112">acquire — Settings→WIFI opened</text>
+      <path class="w" d="M450 100 L450 78"/>
+      <text class="s" x="456" y="130">release — screen closed → full teardown</text>
+      <path class="w" d="M630 100 L630 78"/>
+      <text class="s" x="636" y="148">shutdown — cart launched (forced)</text>
+
+      <!-- what teardown drops -->
+      <rect class="bx" x="20" y="164" width="390" height="60" rx="9"/>
+      <text class="l" x="34" y="186">teardown drops</text>
+      <text class="s" x="34" y="204">esp_wifi_deinit · handlers · STA netif</text>
+      <text class="s" x="34" y="218">P4 also: esp_hosted_deinit → C6 unlinked</text>
+
+      <rect class="bx" x="430" y="164" width="390" height="60" rx="9"/>
+      <text class="l" x="444" y="186">memory returned while idle</text>
+      <text class="s" x="444" y="204">P4  126,484 B     S3  38,016 B</text>
+      <text class="s" x="444" y="218">re-acquire lands within 48 B — no leak</text>
+    </svg>
+    <p class="legend">Boot sits entirely in the first OFF block: on the P4 the C6 is never reset and esp-hosted's priority-23 tasks never exist.</p>
+  </div>
+
+  <h2 id="s1">1. The model</h2>
+  <p><code>wifi_mgr_acquire()</code> brings the stack up and takes a reference; <code>wifi_mgr_release()</code>
+  drops one and tears down at zero. Reference-counted so overlapping users compose — the WiFi screen and, later, an
+  OTA check or a download can each hold one. <code>wifi_mgr_shutdown()</code> forces it down whatever the count.</p>
+  <p>Who acquires today: <b>only Settings → WIFI</b>, while that screen is open. It also runs
+  <code>wifi_mgr_autoconnect()</code> on entry so the screen shows real state rather than a bare OFFLINE. The
+  <code>WC-4</code> features (NTP, OTA, downloads) are the future consumers. <code>wifi_mgr_init()</code> is gone
+  from the public header — bring-up is internal and reached only through <code>acquire</code>.</p>
+
+  <h2 id="s2">2. What teardown actually releases</h2>
+  <pre>esp_wifi_disconnect(); esp_wifi_stop();
+esp_event_handler_instance_unregister(...);   /* before deinit, so no event lands on a dead stack */
+esp_wifi_deinit();
+esp_netif_destroy_default_wifi(s_netif);
+#if CONFIG_IDF_TARGET_ESP32P4
+esp_hosted_deinit();                          /* drops the C6 link — the actual power win */
+#endif</pre>
+  <p>The long-lived primitives (mutex, event group, retry timer) are deliberately <b>not</b> destroyed: they are
+  small, and keeping them removes a whole class of use-after-free race against a concurrent scan/connect.
+  Everything guarding a one-shot allocation is reset so the next bring-up starts clean.</p>
+
+  <h2 id="s3">3. Measurements</h2>
+  <p><b>Up/down cycle, P4</b> — the <code>radio up</code>/<code>radio down</code> logs carry the free heap:</p>
+  <table>
+    <tr><th>event</th><th>free heap</th><th>note</th></tr>
+    <tr><td>acquire #1</td><td class="n">32,692,900</td><td>bring-up ~2.27 s (esp-hosted handshake + C6 identify)</td></tr>
+    <tr><td>release #1</td><td class="n">32,819,384</td><td><b class="ok">+126,484 B recovered</b></td></tr>
+    <tr><td>acquire #2</td><td class="n">32,692,852</td><td>within <b>48 B</b> of the first — no leak</td></tr>
+    <tr><td>release #2</td><td class="n">32,819,372</td><td>+126,520 B</td></tr>
+  </table>
+  <p><b>Up/down cycle, S3:</b></p>
+  <table>
+    <tr><th>event</th><th>free heap</th><th>note</th></tr>
+    <tr><td>acquire #1</td><td class="n">1,343,092</td><td>bring-up ~0.13 s; autoconnect joined, IP 192.168.7.228</td></tr>
+    <tr><td>release #1</td><td class="n">1,381,108</td><td><b class="ok">+38,016 B recovered</b></td></tr>
+    <tr><td>acquire #2</td><td class="n">1,342,108</td><td></td></tr>
+    <tr><td>release #2</td><td class="n">1,381,092</td><td>down-heap within 16 B of the first cycle</td></tr>
+  </table>
+  <p><b>Cover-art load on the P4 — the loading-time question.</b> Same folder and method both runs (scroll the
+  carousel to force uncached loads):</p>
+  <table>
+    <tr><th>radio</th><th>n</th><th>min</th><th>median</th><th>mean</th><th>max</th></tr>
+    <tr><td><b>ON</b> (connected, previous build)</td><td class="n">9</td><td class="n">49.4</td><td class="n"><b>64.0</b></td><td class="n">65.9</td><td class="n">82.6 ms</td></tr>
+    <tr><td><b>OFF</b> (this build)</td><td class="n">10</td><td class="n">49.9</td><td class="n"><b>64.0</b></td><td class="n">66.2</td><td class="n">82.4 ms</td></tr>
+  </table>
+  <p><b>No difference.</b> The cover path is SPI-read + PNG-decode bound; the idle radio wasn't contending with it.</p>
+
+  <h2 id="s4">4. Two bugs found while testing</h2>
+  <p><b><code>esp_hosted</code> re-init looked broken and wasn't.</b> The first cycle test showed acquire #2
+  producing no log at all — exactly what <code>esp_hosted_init()</code> hanging after a <code>deinit</code> would
+  look like, which was the risk called out in the plan. Tracing the bring-up state machine (and each screen's
+  entry) showed the bring-up was never <i>reached</i>: <code>run_wifi</code> was never called the second time.
+  Worth the trace — the workaround for the imagined bug would have been to skip <code>esp_hosted_deinit()</code>
+  and give up most of the power saving.</p>
+  <p><b>The actual bug: X backed out two screens.</b> The serial input backend holds a tap for 6 frames (and a
+  finger on the deck rests longer), so the <code>X</code> that closed the WiFi screen was still asserted when
+  <code>run_settings</code>' loop polled next. Its <code>prev</code> was stale, so it read a fresh X edge and exited
+  Settings too. Fixed by re-seeding <code>prev = input_poll()</code> after a submenu returns — the same pattern
+  already used on screen entry — in both places it can happen. Pre-existing, but it lives in this flow.</p>
+
+  <h2 id="s5">5. Against the three goals</h2>
+  <div class="goal">
+    <span class="pill p-no">not met</span>
+    <div><b>Loading time.</b> Measured, null result (§3). The radio wasn't in the way.</div>
+    <span class="pill p-yes">met</span>
+    <div><b>Battery</b> — by construction, not measured. On the P4 the C6 is never brought up at boot and is
+      unlinked when idle: a whole companion chip not running WiFi firmware. No bench power meter here, so the
+      magnitude is unquantified — stated as structural, not measured.</div>
+    <span class="pill p-part">partly</span>
+    <div><b>Cores for the game</b> — structural, frame time not measured. esp-hosted's priority-23 tasks and the
+      wifi driver task don't exist unless something acquired the radio, and a cart launch forces a teardown. The
+      launcher-side null result suggests the idle radio's CPU cost was small, so the honest expectation is a small
+      win. A gameplay frame-time comparison was not run.</div>
+  </div>
+
+  <h2 id="s6">6. Commands · board state</h2>
+  <pre># P4 (serial input so the menus can be driven over the console)
+make flash APP=pico-e32-fake08 BOARD=guition-jc4880p443c PORT=/dev/ttyACM0 \
+     DEFS="-D LAUNCHER=1 -D INPUT_BACKEND=serial"
+# S3
+make flash APP=pico-e32-fake08 BOARD=makerfabs-ili9488-r1 PORT=/dev/ttyUSB0 \
+     DEFS="-D LAUNCHER=1 -D INPUT_BACKEND=serial"</pre>
+  <p>Cycle test: boot, <code>d o d</code> to reach Settings → WIFI, <code>o</code> to open (acquire), <code>x</code>
+  to leave (release), <code>o</code> again to re-acquire. Cart launch verified separately: Games → folder →
+  <code>r</code> past the parent entry → <code>o</code>, which logged
+  <code>launch /sdcard/[Action-Adventure]/13 Jumps.p8.png</code> and started the VM.</p>
+
+  <p class="foot">pico-e32 worklog · 2026-08-06 · source: <code>docs/worklog/2026-08-06-wifi-on-demand.md</code> ·
+  backlog <code>WC-5</code> in <code>docs/pico-e32-todo.md</code></p>
+</div>
+</body>
+</html>

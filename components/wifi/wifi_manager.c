@@ -8,6 +8,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_system.h"   /* esp_get_free_heap_size — the up/down logs double as teardown evidence */
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
@@ -37,7 +38,9 @@ static bool               s_connecting = false;   /* true only while wifi_mgr_co
 static bool               s_keepalive  = false;   /* true once a link came up: keep it up from then on */
 static esp_timer_handle_t s_retry_timer = NULL;
 static bool               s_handlers = false;    /* event handlers registered once, even across a failed init */
-static volatile bool      s_initing  = false;    /* a bring-up is in flight (see wifi_mgr_init) */
+static esp_event_handler_instance_t s_h_wifi = NULL, s_h_ip = NULL;   /* kept so teardown can unregister them */
+static int                s_refs     = 0;        /* live wifi_mgr_acquire() references; 0 => radio torn down */
+static volatile bool      s_initing  = false;    /* a bring-up is in flight (see wifi_mgr_bringup) */
 static portMUX_TYPE       s_init_mux = portMUX_INITIALIZER_UNLOCKED;   /* statically init'd: usable before init */
 
 static void retry_timer_cb(void *arg) { (void)arg; esp_wifi_connect(); }
@@ -66,11 +69,12 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
 
 static esp_err_t wifi_mgr_init_once(void) {
 #if CONFIG_IDF_TARGET_ESP32P4
-    /* Bring up the esp-hosted SDIO link to the C6 HERE, from app_main, rather than from esp-hosted's own boot
-     * constructor. That constructor (ESP_ERROR_CHECK(esp_hosted_init()) at __attribute__((constructor)) time)
-     * stalls the C6 handshake in the full firmware — it runs before app_main, racing the other C++ global
-     * constructors, and the board never reaches app_main. Deferring it to here (after board bring-up) makes it
-     * reliable; a minimal app is unaffected either way. esp_hosted_init() is idempotent. */
+    /* Bring up the esp-hosted SDIO link to the C6 HERE — on demand, from whoever acquired the radio — and never
+     * from esp-hosted's own boot constructor. That constructor (ESP_ERROR_CHECK(esp_hosted_init()) at
+     * __attribute__((constructor)) time) stalls the C6 handshake in the full firmware: it runs before app_main,
+     * racing the other C++ global constructors, and the board never reaches app_main. It is disabled at build
+     * time from the project CMakeLists; see the P4 board doc. Verified that this pairs cleanly with the
+     * esp_hosted_deinit() in teardown — repeated up/down cycles re-init fine and don't leak. */
     esp_err_t he = esp_hosted_init();
     if (he != ESP_OK && he != ESP_ERR_INVALID_STATE) { ESP_LOGE(TAG, "esp_hosted_init -> %s", esp_err_to_name(he)); return he; }
     /* esp_hosted_init() only starts the transport tasks; this does the blocking C6 handshake (reset via GPIO54,
@@ -104,8 +108,8 @@ static esp_err_t wifi_mgr_init_once(void) {
         esp_timer_create(&targs, &s_retry_timer);   /* NULL on failure -> we simply don't auto-retry */
     }
     if (!s_handlers) {
-        ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_event, NULL, NULL));
-        ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, NULL, NULL));
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_event, NULL, &s_h_wifi));
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, NULL, &s_h_ip));
         s_handlers = true;
     }
 
@@ -113,15 +117,14 @@ static esp_err_t wifi_mgr_init_once(void) {
     ESP_ERROR_CHECK(esp_wifi_start());
 
     s_inited = true;
-    ESP_LOGI(TAG, "STA up");
+    ESP_LOGI(TAG, "radio up (free heap %u)", (unsigned)esp_get_free_heap_size());
     return ESP_OK;
 }
 
-/* Idempotent AND thread-safe: the launcher brings the radio up on a background task at boot, while the user
- * can open Settings->WIFI at any moment and trigger a second call. Without this gate both callers would sail
- * past the s_inited check and run the whole bring-up twice (two netifs, a second esp_wifi_init). The loser
- * simply waits for the winner to finish and reports the same result. */
-esp_err_t wifi_mgr_init(void) {
+/* Idempotent AND thread-safe: two callers can want the radio at once (the WiFi screen and, later, an OTA or
+ * download). Without this gate both would sail past the s_inited check and run the whole bring-up twice (two
+ * netifs, a second esp_wifi_init). The loser simply waits for the winner and reports the same result. */
+static esp_err_t wifi_mgr_bringup(void) {
     if (s_inited) return ESP_OK;
 
     bool mine = false;
@@ -138,6 +141,77 @@ esp_err_t wifi_mgr_init(void) {
     s_initing = false;
     return err;
 }
+
+/* Full teardown — the whole point of the on-demand model (WC-5). Not a "stop": the stack is deinitialised and
+ * the netif destroyed, and on the P4 the esp-hosted link is dropped so the C6 stops drawing power and its
+ * priority-23 tasks disappear. Everything here must leave the module able to bring up again from scratch, so
+ * every flag guarding a one-shot allocation is reset. The long-lived primitives (mutex, event group, timer) are
+ * deliberately NOT destroyed — they are small, and keeping them removes a whole class of use-after-free race
+ * with a concurrent scan/connect. */
+static void wifi_mgr_teardown(void) {
+    if (!s_inited) return;
+
+    xSemaphoreTake(s_lock, portMAX_DELAY);   /* never tear down under a live scan/connect */
+
+    s_keepalive  = false;                    /* stop the reconnector before the handlers go away */
+    s_connecting = false;
+    if (s_retry_timer) esp_timer_stop(s_retry_timer);
+
+    esp_wifi_disconnect();
+    esp_wifi_stop();
+
+    if (s_handlers) {                        /* unregister BEFORE deinit so no event lands on a dead stack */
+        esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, s_h_wifi);
+        esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, s_h_ip);
+        s_h_wifi = s_h_ip = NULL;
+        s_handlers = false;
+    }
+
+    esp_wifi_deinit();
+
+    if (s_netif) { esp_netif_destroy_default_wifi(s_netif); s_netif = NULL; }
+
+#if CONFIG_IDF_TARGET_ESP32P4
+    /* Drop the SDIO link to the C6. This is what actually powers the companion radio down and removes the
+     * esp-hosted tasks; without it the P4 keeps a whole second chip awake for nothing. */
+    esp_hosted_deinit();
+#endif
+
+    s_inited = false;
+    xSemaphoreGive(s_lock);
+    ESP_LOGI(TAG, "radio down (free heap %u)", (unsigned)esp_get_free_heap_size());
+}
+
+esp_err_t wifi_mgr_acquire(void) {
+    portENTER_CRITICAL(&s_init_mux);
+    s_refs++;
+    portEXIT_CRITICAL(&s_init_mux);
+
+    esp_err_t err = wifi_mgr_bringup();
+    if (err != ESP_OK) {                     /* failed acquires hold no reference */
+        portENTER_CRITICAL(&s_init_mux);
+        if (s_refs > 0) s_refs--;
+        portEXIT_CRITICAL(&s_init_mux);
+    }
+    return err;
+}
+
+void wifi_mgr_release(void) {
+    bool last = false;
+    portENTER_CRITICAL(&s_init_mux);
+    if (s_refs > 0 && --s_refs == 0) last = true;
+    portEXIT_CRITICAL(&s_init_mux);
+    if (last) wifi_mgr_teardown();
+}
+
+void wifi_mgr_shutdown(void) {
+    portENTER_CRITICAL(&s_init_mux);
+    s_refs = 0;
+    portEXIT_CRITICAL(&s_init_mux);
+    wifi_mgr_teardown();
+}
+
+bool wifi_mgr_is_up(void) { return s_inited; }
 
 int wifi_mgr_scan(wifi_ap_t *out, int max) {
     if (!s_inited || !out || max <= 0) return -1;
