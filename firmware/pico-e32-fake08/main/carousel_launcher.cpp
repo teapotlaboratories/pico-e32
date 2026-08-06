@@ -810,13 +810,18 @@ static void run_wifi_scan_connect(void) {
 }
 
 static void run_wifi(void) {
-    /* Idempotent and thread-safe: the boot task may still be mid-bring-up, in which case this blocks until it
-     * finishes rather than racing it. On the P4 that can be a couple of seconds if the menu is opened early. */
-    esp_err_t werr = wifi_mgr_init();
-    if (werr != ESP_OK) {                 /* no radio (P4: the C6 link never came up) — say so, don't pretend */
+    /* The radio is off until someone asks for it (WC-5). Hold a reference for as long as this screen is open and
+     * drop it on the way out, which tears the stack (and, on the P4, the C6) back down. The bring-up is blocking
+     * — ~2.3 s on the P4 for the esp-hosted handshake — so tell the user what the wait is. */
+    wifi_msg("WIFI", "STARTING RADIO...", s_dim, false);
+    if (wifi_mgr_acquire() != ESP_OK) {    /* no radio (P4: the C6 link never came up) — say so, don't pretend */
         wifi_msg("WIFI", "RADIO UNAVAILABLE", s_missing, true);
         return;
     }
+    /* Rejoin the saved network so the screen opens showing the real state rather than a bare OFFLINE. Failure is
+     * fine and expected (out of range, credentials changed) — the user can scan from here. */
+    if (wifi_mgr_autoconnect(12000) == ESP_ERR_NOT_FOUND) { /* nothing saved yet: straight to the menu */ }
+
     const int HS = s_info_scale + 1, VS = s_info_scale;
     int sel = 0;
     uint8_t prev = input_poll();   /* seed with held buttons so a press carried in from the previous screen doesn't re-fire */
@@ -844,11 +849,12 @@ static void run_wifi(void) {
 #ifdef FB_DUMP
             if (p & INPUT_PAUSE) carousel_fb_dump();
 #endif
-            if (p & INPUT_X) return;
+            if (p & INPUT_X) { wifi_mgr_release(); return; }   /* last reference out => radio powers down */
             if (p & (INPUT_DOWN | INPUT_UP)) { sel ^= 1; break; }
             if (p & INPUT_O) {
                 if (sel == 0) run_wifi_scan_connect();
                 else { wifi_mgr_forget(); wifi_msg("WIFI", "FORGOTTEN", s_dim, true); }
+                prev = input_poll();   /* the button that closed the submenu may still be held — see run_settings */
                 break;
             }
             vTaskDelay(pdMS_TO_TICKS(40));
@@ -856,22 +862,6 @@ static void run_wifi(void) {
     }
 }
 
-/* One-shot boot task: reconnect to saved credentials without blocking the launcher. Self-deletes when done. */
-/* Radio bring-up + reconnect, entirely off the boot path. On the P4 wifi_mgr_init() blocks for ~2.3 s doing
- * the esp-hosted handshake with the C6 (SDIO reset, card init, identify slave); doing that inline would delay
- * the menu appearing by the same amount, on every boot, for a feature most sessions never touch. It is
- * idempotent, so Settings->WIFI can call it again and will simply join whatever this task already finished. */
-static void wifi_autoconnect_task(void *arg) {
-    (void)arg;
-    esp_err_t err = wifi_mgr_init();
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "wifi init failed (%s) — WiFi menu will report no radio", esp_err_to_name(err));
-        vTaskDelete(NULL);
-        return;
-    }
-    wifi_mgr_autoconnect(15000);
-    vTaskDelete(NULL);
-}
 #endif  /* BOARD_HAS_WIFI */
 
 static void run_settings(void) {
@@ -941,7 +931,10 @@ static void run_settings(void) {
             }
         }
 #ifdef BOARD_HAS_WIFI
-        else if ((p & INPUT_O) && kinds[sel] == R_WIFI) { run_wifi(); draw_all(); }
+        /* Re-seed prev after the submenu: the X that closed it is very likely STILL held (the serial backend
+         * holds a tap for 6 frames, and a finger rests on the deck longer than that), and with a stale prev
+         * that reads as a fresh X edge here — backing out of Settings too, two screens for one press. */
+        else if ((p & INPUT_O) && kinds[sel] == R_WIFI) { run_wifi(); draw_all(); prev = input_poll(); }
 #endif
         vTaskDelay(pdMS_TO_TICKS(40));
     }
@@ -1025,8 +1018,8 @@ std::string carousel_launcher_run(Host *host, const std::string &start_dir) {
     apply_accent();
 
 #ifdef BOARD_HAS_WIFI
-    /* Bring the radio up AND reconnect off-thread: neither the C6 handshake nor a slow join may delay the menu. */
-    xTaskCreate(wifi_autoconnect_task, "wifi_ac", 4096, NULL, 4, NULL);
+    /* Deliberately nothing here: the radio stays OFF at boot (WC-5). It is brought up only by whoever needs it
+     * — Settings->WIFI while that screen is open, and later OTA/downloads — and torn down again after. */
 #endif
 
     /* Top-level menu: Games (the SD carousel) / Settings / About. Games returns a cart path to launch;
@@ -1060,6 +1053,11 @@ std::string carousel_launcher_run(Host *host, const std::string &start_dir) {
         }
     }
 
+#ifdef BOARD_HAS_WIFI
+    /* A cart never needs the network, and the game should not be sharing cores (or, on the P4, the SDIO bus and
+     * esp-hosted's priority-23 tasks) with a radio nobody is using. Force it down whatever the refcount. */
+    wifi_mgr_shutdown();
+#endif
     cache_clear();          /* free the decoded cover cache (up to CACHE_MAX PSRAM RGBAs) before the VM boots */
     heap_caps_free(s_scratch); s_scratch = nullptr;
     board_lcd_fill(s_bg);   /* clear before the game boots */

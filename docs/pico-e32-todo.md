@@ -94,7 +94,32 @@ docs (per [`.ai/AGENTS.md`](../.ai/AGENTS.md) → *Plan first*).
   - Verified: one boot mounts the SD over SPI **and** identifies the C6 (`Identified slave [esp32c6]`, STA up) with the
     launcher rendering. Driver-level connect proven earlier (joined `Tukang Ketoprak`, IP 192.168.7.212).
 - **`WC-4` — build on the foundation:** NTP clock (About/real-time), OTA firmware update (partition table already
-  OTA-ready), and network cart downloads (non-Splore). Each layers on `WC-1`.
+  OTA-ready), and network cart downloads (non-Splore). Each layers on `WC-1`. These are the **consumers** of the
+  on-demand model in `WC-5` — each one acquires the radio, does its transfer, and releases it.
+- **`WC-5` — WiFi off by default; on-demand only — ✅ DONE, hardware-verified on both boards (2026-08-06).** *Why:* the radio currently comes up on every boot and stays up
+  for the whole session, which costs boot/loading time, battery, and CPU that should belong to the game — on the P4
+  esp-hosted's tasks run at **priority 23** and the C6 stays powered even when nothing is using the network. A
+  handheld that is mostly playing offline carts should have its radio off almost always.
+  - **Model — pure on-demand, no boot connect and no persisted "on" toggle.** The radio is brought up only by a
+    caller that needs it and dropped as soon as that caller is done. Refcounted `wifi_mgr_acquire()` /
+    `wifi_mgr_release()` so overlapping users (e.g. an OTA check while the WiFi screen is open) compose correctly.
+    Settings → **WIFI** holds a reference while the screen is open, so scan/join still work exactly as now; saved
+    credentials still persist and are used by `wifi_mgr_autoconnect()` when a consumer acquires.
+  - **Teardown is full, on BOTH boards:** `esp_wifi_stop` + `esp_wifi_deinit`, unregister the event handlers and
+    destroy the STA netif; on the P4 additionally drop the esp-hosted link (`esp_hosted_deinit`) so the C6 stops
+    drawing power and its priority-23 tasks go away. Investigate holding the C6 in reset (GPIO54) while idle so it
+    isn't merely unlinked but actually off.
+  - **Games get the whole machine:** launching a cart forces a teardown regardless of refcount — a cart never needs
+    the network, and this is the point of the change.
+  - **Verified** ([worklog](worklog/2026-08-06-wifi-on-demand.md)): no WiFi in either boot log until something
+    acquires; teardown returns **126.5 KB** (P4) / **38.0 KB** (S3) of heap, and a second acquire lands within
+    **48 bytes** of the first, so the cycle is repeatable and doesn't leak — `esp_hosted_deinit()` *does* allow a
+    clean re-init, which was the main risk. Cart launch confirmed still working with the forced teardown in path.
+  - **Null result, recorded honestly:** this did **not** improve loading time. P4 cover-art load is **64.0 ms
+    median with the radio off — identical to with it on**; that path is SPI+decode bound and the idle radio wasn't
+    contending. Battery is improved by construction (the C6 is never brought up) but **unmeasured** — no bench
+    power meter. Gameplay frame time was **not** measured; the CPU win is structural (no priority-23 tasks
+    resident) and, given the null result above, expected to be small.
 
 ## Open decisions
 

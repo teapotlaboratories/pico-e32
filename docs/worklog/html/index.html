@@ -30,6 +30,19 @@
       linked from this index (see <a href="../../../.ai/AGENTS.md">.ai/AGENTS.md</a> → Worklogs).</p>
     <ul class="entries">
       <li>
+        <span class="d">2026-08-06</span>
+        <a class="t" href="2026-08-06-wifi-on-demand.html">WiFi off by default · on-demand only</a>
+        <span class="s">The radio no longer comes up at boot on either board. Refcounted
+          <code>wifi_mgr_acquire()</code>/<code>release()</code>; the last release tears the stack <strong>all the
+          way</strong> down — <code>esp_wifi_deinit</code>, netif destroyed, and on the P4
+          <code>esp_hosted_deinit()</code> so the <strong>C6 is unlinked entirely</strong>. Launching a cart forces
+          it down. Memory back when idle: <strong>126.5 KB</strong> (P4) / <strong>38.0 KB</strong> (S3), no leak
+          across cycles. <strong>Honest null result: loading time did NOT improve</strong> — cover load is 64.0 ms
+          median either way. Also found: an <code>esp_hosted</code> re-init that <em>looked</em> broken but wasn't
+          (the trace saved a needless workaround), and a real bug where <strong>X backed out two screens</strong>
+          because a 6-frame tap outlived the screen that consumed it. Backlog <code>WC-5</code>.</span>
+      </li>
+      <li>
         <span class="d">2026-08-05</span>
         <a class="t" href="2026-08-05-wifi-connectivity.html">WiFi connectivity · S3 native + P4 via the ESP32-C6</a>
         <span class="s">A <strong>WiFi menu</strong> on both handhelds — one <code>components/wifi</code> STA front-end
