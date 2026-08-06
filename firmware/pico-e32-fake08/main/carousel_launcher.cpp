@@ -815,19 +815,33 @@ static void run_wifi(void) {
      * drop it on the way out, which tears the stack (and, on the P4, the C6) back down. The bring-up is blocking
      * — ~2.3 s on the P4 for the esp-hosted handshake — so tell the user what the wait is. */
     wifi_msg("WIFI", "STARTING RADIO...", s_dim, false);
-#ifdef BOARD_HAS_SDMMC
     /* WC-6: this board's SD and its C6 radio share one SDMMC host, so the SD has to give it up while the radio
      * is in use. Safe here because nothing in this screen touches storage, and the launcher holds no open file
-     * handles (cover art is decoded into PSRAM at browse time, not streamed). Remounted on the way out. */
-    bool sd_was_up = (board_sd_unmount(s_sd_mount.c_str()) == ESP_OK);
-#endif
-    esp_err_t werr = wifi_mgr_acquire();
+     * handles (cover art is decoded into PSRAM at browse time, not streamed).
+     *
+     * The remount is tied to scope rather than written at each exit ON PURPOSE. Forgetting it on some future
+     * error path would not crash — it would leave the card unmounted and the games carousel silently empty, with
+     * the cause several screens away. A guard makes that unforgettable. */
+    struct SdHostLoan {
+        bool lent = false;
+        void lend() {
 #ifdef BOARD_HAS_SDMMC
-    if (werr != ESP_OK && sd_was_up) board_sd_mount(s_sd_mount.c_str());   /* radio failed — give the SD back */
+            lent = (board_sd_unmount(s_sd_mount.c_str()) == ESP_OK);
 #endif
+        }
+        ~SdHostLoan() {
+#ifdef BOARD_HAS_SDMMC
+            if (lent && board_sd_mount(s_sd_mount.c_str()) != ESP_OK)
+                wifi_msg("WIFI", "SD REMOUNT FAILED", s_missing, true);   /* don't fail silently into an empty carousel */
+#endif
+        }
+    } sd_host;      /* no-op on boards whose SD doesn't share a host with the radio (the S3) */
+    sd_host.lend();
+
+    esp_err_t werr = wifi_mgr_acquire();
     if (werr != ESP_OK) {                  /* no radio (P4: the C6 link never came up) — say so, don't pretend */
         wifi_msg("WIFI", "RADIO UNAVAILABLE", s_missing, true);
-        return;
+        return;                            /* ~SdHostLoan gives the card back */
     }
     /* Rejoin the saved network so the screen opens showing the real state rather than a bare OFFLINE. Failure is
      * fine and expected (out of range, credentials changed) — the user can scan from here. */
@@ -861,10 +875,8 @@ static void run_wifi(void) {
             if (p & INPUT_PAUSE) carousel_fb_dump();
 #endif
             if (p & INPUT_X) {
-                wifi_mgr_release();                   /* last reference out => radio powers down */
-#ifdef BOARD_HAS_SDMMC
-                if (sd_was_up) board_sd_mount(s_sd_mount.c_str());   /* take the SDMMC host back for the SD */
-#endif
+                wifi_mgr_release();   /* last reference out => radio powers down, then ~SdHostLoan takes the
+                                       * SDMMC host back for the SD. Order matters: the radio must let go first. */
                 return;
             }
             if (p & (INPUT_DOWN | INPUT_UP)) { sel ^= 1; break; }
