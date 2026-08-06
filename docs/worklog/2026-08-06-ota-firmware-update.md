@@ -205,3 +205,19 @@ Also fixed a small gap found while capturing: the confirm loop had no `FB_DUMP` 
 screen it could not be screenshotted. Added — a screen that can't be captured can't be reviewed.
 
 Frames in the scratchpad (not committed, per the captured-frames rule).
+
+### 10. Centring the action buttons
+
+Owner asked for "CHECK FOR UPDATE" to sit in the middle. Rather than special-casing one screen, the rule is now
+structural in `draw_pill_row()`: **a row with a sub-label is a list item** (SSID left, signal right) and stays
+left-aligned; **a row without one is a button** and is centred in its pill.
+
+That also centres the WiFi screen's two action rows (`SCAN / RECONNECT`, `FORGET NETWORK`) for free, which is
+consistent rather than a side effect — they were always buttons drawn with list alignment. Verified on the panel:
+the update screen's button is centred, and the WiFi screen's `STATUS` / `SSID` / `IP` rows (drawn by `draw_kv`,
+not this helper) are untouched.
+
+Note on the S3 build: it failed once with `libesp_driver_dma.a: No such file` after the mbedTLS/cert-bundle
+config landed — a stale build tree, not a code error. Removing `build/pico-e32-fake08/makerfabs-ili9488-r1` and
+rebuilding fixed it. Same family as the `sdkconfig` staleness in §5: config changes need the generated tree
+dropped.
