@@ -128,14 +128,35 @@ docs (per [`.ai/AGENTS.md`](../.ai/AGENTS.md) → *Plan first*).
   `WC-5` on-demand work was measured and did *not* move it.
   - **Why it's newly possible:** the SD went to SPI only because the C6 needed the single SDMMC host and WiFi was
     then always-on. Since `WC-5` the radio is off unless acquired, so the host is free almost all the time.
-  - **The conflict that remains:** network cart downloads (`WC-4`) want SD *and* WiFi at once. Simplest resolution
-    — the P4 has 32 MB of PSRAM: buffer a download in PSRAM while WiFi is up, release the radio, then write to SD.
-    Cart-sized payloads make this trivial. Avoids any dual-driver/live-remount complexity.
-  - **Shape:** SD mounts over SDMMC at boot; `wifi_mgr_acquire()` unmounts it and releases the SDMMC host before
-    esp-hosted init, `wifi_mgr_release()` remounts. Needs a board seam for "give up the host" and a rule that no
-    file handles are held across an acquire.
-  - **Verify:** cover-load split before/after (expect ~32.5 ms); acquire→release→remount cycle repeatable; SD still
-    mounts after several WiFi sessions; and confirm unmounting SDMMC really frees the host for esp-hosted.
+  - **The conflict that remains:** network cart downloads (`WC-4`) want SD *and* WiFi at once. **Resolution (owner):
+    swap the SD onto SPI for the duration of a network session.** The SD and the C6 then run simultaneously exactly
+    as they do today — that pairing is already shipped and proven — but it becomes the *temporary* mode instead of
+    the permanent one. Better than buffering the download in PSRAM: no size ceiling, and a download can stream
+    straight to the card. The SD is slow (1.43 MB/s) only while the radio is up, which is irrelevant when a cart is
+    ~38 KB and the network is the bottleneck.
+  - **Shape:** the board exposes **both** SD drivers on the same TF pins — SDMMC 4-bit (fast, default) and SPI
+    (slow, network mode) — plus a switch. A network session is: close all file handles → unmount SDMMC + release
+    the host → mount SD over SPI → `wifi_mgr_acquire()` → transfer → `wifi_mgr_release()` → unmount SPI → remount
+    SDMMC. Sequenced by the **app**, not the wifi component: the wifi manager must not learn about storage, and the
+    board owns both drivers. Rule: no file handle may be held across a mode switch.
+  - **GATE — ✅ PASSED on hardware (2026-08-06).** The SDMMC host *can* be handed over at runtime. Probed the full
+    round trip on the P4: SD mounted 4-bit → `esp_vfs_fat_sdcard_unmount()` → `Identified slave [esp32c6]` +
+    `radio up` → `radio down` → SD **remounted** over SDMMC (44 ms). The original finding was only that the two
+    cannot be initialised *simultaneously*; sequential handover is fine.
+  - **Trap found while probing (do not repeat):** `esp_vfs_fat_sdcard_unmount()` **already** deinitialises the host
+    and frees the card — IDF `components/fatfs/vfs/vfs_fat_sdmmc.c`, `unmount_card_core()` calls
+    `call_host_deinit(&card->host)` then `free(card)`. Calling `sdmmc_host_deinit()` yourself afterwards is a
+    double-deinit and **panics the board into a boot loop** (`Guru Meditation ... MCAUSE 0x1f` right after the
+    unmount log). Unmount, and nothing else. Leave the LDO VO4 rail powered — SPI mode needs it too, so it should
+    survive the switch rather than being torn down and re-acquired.
+  - **Staging (recommended):** ship the win first, add the SPI mode when it's actually needed. **Step 1** — SD on
+    SDMMC by default, and the WiFi settings screen (which needs no SD) unmounts it for the duration. That is the
+    whole 41% loading win with almost no new machinery, and it is fully proven by the gate above. **Step 2** —
+    add the SPI mode when `WC-4` lands a download that genuinely needs SD *and* radio at once; SD-on-SPI +
+    C6-on-SDMMC is already proven, since it is exactly what shipped before this item.
+  - **Verify:** the gate above; cover-load split before/after (expect ~32.5 ms); a full
+    SDMMC → SPI → WiFi → SPI → SDMMC cycle repeated several times without losing the card; and SD writes working
+    while the radio is up.
   - **S3 is unaffected** — native radio, no shared host; it keeps SPI.
 
 ## Open decisions
