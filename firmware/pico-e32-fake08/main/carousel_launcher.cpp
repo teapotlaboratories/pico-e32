@@ -736,7 +736,11 @@ static int wifi_row_dy(void) { return wifi_row_h() + 8; }             /* row pit
 static void draw_pill_row(int y, const char *label, const char *sub, bool hl) {
     const int ls = s_info_scale + 1, ss = s_info_scale, rh = wifi_row_h();
     if (hl) blit_round_rect(s_gx + 16, y, s_gw - 32, rh, rh / 2, s_accent);
-    draw_text(s_gx + 24, y + (rh - 5 * ls) / 2, label, ls, hl ? s_bg : s_fg, hl ? s_accent : s_bg);
+    /* A row with a sub-label is a LIST item (SSID left, signal right), so it stays left-aligned. A row without
+     * one is a BUTTON — centre it in the pill, which is what it reads as. */
+    const int ty = y + (rh - 5 * ls) / 2;
+    if (sub && *sub) draw_text(s_gx + 24, ty, label, ls, hl ? s_bg : s_fg, hl ? s_accent : s_bg);
+    else             draw_text_centered(s_gx + s_gw / 2, ty, label, ls, hl ? s_bg : s_fg, hl ? s_accent : s_bg);
     if (sub && *sub)
         draw_text(s_gx + s_gw - 24 - (int)strlen(sub) * 4 * ss, y + (rh - 5 * ss) / 2,
                   sub, ss, hl ? s_bg : s_dim, hl ? s_accent : s_bg);
