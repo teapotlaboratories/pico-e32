@@ -1022,6 +1022,9 @@ static void run_update(void) {
         bool go = false, done_choosing = false;
         while (!done_choosing) {
             uint8_t m = input_poll(); uint8_t p = (uint8_t)(m & ~prev); prev = m;
+#ifdef FB_DUMP
+            if (p & INPUT_PAUSE) carousel_fb_dump();   /* every other screen is capturable; so is this one */
+#endif
             if (p & INPUT_O) { go = true;  done_choosing = true; }
             if (p & INPUT_X) { go = false; done_choosing = true; }
             vTaskDelay(pdMS_TO_TICKS(40));
@@ -1095,8 +1098,14 @@ static void run_settings(void) {
 #endif
 #ifdef BOARD_HAS_WIFI
             case R_UPDATE: {
+                /* "SYSTEM UPDATE" + a full git-describe version is wider than the row and the two collide
+                 * mid-line (seen on the panel, not in any log). Shorten both: the screen this opens is titled
+                 * SYSTEM UPDATE, and the short hash is the part anyone reads. */
                 char v[OTA_VERSION_MAXLEN + 1]; ota_current_version(v, sizeof v);
-                draw_kv(ry, "SYSTEM UPDATE", v, LS, VS, lc, s_dim);
+                char *dash = strchr(v, '-');
+                if (dash) *dash = '\0';            /* drop the "-dirty"/"-N-gxxxx" tail */
+                if (strlen(v) > 10) v[10] = '\0';
+                draw_kv(ry, "UPDATE", v, LS, VS, lc, s_dim);
                 break; }
 #endif
             case R_BRIGHT: draw_kv(ry, "BRIGHTNESS", "SOON", LS, VS, hl ? s_accent : s_dim, s_dim); break;

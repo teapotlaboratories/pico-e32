@@ -186,3 +186,22 @@ carousel drawing. **The bad image was written to flash and then simply never boo
 
 Also outstanding: the whole test ran over **HTTP** against a local server. TLS is wired (cert bundle, plus an
 `OTA_INSECURE` escape hatch for self-signed) but **has not been exercised** — so "HTTPS works" is unverified.
+
+### 9. Actually looking at the UI — one real bug
+
+Everything above was verified from serial logs. The screens had never been *seen*, which is precisely what the
+repo's "capture a frame and look at it" rule exists to prevent. Captured them via `FB_DUMP`:
+
+- **Settings row — BUG.** `SYSTEM UPDATE` as a label plus a full git-describe version rendered as
+  `SYSTEM UPDA79B369F-DIRTY`: the label and the right-aligned value **overlapped mid-row**. Invisible to every
+  log-based check, obvious in one screenshot. Fixed by shortening both — the row is now `UPDATE / 79B369F` (the
+  screen it opens is titled SYSTEM UPDATE, and the short hash is the part anyone reads), which also matches the
+  visual rhythm of the ACCENT/WIFI/BRIGHTNESS rows.
+- **Confirm screen — correct.** `CURRENT` dim, `NEW` in the accent colour, plus size and build stamp, so the
+  install is approved against what it actually is rather than a bare "update available".
+- **Update home — correct.** Title, `O SELECT  X BACK`, `CURRENT`, and the highlighted `CHECK FOR UPDATE` pill.
+
+Also fixed a small gap found while capturing: the confirm loop had no `FB_DUMP` hook, so unlike every other
+screen it could not be screenshotted. Added — a screen that can't be captured can't be reviewed.
+
+Frames in the scratchpad (not committed, per the captured-frames rule).
