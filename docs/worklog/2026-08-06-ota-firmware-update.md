@@ -255,3 +255,68 @@ is not yet verified on hardware**: repeated attempts to drive it were lost to se
 
 Manifest format is now:
 `{"target","version","build","url","sha256","size"}`.
+
+### 12. The remaining acceptance items — and two vacuous "passes"
+
+**Wrong-chip refusal — verified.** Served the S3 a `"target":"esp32p4"` manifest:
+
+```
+E ota: manifest targets 'esp32p4' but this is 'esp32s3' — refusing
+```
+
+Refused at *check* time, with no `target slot` line — nothing was downloaded or written. That is the point of
+checking in `ota_check()` rather than leaving it to the bootloader.
+
+**Power-pull mid-download — verified, but only on the third attempt, and the first two were worthless.** The
+first two runs reset the board and it came back fine, which *looked* like a pass. It wasn't: the S3 was already
+running `ota-test-s3` and the manifest offered `ota-test-s3`, so `ota_is_newer()` correctly said "up to date" and
+**no download ever started**. Resetting an idle board proves nothing. The tell was a missing `target slot` line —
+worth catching, because a green result from a test that never exercised the path is worse than a red one.
+
+Fixed by offering `ota-test-s3b` (same bytes, different version string — `ota_is_newer` is an inequality, which
+is exactly why that works) and asserting the write was in flight before pulling the plug:
+
+```
+FLASH WRITE IN FLIGHT: True
+ota: target slot 'ota_0' @0x20000 (4096 KB)
+<<< RESET WHILE WRITING >>>
+rst:0x1 (POWERON)
+App version: ota-test-s3      <- previous firmware, untouched
+sdcard_spi: SD mounted at /sdcard
+carousel: carousel layout ...
+```
+
+A reset ~3 s into the flash write leaves the board fully bootable on the old firmware.
+
+**TLS — verified.** Pointed a build at a real public HTTPS endpoint
+(`https://raw.githubusercontent.com/jtothebell/fake-08/master/README.md`, read-only, nothing published):
+
+```
+E ota: manifest missing a required field
+```
+
+That error is the success signal: it can only be reached after a completed TLS handshake, certificate validation
+against the bundled CA roots, HTTP 200, and a body read. A TLS failure would have errored earlier, at
+`manifest open`. **Still untested:** a full ~1.6 MB image transfer over TLS — only the small manifest fetch went
+over HTTPS. The image download uses the same `esp_http_client` config, so it is the same code path, but that is
+reasoning rather than a measurement.
+
+### 13. Acceptance status — final
+
+| criterion | status |
+|---|---|
+| (a) end-to-end update, version visibly changes | ✅ **both boards** (P4 `ota-test-2`, S3 `ota-test-s3`) |
+| (b) corrupted image rejected, old firmware still boots | ✅ verified (P4) |
+| (c) power-pull mid-download leaves the board bootable | ✅ verified (S3, write confirmed in flight) |
+| (d) radio + SD host released on every exit path | ✅ observed across the failure paths exercised |
+| (e) no-network case reports cleanly | ✅ |
+| wrong-chip image refused | ✅ verified (S3) |
+| TLS | ✅ handshake + cert validation; ⬜ full image transfer over TLS |
+
+Throughput: **P4 218 KB/s** (1.66 MB / 7.6 s, over the C6), **S3 180 KB/s** (1.63 MB / 9.1 s, native radio).
+
+### 14. Board state
+
+Both boards reflashed to the shipped touch build (`-D LAUNCHER=1`) with **no manifest URL configured**, so
+SYSTEM UPDATE reports `NO UPDATE URL IN BUILD` rather than pointing at a bench laptop. The test server, images
+and manifests live only in the scratchpad and are not committed.
