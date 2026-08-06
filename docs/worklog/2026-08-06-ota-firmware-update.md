@@ -105,3 +105,84 @@ decision that is out of scope.
 
 Nothing is on hardware yet and no UI exists — next is the SYSTEM UPDATE screen, then a local manifest/image host
 to test against, including the negative cases (corrupted image rejected, power-pull mid-download).
+
+### 5. UI + the two quoting traps
+
+Settings gains a **SYSTEM UPDATE** row and `run_update()`: current version → CHECK (acquires the radio, lends
+the SD host out on the P4 via the same `SdHostLoan` guard the WiFi screen uses, autoconnects, fetches the
+manifest) → shows *what* it would install (version, size, build) → INSTALL with a progress bar and X to cancel →
+reboot. The guard was hoisted to file scope so both network screens share one definition of the invariant.
+
+Two traps, same root cause, both cost a test cycle:
+
+1. **`-D OTA_MANIFEST_URL='"http://…"'` silently arrived empty.** Quotes do not survive
+   make → `idf.py` → CMake → compiler. Moved to Kconfig (`main/Kconfig.projbuild`,
+   `CONFIG_PICO_E32_OTA_MANIFEST_URL`), which quotes correctly — and is better anyway: the endpoint a build will
+   trust is now visible config rather than a magic command-line string. Empty by default, and the menu says
+   "NO UPDATE URL IN BUILD" rather than pretending.
+2. **`-D BENCH_WIFI_SEED=1` did nothing at all.** `DEFS` flags only become compile definitions if
+   `main/CMakeLists.txt` explicitly forwards them (`target_compile_definitions`) — there is a per-flag list. An
+   unknown `-D` sets a CMake variable and is otherwise ignored, with no warning.
+
+Also: **changing `sdkconfig.defaults` does not take effect on an existing build** — IDF only applies defaults
+when generating `sdkconfig` the first time. The generated `build/<app>/<board>/sdkconfig` has to be deleted
+(which forces a full rebuild).
+
+### 6. A real bug found by the test setup
+
+Seeding credentials at boot to avoid driving the on-screen keyboard failed silently: `wifi_mgr_save()` returned
+an error because **NVS had never been initialised**. `nvs_flash_init()` only ran inside the radio bring-up, so
+any credential call made without the radio having come up first was writing into uninitialised NVS and dropping
+the write.
+
+Not just test scaffolding — `wifi_mgr_save`/`load`/`forget` are legitimately callable without the radio (a
+settings screen reading saved state, provisioning, this). Added an idempotent `ensure_nvs()` used by all three
+and by the bring-up path. After the fix the seed returned `ESP_OK` and autoconnect found the network.
+
+The UX flaw it exposed is fixed too: "NO NETWORK" conflated *no saved credentials* with *the join failed*, which
+send the user to different places. Now "NO SAVED WIFI - JOIN ONE FIRST" vs "CANT REACH NETWORK".
+
+### 7. Hardware results — both paths
+
+**Happy path, P4, end to end:**
+
+```
+App version: 30834c5-dirty                       <- running
+wifi: autoconnect -> Tukang Ketoprak
+sta ip: 192.168.7.212
+ota: manifest: ota-test-2 (1661328 bytes)
+ota: target slot 'ota_1' @0x420000 (4096 KB)
+ota: verified 1661328 bytes, boot slot -> 'ota_1'
+rst:0xc (SW_CPU_RESET)
+App version: ota-test-2                          <- NEW FIRMWARE RUNNING
+ota: new image confirmed good (ESP_OK) — rollback cancelled
+```
+
+1.66 MB downloaded, hashed and switched in **7.6 s** (~218 KB/s over the C6). The version visibly changed, and
+the pending-verify → mark-valid handshake completed.
+
+**Corrupted image — the test that matters.** Served a byte-flipped image while advertising the good hash:
+
+```
+ota: manifest: ota-test-3-corrupt (1661328 bytes)
+ota: target slot 'ota_0' @0x20000 (4096 KB)
+E ota: SHA-256 mismatch — boot slot untouched
+E ota:   manifest 14557f0482fd934e8953efdc34aa8e0a0d4a495f8f9ddbe01dd5cab08ef3caf2
+E ota:   received  4946ff8c19ac2b7cec9b31c27156df289e9cf59ec99b18d88f93565648524d6f
+```
+
+Rejected, both hashes logged, and the board rebooted straight back into `ota-test-2` with the SD mounting and the
+carousel drawing. **The bad image was written to flash and then simply never booted** — which is the whole design.
+
+### 8. Acceptance status against `WC-4a`
+
+| criterion | status |
+|---|---|
+| (a) end-to-end update, version visibly changes | ✅ P4. **S3 not yet tested** |
+| (b) corrupted image rejected, old firmware still boots | ✅ verified |
+| (c) power-pull mid-download leaves the board bootable | ⬜ not yet run |
+| (d) radio + SD host released on every exit path | ✅ observed on the failure paths exercised |
+| (e) no-network case reports cleanly | ✅ (this is how the NVS bug surfaced) |
+
+Also outstanding: the whole test ran over **HTTP** against a local server. TLS is wired (cert bundle, plus an
+`OTA_INSECURE` escape hatch for self-signed) but **has not been exercised** — so "HTTPS works" is unverified.

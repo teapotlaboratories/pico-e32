@@ -23,7 +23,8 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_app_desc.h"   /* main-menu About screen: version / IDF / build date */
-#include "wifi_manager.h"   /* Settings -> WiFi (real on BOARD_HAS_WIFI boards; a no-op stub otherwise) */
+#include "wifi_manager.h"
+#include "ota_manager.h"   /* Settings -> SYSTEM UPDATE (WC-4a) + confirming a freshly-installed image */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -780,6 +781,25 @@ static const char *rssi_bars(int8_t r) {
 }
 
 /* Scan -> pick a network -> (keyboard for the password unless open) -> connect -> persist on success. */
+/* Lending the SDMMC host to the radio (WC-6). On the P4 the SD and the C6 share one host, so any screen that
+ * brings the radio up must give the card back for the duration. Tied to scope rather than written at each exit:
+ * forgetting it on some future error path would not crash — it would leave the card unmounted and the games
+ * carousel silently empty, with the cause several screens away. A no-op on boards whose SD has its own bus. */
+struct SdHostLoan {
+    bool lent = false;
+    void lend() {
+#ifdef BOARD_HAS_SDMMC
+        lent = (board_sd_unmount(s_sd_mount.c_str()) == ESP_OK);
+#endif
+    }
+    ~SdHostLoan() {
+#ifdef BOARD_HAS_SDMMC
+        if (lent && board_sd_mount(s_sd_mount.c_str()) != ESP_OK)
+            wifi_msg("WIFI", "SD REMOUNT FAILED", s_missing, true);   /* don't fail silently into an empty carousel */
+#endif
+    }
+};
+
 static void run_wifi_scan_connect(void) {
     wifi_msg("WIFI", "SCANNING...", s_dim, false);
     static wifi_ap_t aps[16];
@@ -822,20 +842,7 @@ static void run_wifi(void) {
      * The remount is tied to scope rather than written at each exit ON PURPOSE. Forgetting it on some future
      * error path would not crash — it would leave the card unmounted and the games carousel silently empty, with
      * the cause several screens away. A guard makes that unforgettable. */
-    struct SdHostLoan {
-        bool lent = false;
-        void lend() {
-#ifdef BOARD_HAS_SDMMC
-            lent = (board_sd_unmount(s_sd_mount.c_str()) == ESP_OK);
-#endif
-        }
-        ~SdHostLoan() {
-#ifdef BOARD_HAS_SDMMC
-            if (lent && board_sd_mount(s_sd_mount.c_str()) != ESP_OK)
-                wifi_msg("WIFI", "SD REMOUNT FAILED", s_missing, true);   /* don't fail silently into an empty carousel */
-#endif
-        }
-    } sd_host;      /* no-op on boards whose SD doesn't share a host with the radio (the S3) */
+    SdHostLoan sd_host;
     sd_host.lend();
 
     esp_err_t werr = wifi_mgr_acquire();
@@ -891,6 +898,156 @@ static void run_wifi(void) {
     }
 }
 
+
+/* ---------- Settings -> SYSTEM UPDATE (WC-4a) ----------------------------------------------------------- */
+
+/* Where to look for the manifest — CONFIG_PICO_E32_OTA_MANIFEST_URL (main/Kconfig.projbuild), so a build is
+ * always explicit about what it will trust. Empty = the menu says so instead of pretending.
+ * Kconfig rather than a -D define because a quoted string does not survive make -> idf.py -> CMake -> compiler:
+ * the quotes are stripped and the macro silently ends up empty. Verified the hard way. */
+#ifdef CONFIG_PICO_E32_OTA_MANIFEST_URL
+#define OTA_MANIFEST_URL CONFIG_PICO_E32_OTA_MANIFEST_URL
+#else
+#define OTA_MANIFEST_URL ""
+#endif
+
+static int  s_ota_pct = -1;      /* last painted percentage, so the bar only repaints when it moves */
+
+static void ota_draw_progress(size_t done, size_t total) {
+    int pct = total ? (int)((done * 100) / total) : 0;
+    if (pct == s_ota_pct) return;
+    s_ota_pct = pct;
+
+    const int VS = s_info_scale;
+    int y  = s_crumb_y + (s_info_scale + 1) * 8 + VS * 8 + 60;
+    int bw = s_gw - 40, bx = s_gx + 20, bh = VS * 6;
+
+    blit_round_rect(bx, y, bw, bh, 3, s_platform);                       /* track */
+    if (pct > 0) blit_round_rect(bx, y, (bw * pct) / 100, bh, 3, s_accent);
+
+    char line[40];
+    snprintf(line, sizeof line, "%d%%  %uK / %uK", pct,
+             (unsigned)(done / 1024), (unsigned)(total / 1024));
+    int ty = y + bh + 10;
+    blit_round_rect(s_gx + 20, ty, s_gw - 40, VS * 6, 0, s_bg);          /* clear the old figures */
+    draw_text_centered(s_W / 2, ty, line, VS, s_fg, s_bg);
+}
+
+static bool ota_progress_cb(size_t done, size_t total, void *user) {
+    (void)user;
+    ota_draw_progress(done, total);
+    /* X cancels mid-download; the component aborts and leaves the boot slot untouched. */
+    return !(input_poll() & INPUT_X);
+}
+
+static void run_update(void) {
+    const int HS = s_info_scale + 1, VS = s_info_scale;
+    char cur[OTA_VERSION_MAXLEN + 1];
+    ota_current_version(cur, sizeof cur);
+
+    auto header = [&](const char *sub) {
+        board_lcd_fill(s_bg);
+        draw_text_centered(s_W / 2, s_crumb_y, "SYSTEM UPDATE", HS, s_fg, s_bg);
+        blit_round_rect(s_W / 2 - 26, s_crumb_y + HS * 8, 52, 3, 1, s_accent);
+        draw_text_centered(s_W / 2, s_crumb_y + HS * 8 + 12, sub, VS, s_dim, s_bg);
+        board_draw_touch_deck();
+    };
+
+    if (!OTA_MANIFEST_URL[0]) {           /* no endpoint compiled in — say so rather than fail obscurely */
+        wifi_msg("UPDATE", "NO UPDATE URL IN BUILD", s_missing, true);
+        return;
+    }
+
+    int sel = 0;
+    uint8_t prev = input_poll();
+    for (;;) {
+        header("O SELECT   X BACK");
+        int y = s_crumb_y + HS * 8 + VS * 8 + 30;
+        draw_kv(y, "CURRENT", cur, VS, VS, s_fg, s_fg);   y += VS * 11;
+        y += VS * 10;
+        draw_pill_row(y, "CHECK FOR UPDATE", NULL, sel == 0);
+
+        bool act = false;
+        while (!act) {
+            uint8_t m = input_poll(); uint8_t p = (uint8_t)(m & ~prev); prev = m;
+#ifdef FB_DUMP
+            if (p & INPUT_PAUSE) carousel_fb_dump();
+#endif
+            if (p & INPUT_X) return;
+            if (p & INPUT_O) { act = true; }
+            vTaskDelay(pdMS_TO_TICKS(40));
+        }
+
+        /* --- one network session: radio up (and, on the P4, the SD host lent out) for check + install --- */
+        wifi_msg("UPDATE", "STARTING RADIO...", s_dim, false);
+        SdHostLoan sd_host;
+        sd_host.lend();
+        if (wifi_mgr_acquire() != ESP_OK) { wifi_msg("UPDATE", "RADIO UNAVAILABLE", s_missing, true); return; }
+
+        wifi_msg("UPDATE", "CONNECTING...", s_dim, false);
+        esp_err_t cerr = wifi_mgr_autoconnect(15000);
+        if (cerr != ESP_OK) {
+            wifi_mgr_release();
+            /* "no saved network" and "the join failed" send the user to different places — the first to the WiFi
+             * screen to join one, the second to try again or move closer. Don't collapse them into one message. */
+            wifi_msg("UPDATE", cerr == ESP_ERR_NOT_FOUND ? "NO SAVED WIFI - JOIN ONE FIRST" : "CANT REACH NETWORK",
+                     s_missing, true);                          /* ~SdHostLoan gives the card back */
+            return;
+        }
+
+        wifi_msg("UPDATE", "CHECKING...", s_dim, false);
+        ota_release_t rel;
+        esp_err_t err = ota_check(OTA_MANIFEST_URL, &rel, 10000);
+        if (err != ESP_OK) {
+            wifi_mgr_release();
+            wifi_msg("UPDATE", err == ESP_ERR_INVALID_RESPONSE ? "BAD MANIFEST" : "CHECK FAILED", s_missing, true);
+            return;
+        }
+        if (!ota_is_newer(&rel)) {
+            wifi_mgr_release();
+            wifi_msg("UPDATE", "ALREADY UP TO DATE", s_accent, true);
+            return;
+        }
+
+        /* Offer it, with the version actually on the other end — never install without showing what. */
+        header("O INSTALL   X CANCEL");
+        y = s_crumb_y + HS * 8 + VS * 8 + 30;
+        draw_kv(y, "CURRENT", cur,         VS, VS, s_dim, s_dim); y += VS * 11;
+        draw_kv(y, "NEW",     rel.version, VS, VS, s_fg, s_accent); y += VS * 11;
+        char sz[24]; snprintf(sz, sizeof sz, "%uK", (unsigned)(rel.size / 1024));
+        draw_kv(y, "SIZE",    sz,          VS, VS, s_fg, s_fg);   y += VS * 11;
+        if (rel.build[0]) { draw_kv(y, "BUILT", rel.build, VS, VS, s_dim, s_dim); y += VS * 11; }
+
+        prev = input_poll();
+        bool go = false, done_choosing = false;
+        while (!done_choosing) {
+            uint8_t m = input_poll(); uint8_t p = (uint8_t)(m & ~prev); prev = m;
+            if (p & INPUT_O) { go = true;  done_choosing = true; }
+            if (p & INPUT_X) { go = false; done_choosing = true; }
+            vTaskDelay(pdMS_TO_TICKS(40));
+        }
+        if (!go) { wifi_mgr_release(); return; }
+
+        header("DOWNLOADING   X CANCEL");
+        s_ota_pct = -1;
+        err = ota_apply(&rel, ota_progress_cb, NULL);
+        wifi_mgr_release();
+
+        if (err == ESP_OK) {
+            wifi_msg("UPDATE", "INSTALLED - REBOOTING", s_accent, false);
+            vTaskDelay(pdMS_TO_TICKS(1200));
+            esp_restart();                       /* new image boots pending-verify; the launcher confirms it */
+        }
+        /* Every failure below left the running firmware untouched — say which, don't just say "failed". */
+        const char *why = "UPDATE FAILED";
+        if (err == ESP_ERR_INVALID_CRC)        why = "BAD IMAGE - NOT INSTALLED";
+        else if (err == ESP_ERR_INVALID_SIZE)  why = "WRONG SIZE - NOT INSTALLED";
+        else if (err == ESP_ERR_INVALID_STATE) why = "CANCELLED";
+        wifi_msg("UPDATE", why, s_missing, true);
+        return;
+    }
+}
+
 #endif  /* BOARD_HAS_WIFI */
 
 static void run_settings(void) {
@@ -900,11 +1057,12 @@ static void run_settings(void) {
 
     /* Rows are a selectable list now (up/down move, L/R adjusts the row if it adjusts, O opens a submenu). The
      * set is board-dependent: WIFI only appears where there's a radio (BOARD_HAS_WIFI). */
-    enum { R_ACCENT, R_WIFI, R_BRIGHT, R_VOL };
-    int kinds[4], nrows = 0;
+    enum { R_ACCENT, R_WIFI, R_UPDATE, R_BRIGHT, R_VOL };
+    int kinds[5], nrows = 0;
     kinds[nrows++] = R_ACCENT;
 #ifdef BOARD_HAS_WIFI
     kinds[nrows++] = R_WIFI;
+    kinds[nrows++] = R_UPDATE;
 #endif
     kinds[nrows++] = R_BRIGHT;
     kinds[nrows++] = R_VOL;
@@ -935,6 +1093,12 @@ static void run_settings(void) {
                 draw_kv(ry, "WIFI", st.connected ? st.ssid : "OFF", LS, VS, lc, st.connected ? s_accent : s_dim);
                 break; }
 #endif
+#ifdef BOARD_HAS_WIFI
+            case R_UPDATE: {
+                char v[OTA_VERSION_MAXLEN + 1]; ota_current_version(v, sizeof v);
+                draw_kv(ry, "SYSTEM UPDATE", v, LS, VS, lc, s_dim);
+                break; }
+#endif
             case R_BRIGHT: draw_kv(ry, "BRIGHTNESS", "SOON", LS, VS, hl ? s_accent : s_dim, s_dim); break;
             case R_VOL:    draw_kv(ry, "VOLUME",     "SOON", LS, VS, hl ? s_accent : s_dim, s_dim); break;
             }
@@ -963,7 +1127,8 @@ static void run_settings(void) {
         /* Re-seed prev after the submenu: the X that closed it is very likely STILL held (the serial backend
          * holds a tap for 6 frames, and a finger rests on the deck longer than that), and with a stale prev
          * that reads as a fresh X edge here — backing out of Settings too, two screens for one press. */
-        else if ((p & INPUT_O) && kinds[sel] == R_WIFI) { run_wifi(); draw_all(); prev = input_poll(); }
+        else if ((p & INPUT_O) && kinds[sel] == R_WIFI)   { run_wifi();   draw_all(); prev = input_poll(); }
+        else if ((p & INPUT_O) && kinds[sel] == R_UPDATE) { run_update(); draw_all(); prev = input_poll(); }
 #endif
         vTaskDelay(pdMS_TO_TICKS(40));
     }
@@ -1046,6 +1211,11 @@ std::string carousel_launcher_run(Host *host, const std::string &start_dir) {
     input_init();   /* the selected backend (touch when shipped, serial for headless HITL) — same seam the game uses */
 
     apply_accent();
+
+    /* Reaching the launcher is the evidence a freshly-installed image is good, so confirm it here and cancel the
+     * pending rollback. Before this point a panic would (correctly) revert to the previous firmware. Not gated on
+     * BOARD_HAS_WIFI: rollback is a property of the firmware, not of how the image arrived. */
+    ota_mark_valid();
 
 #ifdef BOARD_HAS_WIFI
     /* Deliberately nothing here: the radio stays OFF at boot (WC-5). It is brought up only by whoever needs it

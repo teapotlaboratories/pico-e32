@@ -1,0 +1,18 @@
+menu "pico-e32"
+
+config PICO_E32_OTA_MANIFEST_URL
+    string "OTA manifest URL"
+    default ""
+    help
+        Where Settings -> SYSTEM UPDATE looks for the update manifest, e.g.
+        https://example.org/pico-e32.json  (see WC-4a in docs/firmware/pico-e32-wifi-networking.md
+        for the JSON shape).
+
+        Empty (the default) disables the check and the menu says so, so a build never silently
+        points at someone else's endpoint.
+
+        This is Kconfig rather than a -D define on purpose: a quoted string does not survive the
+        make -> idf.py -> CMake -> compiler hop (the quotes are stripped and the macro ends up
+        empty), whereas sdkconfig quotes it correctly.
+
+endmenu
