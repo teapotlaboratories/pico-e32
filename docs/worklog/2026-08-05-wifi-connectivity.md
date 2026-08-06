@@ -122,9 +122,17 @@ read+decode of a `.p8.png` cover, and scrolled the carousel to force uncached lo
 
 So **20 MHz is the practical ceiling** on this wiring — the TF pins run through the GPIO matrix with no external
 pull-ups, and the card won't negotiate at 40 MHz. Two things follow. First, the throughput lost relative to
-SDMMC 4-bit can't be bought back by raising the clock. Second, it doesn't matter much: SDMMC *cannot* coexist
-with the C6 radio at all, so the comparison is moot — the real choice was "SD over SPI" vs "no WiFi". 64 ms to
-reveal a not-yet-cached cover is acceptable for a browse UI, and covers are cached after first view. Worth
+SDMMC 4-bit can't be bought back by raising the clock. Second, the choice at the time really was "SD over SPI"
+vs "no WiFi", because WiFi was then always-on and SDMMC cannot coexist with the C6 at all.
+
+> **CORRECTION (2026-08-06).** This section originally went on to say the SPI-vs-SDMMC difference "doesn't matter
+> much" and that the comparison was "moot". **That was wrong, and it was asserted without measuring.** Measured
+> later by splitting the cover load into read vs decode: SDMMC 4-bit reads at **10.20 MB/s (3.6 ms/cover)** against
+> SPI's **1.43 MB/s (26.3 ms/cover)** — **7.1× faster** — which takes total cover load from **55.4 ms to 32.5 ms,
+> a 41% cut**. (Decode is ~29 ms either way and is the floor.) The premise has also since changed: `WC-5` made the
+> radio on-demand, so the SDMMC host is now free almost all the time. See `WC-6` in the backlog.
+
+64 ms to reveal a not-yet-cached cover is tolerable for a browse UI, and covers are cached after first view. Worth
 revisiting only if a future board adds pull-ups. Also confirmed: a failed mount degrades gracefully
 (`continuing without SD`) rather than panicking.
 

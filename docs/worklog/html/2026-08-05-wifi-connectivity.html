@@ -218,11 +218,18 @@ wifi: STA up                                        <span style="color:var(--ok)
     <tr><td>40 MHz</td><td>—</td><td><span class="bad">card init fails</span> — <code>send_csd returned 0x108</code>, mount returns <code>ESP_ERR_INVALID_RESPONSE</code></td></tr>
   </table>
   <p>So <b>20 MHz is the practical ceiling</b> on this wiring — the TF pins run through the GPIO matrix with no
-  external pull-ups and the card won't negotiate 40 MHz. Two things follow: the bandwidth lost relative to SDMMC
-  4-bit can't be bought back by raising the clock, and it doesn't much matter — SDMMC <i>cannot</i> coexist with the
-  C6 at all, so the real choice was "SD over SPI" vs "no WiFi". 64 ms to reveal a not-yet-cached cover is fine for a
-  browse UI, and covers are cached after first view. A failed mount also degrades gracefully
-  (<code>continuing without SD</code>) rather than panicking.</p>
+  external pull-ups and the card won't negotiate 40 MHz. The choice at the time really was "SD over SPI" vs "no
+  WiFi", because WiFi was then always-on and SDMMC cannot coexist with the C6 at all. A failed mount also degrades
+  gracefully (<code>continuing without SD</code>) rather than panicking.</p>
+  <div class="nullres" style="border-left-color:var(--bad)">
+    <b class="bad">Correction (2026-08-06).</b> This section originally claimed the SPI-vs-SDMMC difference
+    "doesn't much matter" and that the comparison was "moot". <b>That was wrong, and asserted without measuring.</b>
+    Measured later by splitting the cover load into read vs decode: SDMMC 4-bit reads at <b>10.20 MB/s
+    (3.6 ms/cover)</b> against SPI's <b>1.43 MB/s (26.3 ms/cover)</b> — <b>7.1× faster</b> — taking total cover load
+    from <b>55.4 ms to 32.5 ms, a 41% cut</b>. Decode is ~29 ms either way and is the floor. The premise has also
+    changed: <code>WC-5</code> made the radio on-demand, so the SDMMC host is free almost all the time. See
+    <code>WC-6</code>.
+  </div>
 
   <h3 style="font-size:1rem;margin:1.4rem 0 .4rem">Behavioural fixes</h3>
   <ul>

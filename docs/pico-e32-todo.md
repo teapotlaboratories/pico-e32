@@ -121,6 +121,23 @@ docs (per [`.ai/AGENTS.md`](../.ai/AGENTS.md) → *Plan first*).
     power meter. Gameplay frame time was **not** measured; the CPU win is structural (no priority-23 tasks
     resident) and, given the null result above, expected to be small.
 
+- **`WC-6` — put the P4's SD back on SDMMC now that WiFi is on-demand (loading-time win).** *Why:* measured
+  2026-08-06 by splitting the cover load into read vs decode — **SDMMC 4-bit reads at 10.20 MB/s (3.6 ms per
+  ~38 KB cover) against SPI's 1.43 MB/s (26.3 ms): 7.1× faster**, taking total cover load from **55.4 ms to
+  32.5 ms (−41%)**. Decode is ~29 ms either way and is the floor. This is the real lever on P4 loading time — the
+  `WC-5` on-demand work was measured and did *not* move it.
+  - **Why it's newly possible:** the SD went to SPI only because the C6 needed the single SDMMC host and WiFi was
+    then always-on. Since `WC-5` the radio is off unless acquired, so the host is free almost all the time.
+  - **The conflict that remains:** network cart downloads (`WC-4`) want SD *and* WiFi at once. Simplest resolution
+    — the P4 has 32 MB of PSRAM: buffer a download in PSRAM while WiFi is up, release the radio, then write to SD.
+    Cart-sized payloads make this trivial. Avoids any dual-driver/live-remount complexity.
+  - **Shape:** SD mounts over SDMMC at boot; `wifi_mgr_acquire()` unmounts it and releases the SDMMC host before
+    esp-hosted init, `wifi_mgr_release()` remounts. Needs a board seam for "give up the host" and a rule that no
+    file handles are held across an acquire.
+  - **Verify:** cover-load split before/after (expect ~32.5 ms); acquire→release→remount cycle repeatable; SD still
+    mounts after several WiFi sessions; and confirm unmounting SDMMC really frees the host for esp-hosted.
+  - **S3 is unaffected** — native radio, no shared host; it keeps SPI.
+
 ## Open decisions
 
 - Bytecode-precompile strategy (build-time vs load-time) — plan §10.
