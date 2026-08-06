@@ -30,6 +30,20 @@
       linked from this index (see <a href="../../../.ai/AGENTS.md">.ai/AGENTS.md</a> → Worklogs).</p>
     <ul class="entries">
       <li>
+        <span class="d">2026-08-05</span>
+        <a class="t" href="2026-08-05-wifi-connectivity.html">WiFi connectivity · S3 native + P4 via the ESP32-C6</a>
+        <span class="s">A <strong>WiFi menu</strong> on both handhelds — one <code>components/wifi</code> STA front-end
+          (scan / connect / status / NVS-persist / auto-reconnect) over <strong>two backends chosen by IDF target</strong>:
+          native <code>esp_wifi</code> on the S3, <code>esp_wifi_remote</code> → esp-hosted → an on-board
+          <strong>ESP32-C6</strong> on the P4. Settings → WIFI adds a deck-driven on-screen keyboard. S3 verified
+          end-to-end (IP …228). The P4 took two fixes: esp-hosted's <strong>boot auto-init hangs</strong> before
+          <code>app_main</code> (deferred to <code>wifi_mgr_init</code>, constructor neutralised <strong>at build time</strong>
+          so the vendor tree stays pristine), and the SD + C6 <strong>fight over the single SDMMC host</strong> (moved the
+          SD to <strong>SPI</strong>, freeing the SDMMC host for the C6). Net: one P4 boot mounts the SD <strong>and</strong>
+          links the C6 <strong>and</strong> renders the launcher. <strong>Uncommitted</strong> (weekday no-commit window);
+          backlog <code>WC-1</code>/<code>WC-3</code> done.</span>
+      </li>
+      <li>
         <span class="d">2026-08-03</span>
         <a class="t" href="2026-08-03-z8lua-int-fix32-softfloat.html">z8lua · soft-float <code>int(fix32)</code> → single <code>srai</code></a>
         <span class="s">Disassembling the built interpreter turned up a defect the "-O0→-O2" audit missed: the

@@ -358,6 +358,16 @@ sources** so the claim can be checked — don't report a bare conclusion.
   vendored source `#define` or an errata note is stronger evidence than a datasheet
   headline number) — and flag when something is unverified or unknown rather than
   guessing.
+- **In firmware, cite the source in the code itself — for all firmware we build.**
+  Whenever a pin map, register value, timing/power fix, config, or bring-up method is
+  taken or adapted from an external reference (another repo, a datasheet/schematic, a
+  vendor doc/manual, an upstream example), put a short citation in a comment next to it
+  (project name or URL). Provenance belongs on the *code*, not only the worklog — as with
+  the `giltal/RetroESP32-P4` citations in the P4 audio/SD bring-up and the P4-WiFi
+  SDIO-pin / esp-hosted-OTA citations (`boards/guition-jc4880p443c/board.*`,
+  `firmware/pico-e32-p4-wifi`). This is **source attribution** — crediting the human /
+  external work you built on — and never conflicts with the *no-AI-attribution* rule
+  above: always credit the real source, never the agent.
 
 ## Hardware & flashing notes
 

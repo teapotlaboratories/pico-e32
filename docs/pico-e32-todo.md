@@ -67,6 +67,35 @@ docs (per [`.ai/AGENTS.md`](../.ai/AGENTS.md) → *Plan first*).
   the Gate-5 caveat (it's a PSRAM-framebuffer panel by design) in [plan §2b](pico-e32-development-plan.md#2b-verified-hardware--makerfabs-40-st7701-480480-ordered).
 - Enclosure + (only if custom) a PCB with the display that survives Gate #5.
 
+## WiFi connectivity (`WC-*`)
+
+- **`WC-1` — S3 WiFi foundation — ✅ DONE, hardware-verified (branch `wifi-connectivity`, uncommitted).** New
+  `components/wifi` (`esp_wifi` STA: scan / connect / status / NVS-persist / boot auto-connect). Backend chosen by
+  IDF target in the component CMake: native `esp_wifi` on the S3, `esp_wifi_remote` → esp-hosted → C6 on the P4 (see
+  `WC-3`). Settings → **WIFI** submenu: status, scan the air, deck-driven **on-screen keyboard** for the password,
+  connect + persist. `BOARD_HAS_WIFI` gates the menu. OTA-ready 16 MB partition table added. Verified on the S3:
+  scan → keyboard → connect → persist → boot auto-reconnect (joined `Tukang Ketoprak`, IP 192.168.7.228).
+- **`WC-2` — lowercase font glyphs.** The PICO-8 font (`pico8_font.h`) is **uppercase-only** (`glyph_rows` upper-cases
+  input), so a typed lowercase WiFi password *displays* as uppercase — it is **stored** with correct case, so the
+  join works, but the user can't visually distinguish case. Add lowercase glyphs (a…z) so the password field (and any
+  future mixed-case text) reads true. Low priority, isolated to the font table + `glyph_rows`.
+- **`WC-3` — P4 WiFi via the ESP32-C6 companion (project Gate 4) — ✅ DONE, hardware-verified (branch
+  `wifi-connectivity`, uncommitted).** The P4 has no native radio; the on-board C6 comes up over SDIO/esp-hosted +
+  `esp_wifi_remote`, `BOARD_HAS_WIFI` is defined for the P4, and the same `components/wifi` front-end drives it.
+  Coexistence solved (WiFi + MIPI-DSI + SD all live in one boot). Two P4-specific traps and their fixes:
+  - **esp-hosted's boot auto-init hangs.** esp-hosted inits itself from a C global constructor
+    (`ESP_ERROR_CHECK(esp_hosted_init())`) before `app_main`; in this firmware that stalls the P4 in the C6 SDIO
+    bring-up and `app_main` is never reached. Fix: defer the init to `app_main` (`wifi_mgr_init` does
+    `esp_hosted_init()` + `esp_hosted_connect_to_slave()`), and neutralize the constructor **at build time** from the
+    project CMake (esp-hosted stays fetched byte-identical to upstream; the transform re-applies after any clean).
+  - **SD vs C6 shared SDMMC host.** The P4 has a single SDMMC host; the microSD (slot 0) and the C6 SDIO link (slot 1)
+    can't both init it. Fix: drive the SD over **SPI** instead (`BOARD_HAS_SD` — same seam as the S3), which frees the
+    SDMMC host entirely for the C6. `board_sd_config()` powers the card rail (on-chip LDO VO4) + fills the SPI wiring.
+  - Verified: one boot mounts the SD over SPI **and** identifies the C6 (`Identified slave [esp32c6]`, STA up) with the
+    launcher rendering. Driver-level connect proven earlier (joined `Tukang Ketoprak`, IP 192.168.7.212).
+- **`WC-4` — build on the foundation:** NTP clock (About/real-time), OTA firmware update (partition table already
+  OTA-ready), and network cart downloads (non-Splore). Each layers on `WC-1`.
+
 ## Open decisions
 
 - Bytecode-precompile strategy (build-time vs load-time) — plan §10.

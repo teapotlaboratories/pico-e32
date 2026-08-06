@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WiFi connectivity — S3 native + P4 via the ESP32-C6 — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8;
+        --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  :root[data-theme="light"]{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;--ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  :root[data-theme="dark"]{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;--border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)} .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;font-family:var(--mono)}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:9px;padding:.9rem 1.05rem;overflow-x:auto;font-size:.82rem;line-height:1.5;font-family:var(--mono)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left;vertical-align:top}
+  th{background:var(--codebg);font-family:var(--mono);font-size:.82rem}
+  .bad{color:var(--bad);font-weight:600} .ok{color:var(--ok);font-weight:600} .warn{color:var(--warn);font-weight:600}
+  .diag{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.3rem;margin:1.3rem 0}
+  .diag h3{margin:.1rem 0 .4rem;font-size:.95rem}
+  .diag .sub{color:var(--muted);font-size:.82rem;margin:0 0 1rem}
+  .legend{font-size:.78rem;color:var(--muted);margin-top:.7rem}
+  .foot{margin-top:2.6rem;padding-top:1rem;border-top:1px solid var(--border);color:var(--muted);font-size:.85rem}
+  svg{max-width:100%;height:auto;display:block}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <h1>WiFi connectivity · S3 native + P4 via the ESP32-C6</h1>
+  <p class="date">2026-08-05 · a WiFi menu on both handhelds — one front-end, two radio backends — and the P4/C6 coexistence puzzle (WiFi + display + SD in one boot)</p>
+
+  <div class="tldr">
+    A single <code>components/wifi</code> STA front-end (scan / connect / status / persist / auto-reconnect) drives
+    <b>two backends chosen by IDF target</b>: native <code>esp_wifi</code> on the S3, <code>esp_wifi_remote</code> →
+    esp-hosted → an on-board <b>ESP32-C6</b> on the P4. The launcher's <b>WIFI</b> menu (scan + on-screen keyboard)
+    is identical on both. S3: <b class="ok">verified</b> end-to-end. P4: <b class="ok">verified</b> after solving two
+    traps — esp-hosted's boot auto-init <b class="bad">hangs</b> before <code>app_main</code> (deferred + neutralised
+    at build time), and the SD + C6 <b class="bad">fight over the single SDMMC host</b> (moved the SD to SPI). Net:
+    one P4 boot now mounts the SD <b>and</b> links the C6 <b>and</b> renders the launcher.
+  </div>
+
+  <nav aria-label="Contents" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:.85rem 1.1rem;margin:1.4rem 0">
+    <div style="font:600 .74rem/1 var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:.55rem">On this page</div>
+    <ol style="margin:0;padding-left:1.2rem;columns:2;column-gap:2rem;font-size:.92rem">
+      <li><a href="#s1">One API, two backends</a></li>
+      <li><a href="#s2">The WIFI menu + keyboard</a></li>
+      <li><a href="#s3">Trap #1 — boot auto-init hangs</a></li>
+      <li><a href="#s4">Trap #2 — shared SDMMC host</a></li>
+      <li><a href="#s5">Result — coexistence</a></li>
+      <li><a href="#s6">Commands run · board state</a></li>
+      <li><a href="#s7">Sources</a></li>
+    </ol>
+  </nav>
+
+  <!-- ============ ARCHITECTURE DIAGRAM ============ -->
+  <div class="diag">
+    <h3>One front-end, two radio backends — and the P4's resource split</h3>
+    <p class="sub">The launcher menu and <code>wifi_manager</code> are shared; only the backend + the P4's host wiring differ.</p>
+    <svg viewBox="0 0 840 430" role="img" aria-label="WiFi architecture: shared front-end over two backends, and the P4 SDMMC/SPI resource split">
+      <defs>
+        <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+          <path d="M0 0 L9 4.5 L0 9 z" fill="var(--line)"/>
+        </marker>
+      </defs>
+      <style>
+        .box{fill:var(--surface);stroke:var(--border);stroke-width:1.5;rx:9}
+        .lbl{font:600 13px var(--mono);fill:var(--fg)}
+        .sm{font:11px var(--mono);fill:var(--muted)}
+        .hd{font:600 11px var(--mono);fill:var(--muted);letter-spacing:.06em}
+        .wire{stroke:var(--line);stroke-width:1.6;fill:none;marker-end:url(#ar)}
+        .s3{stroke:var(--accent)} .p4{stroke:var(--warn)}
+        .ok{fill:var(--ok)} .bad{fill:var(--bad)}
+      </style>
+
+      <!-- shared top -->
+      <rect class="box" x="270" y="14" width="300" height="46" rx="9"/>
+      <text class="lbl" x="420" y="34" text-anchor="middle">Launcher · Settings → WIFI</text>
+      <text class="sm" x="420" y="50" text-anchor="middle">scan · on-screen keyboard · status</text>
+
+      <rect class="box" x="270" y="84" width="300" height="48" rx="9"/>
+      <text class="lbl" x="420" y="104" text-anchor="middle">components/wifi · wifi_manager</text>
+      <text class="sm" x="420" y="120" text-anchor="middle">esp_wifi STA API · NVS persist · autoconnect</text>
+
+      <path class="wire" d="M420 60 L420 82"/>
+
+      <!-- split label -->
+      <text class="hd" x="420" y="156" text-anchor="middle">backend chosen by IDF target (component CMake)</text>
+
+      <!-- S3 branch -->
+      <path class="wire s3" d="M360 132 L200 170"/>
+      <rect class="box s3" x="60" y="172" width="280" height="44" rx="9"/>
+      <text class="lbl" x="200" y="192" text-anchor="middle">ESP32-S3 · native esp_wifi</text>
+      <text class="sm" x="200" y="208" text-anchor="middle">radio on-chip — nothing else needed</text>
+      <rect class="box s3" x="120" y="240" width="160" height="40" rx="9"/>
+      <text class="lbl ok" x="200" y="264" text-anchor="middle">📶 on-chip radio</text>
+
+      <path class="wire s3" d="M200 216 L200 238"/>
+
+      <!-- P4 branch -->
+      <path class="wire p4" d="M480 132 L640 170"/>
+      <rect class="box p4" x="500" y="172" width="300" height="44" rx="9"/>
+      <text class="lbl" x="650" y="192" text-anchor="middle">ESP32-P4 · esp_wifi_remote</text>
+      <text class="sm" x="650" y="208" text-anchor="middle">re-implements the same API, forwards RPCs</text>
+
+      <rect class="box p4" x="500" y="236" width="300" height="42" rx="9"/>
+      <text class="lbl" x="650" y="262" text-anchor="middle">esp-hosted (SDIO transport)</text>
+      <path class="wire p4" d="M650 216 L650 234"/>
+
+      <rect class="box p4" x="560" y="300" width="180" height="40" rx="9"/>
+      <text class="lbl ok" x="650" y="324" text-anchor="middle">ESP32-C6 📶</text>
+      <path class="wire p4" d="M650 278 L650 298"/>
+
+      <!-- P4 host resource split -->
+      <rect x="470" y="360" width="360" height="58" rx="9" fill="none" stroke="var(--warn)" stroke-width="1.3" stroke-dasharray="5 4"/>
+      <text class="hd" x="650" y="378" text-anchor="middle">P4 host peripherals — the coexistence fix</text>
+      <text class="sm" x="560" y="400" text-anchor="middle">SDMMC host →</text>
+      <text class="lbl ok" x="560" y="400" text-anchor="middle" dx="52">C6</text>
+      <text class="sm" x="720" y="400" text-anchor="middle">SPI2 →</text>
+      <text class="lbl ok" x="720" y="400" text-anchor="middle" dx="34">SD</text>
+      <text class="sm" x="650" y="414" text-anchor="middle">(SD moved off SDMMC so the C6 owns it)</text>
+
+      <path class="wire p4" d="M600 340 L560 358"/>
+    </svg>
+    <p class="legend"><span style="color:var(--accent)">blue</span> = S3 path · <span style="color:var(--warn)">amber</span> = P4 path. The two boxes above the dashed frame are the radio stack; the dashed frame is why SD + WiFi can coexist.</p>
+  </div>
+
+  <h2 id="s1">1. One API, two backends</h2>
+  <p><code>components/wifi/wifi_manager.{h,c}</code> is a thin esp_wifi STA manager: a mutex serialises boot-autoconnect
+  vs. the menu, an event group turns the async connect into a blocking <code>wifi_mgr_connect(ssid, pass, timeout)</code>,
+  and persistence is ours in NVS (<code>WIFI_STORAGE_RAM</code> so esp_wifi doesn't double-store). It's written to the
+  plain <code>esp_wifi.h</code> API — which is exactly why the P4 reuses it: <code>esp_wifi_remote</code> re-implements
+  that same API and forwards the RPCs to the C6. Per-target code is tiny:</p>
+  <ul>
+    <li><b>CMake</b> — S3: <code>esp_wifi esp_netif esp_event nvs_flash</code>; P4 adds <code>esp_wifi_remote esp_hosted</code>.
+      <code>esp_wifi_remote</code> re-implements the API but does <b>not</b> re-export the header, so <code>esp_wifi</code>
+      must stay in <code>REQUIRES</code> for <code>esp_wifi.h</code> to resolve — a build error that looked like a missing
+      dep but is by design.</li>
+    <li>A short <code>#if CONFIG_IDF_TARGET_ESP32P4</code> block in <code>wifi_mgr_init</code> brings the C6 up first (§3).</li>
+  </ul>
+  <p>An earlier no-op <code>wifi_manager_stub.c</code> for radio-less targets is gone — the P4 has a real backend now.</p>
+
+  <h2 id="s2">2. The WIFI menu + on-screen keyboard</h2>
+  <p>Settings → <b>WIFI</b> (gated on <code>BOARD_HAS_WIFI</code>) shows status/IP, scans the air into a selectable
+  list, and on select opens a <b>deck-driven on-screen keyboard</b> (d-pad to move, O to type, MENU to submit) for the
+  password, then connects and persists. Board-driven layout keeps it correct on both panels. Follow-up
+  (<code>WC-2</code>): the PICO-8 font is uppercase-only, so a lowercase password <i>displays</i> uppercase — it is
+  <b>stored</b> with correct case, so joins work; lowercase glyphs are a small font-table add.</p>
+
+  <h2 id="s3">3. Trap #1 — esp-hosted's boot auto-init hangs before <code>app_main</code></h2>
+  <p>esp-hosted inits itself from a <b>C global constructor</b>
+  (<code>__attribute__((constructor))</code> → <code>ESP_ERROR_CHECK(esp_hosted_init())</code>), before
+  <code>app_main</code>. In a minimal probe that's fine; in the full firmware it <b class="bad">stalls the P4 in the C6
+  SDIO bring-up</b> — the boot log reaches <code>H_SDIO_DRV: sdio_data_to_rx_buf_task started</code> and dies,
+  <code>app_main</code> never runs.</p>
+  <p><b>Fix — defer to <code>app_main</code>.</b> <code>wifi_mgr_init</code> (P4 branch) does the bring-up explicitly,
+  after board init:</p>
+  <pre>esp_err_t he = esp_hosted_init();              /* starts the transport tasks */
+if (he != ESP_OK &amp;&amp; he != ESP_ERR_INVALID_STATE) return he;
+he = esp_hosted_connect_to_slave();            /* blocking: reset C6 (GPIO54), SDIO init, identify slave */
+if (he != ESP_OK) return he;</pre>
+  <p><b>Neutralising the constructor cleanly.</b> esp-hosted has no Kconfig to disable the auto-init, and its
+  <code>managed_components/</code> copy is git-ignored (regenerated from the lockfile) — hand-editing it is neither
+  tracked nor durable. So the project CMake transforms that one call <b>at configure time</b>: the component manager
+  fetches esp-hosted <b>byte-identical to upstream</b>, an idempotent <code>string(REPLACE …)</code> comments out the
+  constructor's <code>esp_hosted_init()</code>, and it re-applies after any clean/re-fetch. Matches the repo's "keep the
+  vendor tree byte-identical, push integration into the build" rule.</p>
+
+  <h2 id="s4">4. Trap #2 — SD and C6 share one SDMMC host</h2>
+  <p>The P4 has a <b>single SDMMC host</b>. The microSD is on slot 0 and the C6's SDIO link on slot 1 — but one host
+  can't be inited twice, so whichever comes up first locks the other out.</p>
+  <table>
+    <tr><th>Order</th><th>Result</th></tr>
+    <tr><td>SD first (old SDMMC path)</td><td><span class="bad">C6 handshake fails</span> — host already claimed</td></tr>
+    <tr><td>C6 first</td><td><span class="bad">SD mount → <code>ESP_ERR_NOT_FOUND</code></span></td></tr>
+    <tr><td><b>SD over SPI</b> (fix)</td><td><span class="ok">both work</span> — SDMMC host is entirely free for the C6</td></tr>
+  </table>
+  <p><b>Fix — drive the SD over SPI.</b> The same TF pins run in SPI mode (CLK→SCLK, CMD→MOSI, DAT0→MISO, DAT3→CS),
+  reusing the S3's existing <code>BOARD_HAS_SD</code> + <code>sdcard_spi</code> seam, so <code>main.cpp</code> needs no
+  P4-specific SD path. <code>board_sd_config()</code> fills the SPI wiring and still powers the card rail (on-chip
+  <b>LDO VO4</b> — required in SPI mode too). Pins: <code>SCLK 43, MOSI 44, MISO 39, CS 42</code>.
+  <code>BOARD_HAS_SDMMC</code> and the P4's <code>board_sd_mount()</code> were removed.</p>
+
+  <h2 id="s5">5. Result — coexistence, one boot</h2>
+  <pre>board.p4: SD over SPI2: SCLK43 MOSI44 MISO39 CS42, rail on LDO VO4
+sdcard_spi: SD mounted at /sdcard                 <span style="color:var(--ok)">&lt;- SD works over SPI</span>
+carousel: carousel layout: game 48+384, ...       <span style="color:var(--ok)">&lt;- launcher up</span>
+H_API: ESP-Hosted starting ...                     <span style="color:var(--ok)">&lt;- from app_main, not the constructor</span>
+transport: Identified slave [esp32c6]              <span style="color:var(--ok)">&lt;- C6 radio linked</span>
+wifi: STA up                                        <span style="color:var(--ok)">&lt;- esp_wifi STA running</span></pre>
+  <p>The ordering confirms the deferred path — esp-hosted starts <i>after</i> the SD mount and carousel, i.e. from
+  the launcher's <code>wifi_mgr_init</code>. Launcher framebuffer verified via <code>FB_DUMP</code> (P4 compressed
+  <code>SHTZ</code>). Driver-level connect was proven earlier with a standalone probe (joined <code>Tukang Ketoprak</code>,
+  IP 192.168.7.212); nothing on the radio side changed since. S3 verified end-to-end (IP 192.168.7.228).</p>
+
+  <h2 id="s6">6. Commands run · board state</h2>
+  <p>All builds go through the top-level <code>make</code> wrapper (never raw <code>idf.py</code> — the board
+  overlay owns <code>CONFIG_IDF_TARGET</code>, PSRAM and flash size):</p>
+  <pre># P4 — dev build used for the coexistence test (serial input + framebuffer screenshots)
+make flash APP=pico-e32-fake08 BOARD=guition-jc4880p443c PORT=/dev/ttyACM0 \
+     DEFS="-D LAUNCHER=1 -D FB_DUMP=1 -D INPUT_BACKEND=serial"
+
+# P4 — shipping touch build (what the board is left on)
+make flash APP=pico-e32-fake08 BOARD=guition-jc4880p443c PORT=/dev/ttyACM0 DEFS="-D LAUNCHER=1"
+
+# S3 — WiFi foundation build
+make flash APP=pico-e32-fake08 BOARD=makerfabs-ili9488-r1 PORT=/dev/ttyUSB0 DEFS="-D LAUNCHER=1"</pre>
+  <p>The configure step prints <code>-- esp-hosted: deferred boot auto-init out of the C constructor (P4 C6 SDIO).</code>
+  when the build-time transform applies — its absence on a P4 build means the patch didn't take. Boot evidence was
+  captured by pulsing RTS (reset) and reading the console for ~20 s; the P4 screenshot came from the
+  <code>FB_DUMP</code> build's PAUSE-triggered compressed dump (<code>SHTZ</code> → zlib → 480×800 RGB565).</p>
+  <table>
+    <tr><th>board</th><th>left flashed with</th></tr>
+    <tr><td>P4 (Guition)</td><td><span class="ok">shipping touch build</span> <code>-D LAUNCHER=1</code> (no FB_DUMP/serial) — reflashed after testing, boots clean: SD mounted, C6 identified, STA up, launcher rendering</td></tr>
+    <tr><td>S3 (Makerfabs)</td><td>WiFi foundation build <code>-D LAUNCHER=1</code> — joined and auto-reconnecting</td></tr>
+  </table>
+  <p><b>Verification method:</b> the panel was verified via the <b>framebuffer-over-serial screenshot</b>
+  (<code>FB_DUMP</code>), not the bench camera. That's the stronger evidence here — the exact scan-out pixels, no
+  camera framing/glare/mirror ambiguity — and it now works on both boards. The camera adds nothing this change
+  depends on (no new display code); physical output was confirmed by eye.</p>
+
+  <h2 id="s7">7. Sources</h2>
+  <ul>
+    <li><b>P4↔C6 SDIO pin map + esp-hosted wiring:</b> GustavoH-Smart/esp32p4 (<code>README_WIFI</code>), the CNX
+      Software P4+C6 writeup, buccaneer-jak/JC4880P443C-…RS232 (P4↔C6 UART, C6 reset GPIO54, C6 boot IO9, JP1).
+      Confirmed against esp-hosted's own P4 defaults.</li>
+    <li><b>SD-over-SPI on P4 TF pins + LDO VO4 rail:</b> the SDMMC/LDO work from
+      <a href="2026-08-03-p4-sd-launcher-carousel.html">2026-08-03</a> (giltal/RetroESP32-P4); SPI-mode mapping is the
+      standard TF-in-SPI wiring.</li>
+    <li><b>Backends:</b> Espressif <code>esp_wifi_remote</code> (1.6.3) + <code>esp_hosted</code> (2.12.12, C6 factory firmware).</li>
+  </ul>
+
+  <p class="foot">pico-e32 worklog · 2026-08-05 · source: <code>docs/worklog/2026-08-05-wifi-connectivity.md</code> ·
+  backlog <code>WC-1</code>/<code>WC-3</code> in <code>docs/pico-e32-todo.md</code></p>
+</div>
+</body>
+</html>
