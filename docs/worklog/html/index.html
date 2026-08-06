@@ -31,6 +31,18 @@
     <ul class="entries">
       <li>
         <span class="d">2026-08-06</span>
+        <a class="t" href="2026-08-06-p4-sd-sdmmc-handover.html">P4 SD back on SDMMC · host handed to the radio</a>
+        <span class="s">Cover-art load <strong>64.0 → 39.4 ms median (−38%)</strong>. The P4's single SDMMC host is
+          now handed back and forth: the SD owns it while browsing and playing, and gives it up for a WiFi session
+          (remount takes 44 ms, card fully usable after). <strong>This is the loading-time win the on-demand radio
+          work did not deliver</strong> — that one moved nothing, but it freed the host and made this possible.
+          Read is 7.1× faster (26.3 → 3.6 ms); decode is unchanged at ~29 ms and is now ~75% of what's left, so the
+          bus is no longer the bottleneck. Trap recorded: <code>esp_vfs_fat_sdcard_unmount()</code> already deinits
+          the host, and calling <code>sdmmc_host_deinit()</code> after it <strong>boot-loops the board</strong>.
+          <code>WC-6</code> step 1; S3 untouched.</span>
+      </li>
+      <li>
+        <span class="d">2026-08-06</span>
         <a class="t" href="2026-08-06-wifi-on-demand.html">WiFi off by default · on-demand only</a>
         <span class="s">The radio no longer comes up at boot on either board. Refcounted
           <code>wifi_mgr_acquire()</code>/<code>release()</code>; the last release tears the stack <strong>all the

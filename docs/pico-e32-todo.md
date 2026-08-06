@@ -121,7 +121,8 @@ docs (per [`.ai/AGENTS.md`](../.ai/AGENTS.md) → *Plan first*).
     power meter. Gameplay frame time was **not** measured; the CPU win is structural (no priority-23 tasks
     resident) and, given the null result above, expected to be small.
 
-- **`WC-6` — put the P4's SD back on SDMMC now that WiFi is on-demand (loading-time win).** *Why:* measured
+- **`WC-6` — put the P4's SD back on SDMMC now that WiFi is on-demand — ✅ **STEP 1 DONE, hardware-verified
+  (2026-08-06)**; step 2 deferred until a consumer needs it. *Why:* measured
   2026-08-06 by splitting the cover load into read vs decode — **SDMMC 4-bit reads at 10.20 MB/s (3.6 ms per
   ~38 KB cover) against SPI's 1.43 MB/s (26.3 ms): 7.1× faster**, taking total cover load from **55.4 ms to
   32.5 ms (−41%)**. Decode is ~29 ms either way and is the floor. This is the real lever on P4 loading time — the
@@ -149,11 +150,16 @@ docs (per [`.ai/AGENTS.md`](../.ai/AGENTS.md) → *Plan first*).
     double-deinit and **panics the board into a boot loop** (`Guru Meditation ... MCAUSE 0x1f` right after the
     unmount log). Unmount, and nothing else. Leave the LDO VO4 rail powered — SPI mode needs it too, so it should
     survive the switch rather than being torn down and re-acquired.
-  - **Staging (recommended):** ship the win first, add the SPI mode when it's actually needed. **Step 1** — SD on
-    SDMMC by default, and the WiFi settings screen (which needs no SD) unmounts it for the duration. That is the
-    whole 41% loading win with almost no new machinery, and it is fully proven by the gate above. **Step 2** —
-    add the SPI mode when `WC-4` lands a download that genuinely needs SD *and* radio at once; SD-on-SPI +
-    C6-on-SDMMC is already proven, since it is exactly what shipped before this item.
+  - **Step 1 — ✅ DONE ([worklog](worklog/2026-08-06-p4-sd-sdmmc-handover.md)).** SD on SDMMC by default; the WiFi
+    screen unmounts it (releasing the host) for the duration and remounts on the way out, including on the
+    acquire-failure path. Measured in the shipped build: **cover load 64.0 → 39.4 ms median, −38%** (read 26.3 →
+    3.6 ms, 7.1×; decode ~29 ms unchanged and now ~75% of what's left, so the bus is no longer the bottleneck).
+    Remount takes 44 ms and the card is fully usable after (19 folders / 402 entries re-read). Sequencing lives in
+    the launcher — `wifi_manager` still knows nothing about storage. S3 untouched.
+  - **Step 2 — deferred until needed.** SD on SPI *simultaneously* with the radio, for a download that wants
+    storage and network at once. Already proven as a pairing (it is exactly what shipped before step 1); needs the
+    board to carry both drivers plus a mode-switch seam and a no-open-file-handles rule across the switch. Blocked
+    on nothing except `WC-4` producing a consumer.
   - **Verify:** the gate above; cover-load split before/after (expect ~32.5 ms); a full
     SDMMC → SPI → WiFi → SPI → SDMMC cycle repeated several times without losing the card; and SD writes working
     while the radio is up.

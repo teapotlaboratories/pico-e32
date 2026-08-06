@@ -8,16 +8,15 @@
  *
  * GP-3: board.cpp implements the display over MIPI-DSI (ST7701S), hardware-verified. GP-5: GT911
  * capacitive touch (I2C). The pins/timing/init are sourced from ESPHome's board model + confirmed on
- * hardware — see board.cpp's header. This board's TF/microSD slot is driven over SPI (BOARD_HAS_SD, the same
- * seam the S3 uses) rather than the P4's native SDMMC host, which is left to the on-board ESP32-C6 radio
- * (BOARD_HAS_WIFI) — see the two blocks below for why. ES8311 audio too.
+ * hardware — see board.cpp's header. This board's TF/microSD slot runs on the native SDMMC host (BOARD_HAS_SDMMC)
+ * and is handed over to the on-board ESP32-C6 radio (BOARD_HAS_WIFI) when the radio is needed — see the two
+ * blocks below for why. ES8311 audio too.
  * See docs/hardware/pico-e32-guition-jc4880p443c-p4.md.
  */
 #pragma once
 
 #include <stdint.h>
 #include "esp_err.h"
-#include "sdcard_spi.h"   /* sdcard_spi_config_t — board_sd_config() fills this board's SD-over-SPI wiring */
 
 /* Panel geometry, native portrait (480 wide x 800 tall). */
 #define BOARD_LCD_H_RES 480
@@ -77,14 +76,18 @@ uint8_t board_touch_hittest(int x, int y);    /* map a touch (display coords) to
 esp_err_t board_audio_init(void);
 void      board_audio_write(const int16_t *stereo, size_t frames);
 
-/* This board's TF/microSD slot is driven over SPI (BOARD_HAS_SD, the sdcard_spi seam — same as the S3), NOT the
- * native SDMMC host. Why: the SDMMC host's slot 1 is wired to the on-board ESP32-C6 (esp-hosted WiFi/SDIO), and
- * the SD (slot 0) + C6 (slot 1) cannot both init that single shared host — whichever comes up first locks the
- * other out. Running the SD over SPI on the same TF pins frees the SDMMC host entirely for the C6, so WiFi + SD
- * coexist. board_sd_config() fills the SPI host/pins AND powers the card rail (the P4's on-chip LDO VO4) — that
- * power is still required in SPI mode. See board.cpp + docs (WC-3). The app guards its call with BOARD_HAS_SD. */
-#define BOARD_HAS_SD 1
-bool board_sd_config(sdcard_spi_config_t *out);
+/* This board's TF/microSD slot runs on the P4's native SDMMC host (slot 0, 4-bit) — the fast path: measured
+ * 10.20 MB/s vs 1.43 MB/s for the same card over SPI, which is 41% off a cover-art load (WC-6).
+ *
+ * The catch is that the P4 has ONE SDMMC host and slot 1 of it is the on-board ESP32-C6 (esp-hosted WiFi/SDIO),
+ * so the SD and the radio cannot be initialised at the same time. They CAN be handed back and forth: the app
+ * unmounts the SD (board_sd_unmount → the host is released) before bringing the radio up, and remounts after.
+ * That is why the radio is on-demand (WC-5) — it is what makes the fast SD path affordable. A future download
+ * that needs storage AND radio simultaneously moves the SD to SPI for the duration (WC-6 step 2); that pairing
+ * is already proven, it is what shipped before this. See board.cpp + docs/hardware. */
+#define BOARD_HAS_SDMMC 1
+esp_err_t board_sd_mount(const char *mount_point);
+esp_err_t board_sd_unmount(const char *mount_point);
 
 /* WiFi via the on-board ESP32-C6 companion (esp_wifi_remote over esp-hosted/SDIO — the P4 has no native radio).
  * The launcher's WiFi menu keys off this; the wifi component picks the esp_wifi_remote backend for the P4
