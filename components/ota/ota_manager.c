@@ -106,7 +106,8 @@ esp_err_t ota_check(const char *manifest_url, ota_release_t *out, int timeout_ms
     if (n <= 0) return ESP_ERR_INVALID_RESPONSE;
     body[n] = '\0';
 
-    if (!json_str(body, "version", out->version, sizeof out->version) ||
+    if (!json_str(body, "target",  out->target,  sizeof out->target)  ||
+        !json_str(body, "version", out->version, sizeof out->version) ||
         !json_str(body, "url",     out->url,     sizeof out->url)     ||
         !json_str(body, "sha256",  out->sha256,  sizeof out->sha256)  ||
         !json_num(body, "size",    &out->size)) {
@@ -119,7 +120,12 @@ esp_err_t ota_check(const char *manifest_url, ota_release_t *out, int timeout_ms
         ESP_LOGE(TAG, "manifest sha256/size implausible");
         return ESP_ERR_INVALID_RESPONSE;
     }
-    ESP_LOGI(TAG, "manifest: %s (%u bytes)", out->version, (unsigned)out->size);
+    /* Wrong-chip images are refused here rather than at the next boot. */
+    if (strcmp(out->target, CONFIG_IDF_TARGET) != 0) {
+        ESP_LOGE(TAG, "manifest targets '%s' but this is '%s' — refusing", out->target, CONFIG_IDF_TARGET);
+        return ESP_ERR_INVALID_VERSION;
+    }
+    ESP_LOGI(TAG, "manifest: %s for %s (%u bytes)", out->version, out->target, (unsigned)out->size);
     return ESP_OK;
 }
 

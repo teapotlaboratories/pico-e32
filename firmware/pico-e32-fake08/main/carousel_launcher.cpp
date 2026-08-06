@@ -1004,7 +1004,10 @@ static void run_update(void) {
         esp_err_t err = ota_check(OTA_MANIFEST_URL, &rel, 10000);
         if (err != ESP_OK) {
             wifi_mgr_release();
-            wifi_msg("UPDATE", err == ESP_ERR_INVALID_RESPONSE ? "BAD MANIFEST" : "CHECK FAILED", s_missing, true);
+            const char *cm = "CHECK FAILED";
+            if (err == ESP_ERR_INVALID_RESPONSE)     cm = "BAD MANIFEST";
+            else if (err == ESP_ERR_INVALID_VERSION) cm = "UPDATE IS FOR ANOTHER BOARD";
+            wifi_msg("UPDATE", cm, s_missing, true);
             return;
         }
         if (!ota_is_newer(&rel)) {

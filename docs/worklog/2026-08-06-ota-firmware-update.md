@@ -221,3 +221,37 @@ Note on the S3 build: it failed once with `libesp_driver_dma.a: No such file` af
 config landed — a stale build tree, not a code error. Removing `build/pico-e32-fake08/makerfabs-ili9488-r1` and
 rebuilding fixed it. Same family as the `sdkconfig` staleness in §5: config changes need the generated tree
 dropped.
+
+### 11. S3 — updated end to end, and a cross-board guard
+
+**S3 OTA verified on hardware**, the acceptance item that was outstanding:
+
+```
+App version: 09f8874-dirty                       <- running
+wifi: autoconnect -> Tukang Ketoprak
+sta ip: 192.168.7.228
+ota: manifest: ota-test-s3 for esp32s3 (1628192 bytes)
+ota: target slot 'ota_1' @0x420000 (4096 KB)
+ota: verified 1628192 bytes, boot slot -> 'ota_1'
+rst:0xc (RTC_SW_CPU_RST)
+App version: ota-test-s3                         <- NEW FIRMWARE RUNNING
+ota: new image confirmed good (ESP_OK) — rollback cancelled
+```
+
+1.63 MB in **9.1 s** (~180 KB/s on the S3's native radio, against ~218 KB/s on the P4 over the C6 — the remoted
+radio is not the slower one, which is mildly surprising and worth remembering).
+
+**Gap found by doing the second board: the manifest had no chip field.** Two boards, one endpoint, and nothing
+stopped an S3 downloading a P4 image. IDF *does* reject a wrong chip ID — but in the **bootloader**
+(`bootloader_common_loader.c`: `mismatch chip ID, expected %d, found %d`), i.e. only at the next boot. The board
+would burn the whole transfer, write it, switch slots, fail to boot and roll back. Recoverable, but a scary
+reboot instead of a clear message.
+
+So `target` is now a **required** manifest field, checked against `CONFIG_IDF_TARGET` in `ota_check()` before
+anything is downloaded, with the menu saying `UPDATE IS FOR ANOTHER BOARD`. The positive path is verified — the
+S3 run above parsed and matched `"target":"esp32s3"` (`manifest: ota-test-s3 for esp32s3`). **The negative path
+is not yet verified on hardware**: repeated attempts to drive it were lost to serial-port contention, so
+"mismatch is refused" is currently reasoning plus a passing parse, not a HITL result.
+
+Manifest format is now:
+`{"target","version","build","url","sha256","size"}`.
