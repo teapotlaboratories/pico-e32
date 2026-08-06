@@ -30,8 +30,14 @@ extern "C" {
 #define OTA_URL_MAXLEN    255
 
 /* One release, as described by the manifest:
- *   {"version":"...","build":"...","url":"https://...","sha256":"<64 hex>","size":<bytes>} */
+ *   {"target":"esp32s3","version":"...","build":"...","url":"https://...","sha256":"<64 hex>","size":<bytes>}
+ *
+ * `target` is required and must match the running chip. Two boards share one endpoint here, and without it an
+ * S3 would happily download and flash a P4 image: the bootloader does reject a wrong chip ID, but only at the
+ * next boot, so the board would burn the transfer, switch slots, fail to boot and roll back. Refusing up front
+ * is a clear message instead of a scary reboot. */
 typedef struct {
+    char   target[16];                /* IDF target the image is built for, e.g. "esp32p4" */
     char   version[OTA_VERSION_MAXLEN + 1];
     char   build[32];                 /* ISO-8601 build stamp, display only */
     char   url[OTA_URL_MAXLEN + 1];
