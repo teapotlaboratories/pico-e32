@@ -29,3 +29,33 @@ endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(pico_e32_fake08)
+
+# ── P4: defer esp-hosted's boot auto-init ───────────────────────────────────────────────────────────────
+# The ESP32-P4 has no native radio; WiFi runs on an on-board ESP32-C6 via espressif/esp-hosted (SDIO). That
+# component auto-inits itself from a C global constructor (host/port/.../port_esp_hosted_host_init.c:
+# `__attribute__((constructor))` -> `ESP_ERROR_CHECK(esp_hosted_init())`), i.e. BEFORE app_main. In this
+# firmware that hang the P4 during the C6 SDIO bring-up: the H_SDIO_DRV rx task starts and the boot stalls,
+# app_main is never reached. We instead bring the link up from app_main after board bring-up, in
+# components/wifi/wifi_manager.c (esp_hosted_init() + esp_hosted_connect_to_slave()), which is reliable and
+# idempotent. The component manager fetches esp-hosted PRISTINE into the (git-ignored) managed_components/
+# tree; we transform that one call here at configure time rather than committing a modified vendor copy, so
+# the vendored tree stays byte-identical to upstream and the change re-applies after any clean/re-fetch.
+if(IDF_TARGET STREQUAL "esp32p4")
+    set(_hosted_ctor "${CMAKE_CURRENT_LIST_DIR}/managed_components/espressif__esp_hosted/host/port/esp/freertos/src/port_esp_hosted_host_init.c")
+    if(EXISTS "${_hosted_ctor}")
+        file(READ "${_hosted_ctor}" _hosted_src)
+        if(NOT _hosted_src MATCHES "pico-e32: esp_hosted_init")
+            string(REPLACE
+                "\tESP_ERROR_CHECK(esp_hosted_init());"
+                "\t/* pico-e32: esp_hosted_init() deferred to app_main (components/wifi/wifi_manager.c) — running\n\t * it here, from a global constructor before app_main, hangs the P4 in the C6 SDIO bring-up. See the\n\t * project CMakeLists for why this is transformed at build time. */\n\t/* ESP_ERROR_CHECK(esp_hosted_init()); */"
+                _hosted_patched "${_hosted_src}")
+            if(_hosted_patched STREQUAL _hosted_src)
+                message(WARNING "esp-hosted defer-init patch: constructor call not found — upstream may have "
+                                "changed. Verify WiFi still boots on the P4 (see components/wifi).")
+            else()
+                file(WRITE "${_hosted_ctor}" "${_hosted_patched}")
+                message(STATUS "esp-hosted: deferred boot auto-init out of the C constructor (P4 C6 SDIO).")
+            endif()
+        endif()
+    endif()
+endif()

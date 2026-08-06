@@ -23,6 +23,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_app_desc.h"   /* main-menu About screen: version / IDF / build date */
+#include "wifi_manager.h"   /* Settings -> WiFi (real on BOARD_HAS_WIFI boards; a no-op stub otherwise) */
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -518,7 +519,7 @@ static std::string run_carousel(Host *host, const std::string &start_dir) {
     std::vector<Entry> entries = build_entries(host, curdir, start_dir);
     int sel = 0;
     bool dirty = true, full = true;
-    uint8_t prev = 0;
+    uint8_t prev = input_poll();   /* seed with held buttons so a press carried in from the previous screen doesn't re-fire */
     ESP_LOGI(TAG, "games: %d entries in %s", (int)entries.size(), curdir.c_str());
     for (;;) {
         if (dirty) { render(entries, sel, curdir, start_dir, full); dirty = false; full = false; }
@@ -611,29 +612,302 @@ static void draw_kv(int y, const char *label, const char *value, int lscale, int
     }
 }
 
+#ifdef BOARD_HAS_WIFI
+/* ===================== Settings -> WiFi (STA: scan / on-screen keyboard / connect / persist) ===================== */
+
+/* Deck-driven on-screen keyboard (the deck has no letters): d-pad moves, O presses the highlighted key, X is a
+ * backspace shortcut. Two case layers; the bottom control row is [aA] [SPACE] [DEL] [BACK] [OK]. `out` is edited
+ * in place (must hold maxlen+1); returns true if the user pressed OK, false if BACK. */
+static const char *const KB_LOW[4]  = { "1234567890", "qwertyuiop", "asdfghjkl@", "zxcvbnm.-_" };
+static const char *const KB_UPP[4]  = { "!?#$%&*()+", "QWERTYUIOP", "ASDFGHJKL:", "ZXCVBNM,;/" };
+static const char *const KB_CTRL[5] = { "aA", "SPACE", "DEL", "BACK", "OK" };
+#define KB_COLS 10
+#define KB_ROWS 4        /* character rows; row 4 is the control row */
+
+static bool keyboard_input(const char *title, char *out, int maxlen) {
+    const int ks   = s_info_scale;
+    const int HS   = s_info_scale + 1;
+    const int fy   = s_crumb_y + HS * 8 + 8;           /* text field top */
+    const int fh   = ks * 8 + 8;
+    const int gy   = fy + fh + 8;                       /* key grid top */
+    const int rows = KB_ROWS + 1;
+    const int rowh = (CB_BOT - gy) / rows;
+    const int colw = (s_gw - 8) / KB_COLS;
+    const int gx   = s_gx + 4;
+    int cr = 1, cc = 0;                                 /* start on 'q' */
+    bool shift = false;
+
+    auto keychar = [&](int r, int c) -> char {
+        const char *row = (shift ? KB_UPP : KB_LOW)[r];
+        return (c >= 0 && c < (int)strlen(row)) ? row[c] : '\0';
+    };
+    auto draw_field = [&]() {
+        fill_rect(s_scratch, s_gw - 8, fh, s_platform);
+        board_lcd_blit(gx, fy, s_gw - 8, fh, s_scratch);
+        draw_text(gx + 6, fy + (fh - 5 * ks) / 2, out[0] ? out : "_", ks, s_fg, s_platform);
+    };
+    auto draw_key = [&](int x, int y, int w, const char *label, bool hl) {
+        int h = rowh - 3;
+        blit_round_rect(x, y, w - 3, h, 4, hl ? s_accent : s_titlebar);
+        int tw = (int)strlen(label) * 4 * ks;
+        draw_text(x + (w - 3 - tw) / 2, y + (h - 5 * ks) / 2, label, ks, hl ? s_bg : s_fg, hl ? s_accent : s_titlebar);
+    };
+    auto redraw_keys = [&]() {
+        char lab[2] = { 0 };
+        for (int r = 0; r < KB_ROWS; r++)
+            for (int c = 0; c < KB_COLS; c++) {
+                lab[0] = keychar(r, c);
+                draw_key(gx + c * colw, gy + r * rowh, colw, lab[0] ? lab : " ", cr == r && cc == c);
+            }
+        int cw = (s_gw - 8) / 5;
+        for (int c = 0; c < 5; c++)
+            draw_key(gx + c * cw, gy + KB_ROWS * rowh, cw, KB_CTRL[c], cr == KB_ROWS && cc == c);
+    };
+
+    board_lcd_fill(s_bg);
+    draw_text_centered(s_W / 2, s_crumb_y, title, HS, s_fg, s_bg);
+    board_draw_touch_deck();
+    draw_field();
+    redraw_keys();
+
+    uint8_t prev = input_poll();   /* seed with held buttons so a press carried in from the previous screen doesn't re-fire */
+    for (;;) {
+        uint8_t m = input_poll();
+        uint8_t p = (uint8_t)(m & ~prev);
+        prev = m;
+#ifdef FB_DUMP
+        if (p & INPUT_PAUSE) carousel_fb_dump();
+#endif
+        int cols_here = (cr == KB_ROWS) ? 5 : KB_COLS;
+        if      (p & INPUT_DOWN)  cr = (cr + 1) % rows;
+        else if (p & INPUT_UP)    cr = (cr + rows - 1) % rows;
+        else if (p & INPUT_RIGHT) cc = (cc + 1) % cols_here;
+        else if (p & INPUT_LEFT)  cc = (cc + cols_here - 1) % cols_here;
+        else if (p & INPUT_X)     { int l = (int)strlen(out); if (l) { out[l - 1] = '\0'; draw_field(); } vTaskDelay(pdMS_TO_TICKS(40)); continue; }
+        else if (p & INPUT_O) {
+            if (cr < KB_ROWS) {
+                char ch = keychar(cr, cc);
+                int l = (int)strlen(out);
+                if (ch && l < maxlen) { out[l] = ch; out[l + 1] = '\0'; draw_field(); }
+            } else switch (cc) {
+                case 0: shift = !shift; redraw_keys(); break;
+                case 1: { int l = (int)strlen(out); if (l < maxlen) { out[l] = ' '; out[l + 1] = '\0'; draw_field(); } break; }
+                case 2: { int l = (int)strlen(out); if (l) { out[l - 1] = '\0'; draw_field(); } break; }
+                case 3: return false;
+                case 4: return true;
+            }
+            vTaskDelay(pdMS_TO_TICKS(40));
+            continue;
+        } else { vTaskDelay(pdMS_TO_TICKS(40)); continue; }
+        if (cc >= cols_here && cr != KB_ROWS) cc = KB_COLS - 1;   /* leaving the (narrower) ctrl row */
+        { int cw2 = (cr == KB_ROWS) ? 5 : KB_COLS; if (cc >= cw2) cc = cw2 - 1; }
+        redraw_keys();
+        vTaskDelay(pdMS_TO_TICKS(40));
+    }
+}
+
+/* A modal message ("CONNECTING...", "CONNECTED", "SCAN FAILED", ...); if wait_x, block until X. */
+static void wifi_msg(const char *title, const char *msg, uint16_t col, bool wait_x) {
+    const int HS = s_info_scale + 1;
+    board_lcd_fill(s_bg);
+    draw_text_centered(s_W / 2, s_crumb_y, title, HS, s_fg, s_bg);
+    blit_round_rect(s_W / 2 - 26, s_crumb_y + HS * 8, 52, 3, 1, s_accent);
+    board_draw_touch_deck();
+    draw_text_centered(s_W / 2, s_ty + s_th / 2, msg, s_info_scale + 1, col, s_bg);
+    if (!wait_x) return;
+    uint8_t prev = input_poll();   /* seed with held buttons so a press carried in from the previous screen doesn't re-fire */
+    for (;;) {
+        uint8_t m = input_poll(); uint8_t p = (uint8_t)(m & ~prev); prev = m;
+#ifdef FB_DUMP
+        if (p & INPUT_PAUSE) carousel_fb_dump();
+#endif
+        if (p & (INPUT_X | INPUT_O)) return;
+        vTaskDelay(pdMS_TO_TICKS(40));
+    }
+}
+
+/* One selectable list row inside the game column: label (info_scale+1) on the left, optional sub-label on the
+ * right, both vertically centred in a snug accent pill when highlighted. Row height/pitch below are derived
+ * from the same text size, so the pill hugs the text (not the old too-tall bar). y = row (pill) top. */
+static int wifi_row_h(void)  { return 5 * (s_info_scale + 1) + 8; }   /* pill height: label glyph + padding */
+static int wifi_row_dy(void) { return wifi_row_h() + 8; }             /* row pitch */
+static void draw_pill_row(int y, const char *label, const char *sub, bool hl) {
+    const int ls = s_info_scale + 1, ss = s_info_scale, rh = wifi_row_h();
+    if (hl) blit_round_rect(s_gx + 16, y, s_gw - 32, rh, rh / 2, s_accent);
+    draw_text(s_gx + 24, y + (rh - 5 * ls) / 2, label, ls, hl ? s_bg : s_fg, hl ? s_accent : s_bg);
+    if (sub && *sub)
+        draw_text(s_gx + s_gw - 24 - (int)strlen(sub) * 4 * ss, y + (rh - 5 * ss) / 2,
+                  sub, ss, hl ? s_bg : s_dim, hl ? s_accent : s_bg);
+}
+
+/* A scrolling selectable list (title + up to `n` rows, right-aligned sub-labels). Returns the chosen index on
+ * O, or -1 on X. `first` (persisted by caller) tracks the scroll window. */
+static int wifi_list(const char *title, const char *hint, const char *const *items,
+                     const char *const *subs, int n, int *sel_io) {
+    const int HS = s_info_scale + 1, VS = s_info_scale;
+    const int top = s_crumb_y + HS * 8 + VS * 8 + 24;
+    const int dy  = wifi_row_dy();
+    const int vis = (CB_BOT - top) / dy;                /* rows that fit above the deck */
+    int sel = *sel_io, first = 0;
+    uint8_t prev = input_poll();   /* seed with held buttons so a press carried in from the previous screen doesn't re-fire */
+    for (;;) {
+        if (sel < first) first = sel;
+        if (sel >= first + vis) first = sel - vis + 1;
+        board_lcd_fill(s_bg);
+        draw_text_centered(s_W / 2, s_crumb_y, title, HS, s_fg, s_bg);
+        blit_round_rect(s_W / 2 - 26, s_crumb_y + HS * 8, 52, 3, 1, s_accent);
+        if (hint) draw_text_centered(s_W / 2, s_crumb_y + HS * 8 + 12, hint, VS, s_dim, s_bg);
+        board_draw_touch_deck();
+        for (int i = first; i < n && i < first + vis; i++)
+            draw_pill_row(top + (i - first) * dy, items[i], subs ? subs[i] : NULL, i == sel);
+        for (;;) {
+            uint8_t m = input_poll(); uint8_t p = (uint8_t)(m & ~prev); prev = m;
+#ifdef FB_DUMP
+            if (p & INPUT_PAUSE) carousel_fb_dump();
+#endif
+            if (p & INPUT_X) { *sel_io = sel; return -1; }
+            if (p & INPUT_O) { *sel_io = sel; return sel; }
+            if (n && (p & INPUT_DOWN)) { sel = (sel + 1) % n; break; }
+            if (n && (p & INPUT_UP))   { sel = (sel + n - 1) % n; break; }
+            vTaskDelay(pdMS_TO_TICKS(40));
+        }
+    }
+}
+
+static const char *rssi_bars(int8_t r) {
+    return r >= -55 ? "||||" : r >= -66 ? "|||" : r >= -76 ? "||" : "|";
+}
+
+/* Scan -> pick a network -> (keyboard for the password unless open) -> connect -> persist on success. */
+static void run_wifi_scan_connect(void) {
+    wifi_msg("WIFI", "SCANNING...", s_dim, false);
+    static wifi_ap_t aps[16];
+    int n = wifi_mgr_scan(aps, 16);
+    if (n <= 0) { wifi_msg("WIFI", n == 0 ? "NO NETWORKS" : "SCAN FAILED", s_dim, true); return; }
+
+    static const char *items[16];
+    static char subbuf[16][8];
+    static const char *subs[16];
+    for (int i = 0; i < n; i++) {
+        items[i] = aps[i].ssid;
+        snprintf(subbuf[i], sizeof subbuf[i], "%s", aps[i].open ? "OPEN" : rssi_bars(aps[i].rssi));
+        subs[i] = subbuf[i];
+    }
+    int sel = 0;
+    for (;;) {
+        int pick = wifi_list("NETWORKS", "O JOIN   X BACK", items, subs, n, &sel);
+        if (pick < 0) return;
+        char pass[WIFI_PASS_MAXLEN + 1] = { 0 };
+        if (!aps[pick].open && !keyboard_input("PASSWORD", pass, WIFI_PASS_MAXLEN)) continue;
+        wifi_msg("WIFI", "CONNECTING...", s_accent, false);
+        if (wifi_mgr_connect(aps[pick].ssid, pass, 15000) == ESP_OK) {
+            wifi_mgr_save(aps[pick].ssid, pass);
+            wifi_msg("WIFI", "CONNECTED", s_accent, true);
+            return;
+        }
+        wifi_msg("WIFI", "FAILED TO CONNECT", s_missing, true);   /* back to the list to retry */
+    }
+}
+
+static void run_wifi(void) {
+    wifi_mgr_init();   /* idempotent — also done at boot; safe if the boot path hasn't finished */
+    const int HS = s_info_scale + 1, VS = s_info_scale;
+    int sel = 0;
+    uint8_t prev = input_poll();   /* seed with held buttons so a press carried in from the previous screen doesn't re-fire */
+    for (;;) {
+        wifi_status_t st; wifi_mgr_status(&st);
+        board_lcd_fill(s_bg);
+        draw_text_centered(s_W / 2, s_crumb_y, "WIFI", HS, s_fg, s_bg);
+        blit_round_rect(s_W / 2 - 26, s_crumb_y + HS * 8, 52, 3, 1, s_accent);
+        draw_text_centered(s_W / 2, s_crumb_y + HS * 8 + 12, "O SELECT   X BACK", VS, s_dim, s_bg);
+        board_draw_touch_deck();
+        int y = s_crumb_y + HS * 8 + VS * 8 + 30;
+        if (st.connected) {
+            draw_kv(y, "STATUS", "ONLINE", VS, VS, s_accent, s_fg);      y += VS * 11;
+            draw_kv(y, "SSID",   st.ssid, VS, VS, s_fg, s_fg);           y += VS * 11;
+            draw_kv(y, "IP",     st.ip,   VS, VS, s_fg, s_fg);           y += VS * 11;
+        } else {
+            draw_kv(y, "STATUS", "OFFLINE", VS, VS, s_dim, s_dim);       y += VS * 11;
+        }
+        y += VS * 10;
+        const char *actions[2] = { st.connected ? "SCAN / RECONNECT" : "SCAN & CONNECT", "FORGET NETWORK" };
+        for (int i = 0; i < 2; i++)
+            draw_pill_row(y + i * wifi_row_dy(), actions[i], NULL, i == sel);
+        for (;;) {
+            uint8_t m = input_poll(); uint8_t p = (uint8_t)(m & ~prev); prev = m;
+#ifdef FB_DUMP
+            if (p & INPUT_PAUSE) carousel_fb_dump();
+#endif
+            if (p & INPUT_X) return;
+            if (p & (INPUT_DOWN | INPUT_UP)) { sel ^= 1; break; }
+            if (p & INPUT_O) {
+                if (sel == 0) run_wifi_scan_connect();
+                else { wifi_mgr_forget(); wifi_msg("WIFI", "FORGOTTEN", s_dim, true); }
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(40));
+        }
+    }
+}
+
+/* One-shot boot task: reconnect to saved credentials without blocking the launcher. Self-deletes when done. */
+static void wifi_autoconnect_task(void *arg) {
+    (void)arg;
+    wifi_mgr_autoconnect(15000);
+    vTaskDelete(NULL);
+}
+#endif  /* BOARD_HAS_WIFI */
+
 static void run_settings(void) {
     const int HS = s_info_scale + 1;   /* header title */
     const int LS = s_info_scale + 1;   /* row label */
     const int VS = s_info_scale;       /* subtitle + row value */
-    board_lcd_fill(s_bg);
-    draw_text_centered(s_W / 2, s_crumb_y, "SETTINGS", HS, s_fg, s_bg);
-    blit_round_rect(s_W / 2 - 26, s_crumb_y + HS * 8, 52, 3, 1, s_accent);
-    draw_text_centered(s_W / 2, s_crumb_y + HS * 8 + 12, "L/R CHANGE   X BACK", VS, s_dim, s_bg);
-    board_draw_touch_deck();
-    int y0 = s_crumb_y + HS * 8 + VS * 8 + 34;   /* rows sit just under the header, not down at the menu row */
-    int dy = LS * 12;                            /* row pitch scaled to the text */
-    auto draw_rows = [&]() {
-        /* ACCENT (live) — name at right, colour swatch just left of it */
-        draw_kv(y0, "ACCENT", ACCENTS[s_accent_idx].name, LS, VS, s_accent, s_fg);
-        int vw = (int)strlen(ACCENTS[s_accent_idx].name) * 4 * VS;
-        int sw = LS * 13, sh = LS * 7;
-        blit_round_rect(s_gx + s_gw - 24 - vw - 14 - sw, y0 + (LS * 5 - sh) / 2, sw, sh, 5, s_accent);
-        /* planned, greyed */
-        draw_kv(y0 + dy, "BRIGHTNESS", "SOON", LS, VS, s_dim, s_dim);
-        draw_kv(y0 + dy * 2, "VOLUME", "SOON", LS, VS, s_dim, s_dim);
+
+    /* Rows are a selectable list now (up/down move, L/R adjusts the row if it adjusts, O opens a submenu). The
+     * set is board-dependent: WIFI only appears where there's a radio (BOARD_HAS_WIFI). */
+    enum { R_ACCENT, R_WIFI, R_BRIGHT, R_VOL };
+    int kinds[4], nrows = 0;
+    kinds[nrows++] = R_ACCENT;
+#ifdef BOARD_HAS_WIFI
+    kinds[nrows++] = R_WIFI;
+#endif
+    kinds[nrows++] = R_BRIGHT;
+    kinds[nrows++] = R_VOL;
+
+    int sel = 0;
+    const int y0 = s_crumb_y + HS * 8 + VS * 8 + 30;
+    const int dy = LS * 12;
+    auto draw_all = [&]() {
+        board_lcd_fill(s_bg);
+        draw_text_centered(s_W / 2, s_crumb_y, "SETTINGS", HS, s_fg, s_bg);
+        blit_round_rect(s_W / 2 - 26, s_crumb_y + HS * 8, 52, 3, 1, s_accent);
+        draw_text_centered(s_W / 2, s_crumb_y + HS * 8 + 12, "L/R ADJUST  O OPEN  X BACK", VS, s_dim, s_bg);
+        board_draw_touch_deck();
+        for (int i = 0; i < nrows; i++) {
+            int ry = y0 + i * dy;
+            bool hl = (i == sel);
+            uint16_t lc = hl ? s_accent : s_fg;
+            switch (kinds[i]) {
+            case R_ACCENT: {
+                draw_kv(ry, "ACCENT", ACCENTS[s_accent_idx].name, LS, VS, lc, s_fg);
+                int vw = (int)strlen(ACCENTS[s_accent_idx].name) * 4 * VS;
+                int sw = LS * 13, sh = LS * 7;
+                blit_round_rect(s_gx + s_gw - 24 - vw - 14 - sw, ry + (LS * 5 - sh) / 2, sw, sh, 5, s_accent);
+                break; }
+#ifdef BOARD_HAS_WIFI
+            case R_WIFI: {
+                wifi_status_t st; wifi_mgr_status(&st);
+                draw_kv(ry, "WIFI", st.connected ? st.ssid : "OFF", LS, VS, lc, st.connected ? s_accent : s_dim);
+                break; }
+#endif
+            case R_BRIGHT: draw_kv(ry, "BRIGHTNESS", "SOON", LS, VS, hl ? s_accent : s_dim, s_dim); break;
+            case R_VOL:    draw_kv(ry, "VOLUME",     "SOON", LS, VS, hl ? s_accent : s_dim, s_dim); break;
+            }
+            if (hl) blit_round_rect(s_gx + 6, ry + 2, 4, LS * 5, 2, s_accent);   /* selection caret */
+        }
     };
-    draw_rows();
-    uint8_t prev = 0;
+    draw_all();
+    uint8_t prev = input_poll();   /* seed with held buttons so a press carried in from the previous screen doesn't re-fire */
     for (;;) {
         uint8_t m = input_poll();
         uint8_t p = (uint8_t)(m & ~prev);
@@ -642,8 +916,17 @@ static void run_settings(void) {
         if (p & INPUT_PAUSE) carousel_fb_dump();
 #endif
         if (p & INPUT_X) return;
-        if (p & (INPUT_RIGHT | INPUT_DOWN)) { s_accent_idx = (s_accent_idx + 1) % ACCENT_N; apply_accent(); draw_rows(); }
-        else if (p & (INPUT_LEFT | INPUT_UP)) { s_accent_idx = (s_accent_idx + ACCENT_N - 1) % ACCENT_N; apply_accent(); draw_rows(); }
+        else if (p & INPUT_DOWN) { sel = (sel + 1) % nrows; draw_all(); }
+        else if (p & INPUT_UP)   { sel = (sel + nrows - 1) % nrows; draw_all(); }
+        else if (p & (INPUT_LEFT | INPUT_RIGHT)) {
+            if (kinds[sel] == R_ACCENT) {   /* ACCENT is the one adjustable row; recolours the whole UI live */
+                s_accent_idx = (s_accent_idx + ((p & INPUT_RIGHT) ? 1 : ACCENT_N - 1)) % ACCENT_N;
+                apply_accent(); draw_all();
+            }
+        }
+#ifdef BOARD_HAS_WIFI
+        else if ((p & INPUT_O) && kinds[sel] == R_WIFI) { run_wifi(); draw_all(); }
+#endif
         vTaskDelay(pdMS_TO_TICKS(40));
     }
 }
@@ -651,7 +934,7 @@ static void run_settings(void) {
 static void run_about(void) {
     const esp_app_desc_t *d = esp_app_get_description();
     const char *boardname =
-#ifdef BOARD_HAS_SDMMC
+#if CONFIG_IDF_TARGET_ESP32P4
         "ESP32-P4";
 #else
         "ESP32-S3";
@@ -681,7 +964,7 @@ static void run_about(void) {
     /* maintainer as one centered line — label+value won't both fit the column side by side (kept small: it's long) */
     draw_text_centered(s_W / 2, y, "MAINTAINER: ALDWIN HERMANUDIN", 2, s_dim, s_bg);
 
-    uint8_t prev = 0;
+    uint8_t prev = input_poll();   /* seed with held buttons so a press carried in from the previous screen doesn't re-fire */
     for (;;) {
         uint8_t m = input_poll();
         uint8_t p = (uint8_t)(m & ~prev);
@@ -725,13 +1008,20 @@ std::string carousel_launcher_run(Host *host, const std::string &start_dir) {
 
     apply_accent();
 
+#ifdef BOARD_HAS_WIFI
+    /* Bring the radio up now (fast) and reconnect to saved credentials off-thread, so a slow join never blocks
+     * boot. wifi_mgr_init() is idempotent, so Settings->WiFi can also call it without racing this. */
+    wifi_mgr_init();
+    xTaskCreate(wifi_autoconnect_task, "wifi_ac", 4096, NULL, 4, NULL);
+#endif
+
     /* Top-level menu: Games (the SD carousel) / Settings / About. Games returns a cart path to launch;
      * Settings and About return here on X. Nav: up/down move, O select. */
     int menu_sel = 0;
     std::string result;
     for (;;) {
         render_menu(menu_sel, true);
-        uint8_t prev = 0;
+        uint8_t prev = input_poll();   /* seed with held buttons so a press carried in from the previous screen doesn't re-fire */
         bool chosen = false;
         while (!chosen) {
             uint8_t m = input_poll();
