@@ -196,10 +196,10 @@ depends on (no new display code); backlight/physical output was confirmed by eye
 
 ## 10. State & next
 
-- **Committed on branch `wifi-connectivity`** (held during the weekday 9–5 Pacific window, landed after 17:00).
+- **MERGED to `main`** 2026-08-05 as pico-e32 `#30` (rebase, linear; commits held during the weekday 9–5 Pacific
+  window and landed after 17:00). Review pass ran on the PR — §6 records what it found and how it was fixed.
   Contents: `components/wifi`, the P4 board SD-over-SPI + `BOARD_HAS_WIFI`, the CMake defer-init transform, the
   launcher WIFI menu + keyboard, the OTA-ready 16 MB partition table, and the two helper firmwares
-  (`pico-e32-p4-wifi` probe, `pico-e32-p4-c6-ota` C6 slave OTA tool). **Not yet opened as a PR** — code changes go
-  through a PR + `/review` before merging.
+  (`pico-e32-p4-wifi` probe, `pico-e32-p4-c6-ota` C6 slave OTA tool).
 - **Follow-ups:** [`WC-2`](../pico-e32-todo.md) lowercase glyphs; [`WC-4`](../pico-e32-todo.md) NTP / OTA / network
   cart downloads.

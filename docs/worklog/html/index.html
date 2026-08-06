@@ -40,8 +40,10 @@
           <code>app_main</code> (deferred to <code>wifi_mgr_init</code>, constructor neutralised <strong>at build time</strong>
           so the vendor tree stays pristine), and the SD + C6 <strong>fight over the single SDMMC host</strong> (moved the
           SD to <strong>SPI</strong>, freeing the SDMMC host for the C6). Net: one P4 boot mounts the SD <strong>and</strong>
-          links the C6 <strong>and</strong> renders the launcher. <strong>Uncommitted</strong> (weekday no-commit window);
-          backlog <code>WC-1</code>/<code>WC-3</code> done.</span>
+          links the C6 <strong>and</strong> renders the launcher. A review pass then fixed a permanent-disconnect bug
+          in the reconnect policy, moved the 2.3 s C6 handshake off the boot path (menu at 1775 ms, was 4068 ms), and
+          made 32-byte SSIDs joinable. <strong>Merged to main</strong> (pico-e32 <code>#30</code>); backlog
+          <code>WC-1</code>/<code>WC-3</code> done.</span>
       </li>
       <li>
         <span class="d">2026-08-03</span>

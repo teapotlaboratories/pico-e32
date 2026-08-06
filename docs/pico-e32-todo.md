@@ -69,7 +69,7 @@ docs (per [`.ai/AGENTS.md`](../.ai/AGENTS.md) → *Plan first*).
 
 ## WiFi connectivity (`WC-*`)
 
-- **`WC-1` — S3 WiFi foundation — ✅ DONE, hardware-verified (branch `wifi-connectivity`, uncommitted).** New
+- **`WC-1` — S3 WiFi foundation — ✅ DONE, hardware-verified; MERGED to main 2026-08-05 (pico-e32 `#30`).** New
   `components/wifi` (`esp_wifi` STA: scan / connect / status / NVS-persist / boot auto-connect). Backend chosen by
   IDF target in the component CMake: native `esp_wifi` on the S3, `esp_wifi_remote` → esp-hosted → C6 on the P4 (see
   `WC-3`). Settings → **WIFI** submenu: status, scan the air, deck-driven **on-screen keyboard** for the password,
@@ -79,8 +79,8 @@ docs (per [`.ai/AGENTS.md`](../.ai/AGENTS.md) → *Plan first*).
   input), so a typed lowercase WiFi password *displays* as uppercase — it is **stored** with correct case, so the
   join works, but the user can't visually distinguish case. Add lowercase glyphs (a…z) so the password field (and any
   future mixed-case text) reads true. Low priority, isolated to the font table + `glyph_rows`.
-- **`WC-3` — P4 WiFi via the ESP32-C6 companion (project Gate 4) — ✅ DONE, hardware-verified (branch
-  `wifi-connectivity`, uncommitted).** The P4 has no native radio; the on-board C6 comes up over SDIO/esp-hosted +
+- **`WC-3` — P4 WiFi via the ESP32-C6 companion (project Gate 4) — ✅ DONE, hardware-verified;
+  MERGED to main 2026-08-05 (pico-e32 `#30`).** The P4 has no native radio; the on-board C6 comes up over SDIO/esp-hosted +
   `esp_wifi_remote`, `BOARD_HAS_WIFI` is defined for the P4, and the same `components/wifi` front-end drives it.
   Coexistence solved (WiFi + MIPI-DSI + SD all live in one boot). Two P4-specific traps and their fixes:
   - **esp-hosted's boot auto-init hangs.** esp-hosted inits itself from a C global constructor
