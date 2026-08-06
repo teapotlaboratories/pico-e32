@@ -8,14 +8,16 @@
  *
  * GP-3: board.cpp implements the display over MIPI-DSI (ST7701S), hardware-verified. GP-5: GT911
  * capacitive touch (I2C). The pins/timing/init are sourced from ESPHome's board model + confirmed on
- * hardware — see board.cpp's header. This board has a TF/microSD slot wired to the ESP32-P4 SDMMC
- * peripheral (slot 0, 4-bit) — BOARD_HAS_SDMMC below; SD-over-SPI (BOARD_HAS_SD) is a different seam the
- * S3 uses. ES8311 audio too. See docs/hardware/pico-e32-guition-jc4880p443c-p4.md.
+ * hardware — see board.cpp's header. This board's TF/microSD slot is driven over SPI (BOARD_HAS_SD, the same
+ * seam the S3 uses) rather than the P4's native SDMMC host, which is left to the on-board ESP32-C6 radio
+ * (BOARD_HAS_WIFI) — see the two blocks below for why. ES8311 audio too.
+ * See docs/hardware/pico-e32-guition-jc4880p443c-p4.md.
  */
 #pragma once
 
 #include <stdint.h>
 #include "esp_err.h"
+#include "sdcard_spi.h"   /* sdcard_spi_config_t — board_sd_config() fills this board's SD-over-SPI wiring */
 
 /* Panel geometry, native portrait (480 wide x 800 tall). */
 #define BOARD_LCD_H_RES 480
@@ -75,13 +77,24 @@ uint8_t board_touch_hittest(int x, int y);    /* map a touch (display coords) to
 esp_err_t board_audio_init(void);
 void      board_audio_write(const int16_t *stereo, size_t frames);
 
-/* This board HAS a TF/microSD slot on the ESP32-P4 SDMMC peripheral (slot 0, 4-bit, IO_MUX). Unlike the S3's
- * SD-over-SPI (BOARD_HAS_SD, sdcard_spi), SDMMC is a native host with its own mount path, so the board owns
- * the WHOLE mount (esp_vfs_fat_sdmmc_mount) behind this one seam — the app just asks for a mount point and
- * gets a FAT VFS. ESP_OK on success; any error means "no card / mount failed" and the app falls back to the
- * flash cart. Idempotent-ish: a second call while mounted returns ESP_ERR_INVALID_STATE. */
-#define BOARD_HAS_SDMMC 1
-esp_err_t board_sd_mount(const char *mount_point);
+/* This board's TF/microSD slot is driven over SPI (BOARD_HAS_SD, the sdcard_spi seam — same as the S3), NOT the
+ * native SDMMC host. Why: the SDMMC host's slot 1 is wired to the on-board ESP32-C6 (esp-hosted WiFi/SDIO), and
+ * the SD (slot 0) + C6 (slot 1) cannot both init that single shared host — whichever comes up first locks the
+ * other out. Running the SD over SPI on the same TF pins frees the SDMMC host entirely for the C6, so WiFi + SD
+ * coexist. board_sd_config() fills the SPI host/pins AND powers the card rail (the P4's on-chip LDO VO4) — that
+ * power is still required in SPI mode. See board.cpp + docs (WC-3). The app guards its call with BOARD_HAS_SD. */
+#define BOARD_HAS_SD 1
+bool board_sd_config(sdcard_spi_config_t *out);
+
+/* WiFi via the on-board ESP32-C6 companion (esp_wifi_remote over esp-hosted/SDIO — the P4 has no native radio).
+ * The launcher's WiFi menu keys off this; the wifi component picks the esp_wifi_remote backend for the P4
+ * target. SDIO pins are the esp_hosted P4 defaults (CLK18 CMD19 D0-3=14-17, C6 reset GPIO54), which match this
+ * board's wiring. The C6 ships with esp-hosted slave firmware. See components/wifi + firmware/pico-e32-p4-wifi.
+ *
+ * Pin/wiring facts sourced from: GustavoH-Smart/esp32p4 (README_WIFI: the P4->C6 SDIO map), the CNX writeup on
+ * the P4+C6 module, and buccaneer-jak/JC4880P443C-...RS232 (P4<->C6 UART GPIO29/30, C6 reset 54, C6 boot IO9,
+ * JP1 pins). Confirmed on hardware: the pins match esp_hosted's own P4 defaults. */
+#define BOARD_HAS_WIFI 1
 
 /* Carousel-launcher layout for THIS panel (display pixels). The launcher reads these instead of hardcoding
  * positions, so the same UI code lays out correctly on any board. The game column [game_x, game_x+game_w)

@@ -2,6 +2,11 @@
 # (layered first by the top-level Makefile).
 
 # app_main runs fake-08's GameLoop directly; the Lua pcall path + graphics calls want a roomy C stack.
+# OTA-capable partition table (see partitions.csv) — the default single-app table is too small for the WiFi
+# build and has no second slot for OTA. Both boards are 16 MB flash.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768
 
 CONFIG_COMPILER_OPTIMIZATION_PERF=y

@@ -24,6 +24,10 @@
  * never define BOARD_HAS_TOUCH, so the touch input backend's board hooks are simply absent. */
 #define BOARD_HAS_TOUCH 1
 
+/* The ESP32-S3 has a native 2.4 GHz WiFi radio. Boards without one (e.g. the ESP32-P4 until its ESP32-C6
+ * companion is brought up) never define BOARD_HAS_WIFI, so the launcher's WiFi menu compiles out there. */
+#define BOARD_HAS_WIFI 1
+
 /* Pixel-clock (WR strobe) of the parallel bus, in Hz. Exposed because a benchmark needs it to
  * derive the bus ceiling honestly rather than pasting a constant (a stale one is how a 20 MHz
  * ceiling once sat next to a 40 MHz measurement). */

@@ -1,0 +1,13 @@
+# pico-e32-fake08 partition table — 16 MB flash, OTA-capable.
+#
+# The default single-app table gives ~1 MB to the app; the WiFi build is ~1.5 MB and overflows it. Two 4 MB
+# OTA slots leave generous headroom AND enable WiFi OTA later without re-partitioning (a re-partition would
+# wipe the saved WiFi credentials in `nvs`). `nvs` also backs esp_wifi's own calibration store. Both boards
+# are 16 MB, so this table is shared.
+#
+# Name,     Type, SubType,  Offset,    Size
+nvs,        data, nvs,      0x9000,    0x6000
+otadata,    data, ota,      0xf000,    0x2000
+ota_0,      app,  ota_0,    0x20000,   0x400000
+ota_1,      app,  ota_1,    0x420000,  0x400000
+storage,    data, spiffs,   0x820000,  0x7E0000
