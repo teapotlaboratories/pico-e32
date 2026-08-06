@@ -45,6 +45,8 @@ static portMUX_TYPE       s_init_mux = portMUX_INITIALIZER_UNLOCKED;   /* static
 
 /* The timer can be dispatched just as a teardown runs (esp_timer_stop does not wait for an in-flight
  * callback), so re-check before touching the stack. */
+static esp_err_t ensure_nvs(void);   /* defined with the credential helpers below */
+
 static void retry_timer_cb(void *arg) { (void)arg; if (s_inited) esp_wifi_connect(); }
 
 /* Disconnects mean two different things, so they get two different policies:
@@ -85,11 +87,7 @@ static esp_err_t wifi_mgr_init_once(void) {
     if (he != ESP_OK) { ESP_LOGE(TAG, "esp_hosted_connect_to_slave -> %s", esp_err_to_name(he)); return he; }
 #endif
 
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
-    }
+    esp_err_t err = ensure_nvs();
     if (err != ESP_OK) return err;
 
     ESP_ERROR_CHECK(esp_netif_init());
@@ -316,7 +314,22 @@ void wifi_mgr_status(wifi_status_t *out) {
     }
 }
 
+/* NVS is initialised as part of the radio bring-up, but the credential helpers below are legitimately callable
+ * without the radio ever coming up (a settings screen reading saved state, a provisioning step, a test seeding
+ * credentials at boot). Without this they would silently fail against uninitialised NVS — nvs_open returns an
+ * error, the save is dropped, and the next autoconnect reports "nothing saved". Idempotent. */
+static esp_err_t ensure_nvs(void) {
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    return (err == ESP_ERR_INVALID_STATE) ? ESP_OK : err;   /* already initialised is success */
+}
+
 esp_err_t wifi_mgr_save(const char *ssid, const char *pass) {
+    esp_err_t ne = ensure_nvs();
+    if (ne != ESP_OK) return ne;
     nvs_handle_t h;
     esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
     if (err != ESP_OK) return err;
@@ -328,6 +341,7 @@ esp_err_t wifi_mgr_save(const char *ssid, const char *pass) {
 }
 
 bool wifi_mgr_load(char *ssid, char *pass) {
+    if (ensure_nvs() != ESP_OK) return false;
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READONLY, &h) != ESP_OK) return false;
     size_t sl = WIFI_SSID_MAXLEN + 1, pl = WIFI_PASS_MAXLEN + 1;
@@ -338,6 +352,7 @@ bool wifi_mgr_load(char *ssid, char *pass) {
 }
 
 void wifi_mgr_forget(void) {
+    if (ensure_nvs() != ESP_OK) return;
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
     nvs_erase_key(h, KEY_SSID);
