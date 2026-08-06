@@ -59,8 +59,9 @@
       <li><a href="#s3">Trap #1 — boot auto-init hangs</a></li>
       <li><a href="#s4">Trap #2 — shared SDMMC host</a></li>
       <li><a href="#s5">Result — coexistence</a></li>
-      <li><a href="#s6">Commands run · board state</a></li>
-      <li><a href="#s7">Sources</a></li>
+      <li><a href="#s6">Review pass — measurements &amp; fixes</a></li>
+      <li><a href="#s7">Commands run · board state</a></li>
+      <li><a href="#s8">Sources</a></li>
     </ol>
   </nav>
 
@@ -204,7 +205,50 @@ wifi: STA up                                        <span style="color:var(--ok)
   <code>SHTZ</code>). Driver-level connect was proven earlier with a standalone probe (joined <code>Tukang Ketoprak</code>,
   IP 192.168.7.212); nothing on the radio side changed since. S3 verified end-to-end (IP 192.168.7.228).</p>
 
-  <h2 id="s6">6. Commands run · board state</h2>
+  <h2 id="s6">6. Review pass — measurements &amp; fixes</h2>
+  <p>Code review surfaced six issues; all are fixed on the branch, and one turned out to be a measurement rather
+  than a change.</p>
+
+  <h3 style="font-size:1rem;margin:1.4rem 0 .4rem">SD throughput after the move to SPI (measured)</h3>
+  <p>Instrumented <code>cover_rgba()</code> temporarily to time the read+decode of a <code>.p8.png</code> cover,
+  scrolling the carousel to force uncached loads:</p>
+  <table>
+    <tr><th>SPI clock</th><th>cover load (n=9)</th><th>result</th></tr>
+    <tr><td><b>20 MHz</b> (shipped)</td><td>min 49.4 · <b>median 64.0</b> · mean 65.9 · max 82.6 ms</td><td><span class="ok">works</span></td></tr>
+    <tr><td>40 MHz</td><td>—</td><td><span class="bad">card init fails</span> — <code>send_csd returned 0x108</code>, mount returns <code>ESP_ERR_INVALID_RESPONSE</code></td></tr>
+  </table>
+  <p>So <b>20 MHz is the practical ceiling</b> on this wiring — the TF pins run through the GPIO matrix with no
+  external pull-ups and the card won't negotiate 40 MHz. Two things follow: the bandwidth lost relative to SDMMC
+  4-bit can't be bought back by raising the clock, and it doesn't much matter — SDMMC <i>cannot</i> coexist with the
+  C6 at all, so the real choice was "SD over SPI" vs "no WiFi". 64 ms to reveal a not-yet-cached cover is fine for a
+  browse UI, and covers are cached after first view. A failed mount also degrades gracefully
+  (<code>continuing without SD</code>) rather than panicking.</p>
+
+  <h3 style="font-size:1rem;margin:1.4rem 0 .4rem">Behavioural fixes</h3>
+  <ul>
+    <li><b>P4 boot no longer waits on the radio.</b> <code>wifi_mgr_init()</code> ran inline on the launcher thread
+      and blocks ~2.3 s in the esp-hosted handshake, delaying the menu on every boot for a feature most sessions
+      never touch. Moved to the existing background task — measured <b>deck drawn at 1775 ms, down from 4068 ms</b>,
+      with the C6 still finishing at ~4.0 s, just off the critical path.</li>
+    <li><b>WiFi no longer dies permanently after 3 drops.</b> One retry counter served both the modal connect and the
+      steady-state link and only reset on <code>GOT_IP</code>, so an AP reboot left the handheld offline until a
+      manual reconnect. Now two policies: bounded retries while <code>wifi_mgr_connect()</code> waits (the menu still
+      gets a definite answer), and an indefinite slow retry (10 s) once a link has actually been established. An
+      explicit disconnect/forget stands the keepalive down.</li>
+    <li><b><code>wifi_mgr_init()</code> is now thread-safe, not merely idempotent.</b> Making boot-init async meant
+      the background task and Settings → WIFI could both pass the <code>s_inited</code> check and run the bring-up
+      twice. Guarded with a statically-initialised spinlock; the loser waits for the winner.</li>
+    <li><b>32-byte SSIDs now work.</b> <code>strlcpy</code> into the 32-byte, not-NUL-terminated
+      <code>wifi_config_t.sta.ssid</code> silently dropped the last character, so such networks just failed to join.
+      Now <code>memcpy</code> with an explicit length; the passphrase is capped at its protocol maximum of 63 and
+      <code>WIFI_PASS_MAXLEN</code> corrected from 64 to 63.</li>
+    <li><b>Init failure is reported</b> — the return value was discarded at both call sites; the menu now says
+      <code>RADIO UNAVAILABLE</code> instead of a generic offline state.</li>
+    <li><b>Partial-init retry no longer leaks</b> — a failure after netif creation left <code>s_inited</code> false,
+      so a retry would create a second netif and re-register handlers.</li>
+  </ul>
+
+  <h2 id="s7">7. Commands run · board state</h2>
   <p>All builds go through the top-level <code>make</code> wrapper (never raw <code>idf.py</code> — the board
   overlay owns <code>CONFIG_IDF_TARGET</code>, PSRAM and flash size):</p>
   <pre># P4 — dev build used for the coexistence test (serial input + framebuffer screenshots)
@@ -230,7 +274,7 @@ make flash APP=pico-e32-fake08 BOARD=makerfabs-ili9488-r1 PORT=/dev/ttyUSB0 DEFS
   camera framing/glare/mirror ambiguity — and it now works on both boards. The camera adds nothing this change
   depends on (no new display code); physical output was confirmed by eye.</p>
 
-  <h2 id="s7">7. Sources</h2>
+  <h2 id="s8">8. Sources</h2>
   <ul>
     <li><b>P4↔C6 SDIO pin map + esp-hosted wiring:</b> GustavoH-Smart/esp32p4 (<code>README_WIFI</code>), the CNX
       Software P4+C6 writeup, buccaneer-jak/JC4880P443C-…RS232 (P4↔C6 UART, C6 reset GPIO54, C6 boot IO9, JP1).

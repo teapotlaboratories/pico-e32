@@ -10,14 +10,14 @@ if(target STREQUAL "esp32p4")
     idf_component_register(
         SRCS "wifi_manager.c"
         INCLUDE_DIRS "include"
-        REQUIRES esp_wifi esp_wifi_remote esp_hosted esp_netif esp_event nvs_flash
+        REQUIRES esp_wifi esp_wifi_remote esp_hosted esp_netif esp_event nvs_flash esp_timer
     )
     message(STATUS "wifi: esp_wifi_remote -> ESP32-C6 over esp-hosted (${target})")
 else()
     idf_component_register(
         SRCS "wifi_manager.c"
         INCLUDE_DIRS "include"
-        REQUIRES esp_wifi esp_netif esp_event nvs_flash
+        REQUIRES esp_wifi esp_netif esp_event nvs_flash esp_timer
     )
     message(STATUS "wifi: native esp_wifi STA (${target})")
 endif()

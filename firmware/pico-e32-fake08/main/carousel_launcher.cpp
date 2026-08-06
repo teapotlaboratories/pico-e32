@@ -810,7 +810,13 @@ static void run_wifi_scan_connect(void) {
 }
 
 static void run_wifi(void) {
-    wifi_mgr_init();   /* idempotent — also done at boot; safe if the boot path hasn't finished */
+    /* Idempotent and thread-safe: the boot task may still be mid-bring-up, in which case this blocks until it
+     * finishes rather than racing it. On the P4 that can be a couple of seconds if the menu is opened early. */
+    esp_err_t werr = wifi_mgr_init();
+    if (werr != ESP_OK) {                 /* no radio (P4: the C6 link never came up) — say so, don't pretend */
+        wifi_msg("WIFI", "RADIO UNAVAILABLE", s_missing, true);
+        return;
+    }
     const int HS = s_info_scale + 1, VS = s_info_scale;
     int sel = 0;
     uint8_t prev = input_poll();   /* seed with held buttons so a press carried in from the previous screen doesn't re-fire */
@@ -851,8 +857,18 @@ static void run_wifi(void) {
 }
 
 /* One-shot boot task: reconnect to saved credentials without blocking the launcher. Self-deletes when done. */
+/* Radio bring-up + reconnect, entirely off the boot path. On the P4 wifi_mgr_init() blocks for ~2.3 s doing
+ * the esp-hosted handshake with the C6 (SDIO reset, card init, identify slave); doing that inline would delay
+ * the menu appearing by the same amount, on every boot, for a feature most sessions never touch. It is
+ * idempotent, so Settings->WIFI can call it again and will simply join whatever this task already finished. */
 static void wifi_autoconnect_task(void *arg) {
     (void)arg;
+    esp_err_t err = wifi_mgr_init();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "wifi init failed (%s) — WiFi menu will report no radio", esp_err_to_name(err));
+        vTaskDelete(NULL);
+        return;
+    }
     wifi_mgr_autoconnect(15000);
     vTaskDelete(NULL);
 }
@@ -1009,9 +1025,7 @@ std::string carousel_launcher_run(Host *host, const std::string &start_dir) {
     apply_accent();
 
 #ifdef BOARD_HAS_WIFI
-    /* Bring the radio up now (fast) and reconnect to saved credentials off-thread, so a slow join never blocks
-     * boot. wifi_mgr_init() is idempotent, so Settings->WiFi can also call it without racing this. */
-    wifi_mgr_init();
+    /* Bring the radio up AND reconnect off-thread: neither the C6 handshake nor a slow join may delay the menu. */
     xTaskCreate(wifi_autoconnect_task, "wifi_ac", 4096, NULL, 4, NULL);
 #endif
 
