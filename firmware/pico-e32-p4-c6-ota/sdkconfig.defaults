@@ -1,0 +1,14 @@
+# ESP-Hosted host-performs-slave-OTA, targeted at the Guition JC4880P443C's ESP32-C6 (SDIO). Upgrades the
+# factory C6 slave firmware (2.3.0) to match the host esp_hosted (2.12.x), fixing the version mismatch that
+# stalls the esp-hosted handshake in the full fake-08 build. Source: espressif/esp-hosted
+# examples/host_performs_slave_ota. SDIO pins are esp_hosted's P4 defaults, which match this board (see board.h).
+# Target/PSRAM/flash come from the guition board sdkconfig.defaults (layered first by the make wrapper).
+CONFIG_ESP_WIFI_REMOTE_ENABLED=y
+CONFIG_ESP_HOSTED_ENABLED=y
+CONFIG_ESP_WIFI_REMOTE_LIBRARY_HOSTED=y
+CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE=y
+CONFIG_ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ=40000
+CONFIG_OTA_METHOD_LITTLEFS=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"

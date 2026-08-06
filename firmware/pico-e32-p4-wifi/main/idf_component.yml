@@ -1,0 +1,6 @@
+## Managed deps for the P4+C6 WiFi probe. esp_wifi_remote re-exposes the esp_wifi API but forwards it over
+## esp-hosted (SDIO) to the ESP32-C6 companion, which must run esp-hosted slave firmware.
+dependencies:
+  idf: ">=5.4"
+  espressif/esp_wifi_remote: "*"
+  espressif/esp_hosted: "*"
