@@ -182,6 +182,11 @@ extern "C" void app_main(void) {
     if (board_sd_config(&sdcfg)) {               /* board fills host / pins / owns_bus */
         sd_ret = sdcard_spi_mount(&sdcfg);
     }
+#elif BOARD_HAS_SDMMC
+    /* Native SDMMC boards (the P4) own the whole mount behind board_sd_mount — SPI's config/mount seam doesn't
+     * apply. Same non-fatal contract: non-ESP_OK just means "run the flash cart". The launcher hands this host
+     * over to the radio for the duration of a WiFi session (board_sd_unmount) and remounts after — see WC-6. */
+    sd_ret = board_sd_mount(SD_MOUNT_POINT);
 #endif
 
     /* fake-08 boot sequence (mirrors source/main.cpp:39-51). Pass the board's panel size so the host

@@ -37,6 +37,7 @@ static const char *TAG = "carousel";
  * Set once in carousel_launcher_run. See boards/<board>/board.{h,cpp}. */
 static int s_gx, s_gw;          /* game column (x, width) — content confined here to match the game footprint */
 static int s_tw, s_th, s_ty;    /* centre cover thumbnail size + top */
+static std::string s_sd_mount;  /* where the SD is mounted (from main) — see run_wifi / WC-6 */
 static int s_sidew, s_crumb_y;  /* side peek width, breadcrumb top */
 static int s_title_y, s_title_scale, s_body_y, s_body_dy, s_body_scale, s_info_scale;   /* main-menu / settings layout (per board) */
 #define SIDE_DIM 120           /* /256 brightness for the two side peeks */
@@ -814,7 +815,17 @@ static void run_wifi(void) {
      * drop it on the way out, which tears the stack (and, on the P4, the C6) back down. The bring-up is blocking
      * — ~2.3 s on the P4 for the esp-hosted handshake — so tell the user what the wait is. */
     wifi_msg("WIFI", "STARTING RADIO...", s_dim, false);
-    if (wifi_mgr_acquire() != ESP_OK) {    /* no radio (P4: the C6 link never came up) — say so, don't pretend */
+#ifdef BOARD_HAS_SDMMC
+    /* WC-6: this board's SD and its C6 radio share one SDMMC host, so the SD has to give it up while the radio
+     * is in use. Safe here because nothing in this screen touches storage, and the launcher holds no open file
+     * handles (cover art is decoded into PSRAM at browse time, not streamed). Remounted on the way out. */
+    bool sd_was_up = (board_sd_unmount(s_sd_mount.c_str()) == ESP_OK);
+#endif
+    esp_err_t werr = wifi_mgr_acquire();
+#ifdef BOARD_HAS_SDMMC
+    if (werr != ESP_OK && sd_was_up) board_sd_mount(s_sd_mount.c_str());   /* radio failed — give the SD back */
+#endif
+    if (werr != ESP_OK) {                  /* no radio (P4: the C6 link never came up) — say so, don't pretend */
         wifi_msg("WIFI", "RADIO UNAVAILABLE", s_missing, true);
         return;
     }
@@ -849,7 +860,13 @@ static void run_wifi(void) {
 #ifdef FB_DUMP
             if (p & INPUT_PAUSE) carousel_fb_dump();
 #endif
-            if (p & INPUT_X) { wifi_mgr_release(); return; }   /* last reference out => radio powers down */
+            if (p & INPUT_X) {
+                wifi_mgr_release();                   /* last reference out => radio powers down */
+#ifdef BOARD_HAS_SDMMC
+                if (sd_was_up) board_sd_mount(s_sd_mount.c_str());   /* take the SDMMC host back for the SD */
+#endif
+                return;
+            }
             if (p & (INPUT_DOWN | INPUT_UP)) { sel ^= 1; break; }
             if (p & INPUT_O) {
                 if (sel == 0) run_wifi_scan_connect();
@@ -987,6 +1004,7 @@ static void run_about(void) {
 }
 
 std::string carousel_launcher_run(Host *host, const std::string &start_dir) {
+    s_sd_mount = start_dir;   /* WC-6: the WiFi session unmounts/remounts this to hand over the SDMMC host */
     s_W = board_lcd_width();
     s_H = board_lcd_height();
     s_bg       = board_lcd_rgb565(12, 13, 20);

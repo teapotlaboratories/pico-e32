@@ -31,9 +31,10 @@
 #include "driver/i2s_std.h"      /* ES8311 audio: I2S standard TX */
 #include "esp_codec_dev.h"       /* esp_codec_dev (vendored managed component) */
 #include "esp_codec_dev_defaults.h"   /* pulls in es8311_codec.h: es8311_codec_new + ES8311_CODEC_DEFAULT_ADDR */
-/* SD is driven over SPI (sdcard_spi.h, pulled via board.h) so the SDMMC host stays free for the on-board
- * ESP32-C6 radio (esp-hosted SDIO) — see board.h. The card's 3.3V rail is still powered from the on-chip LDO
- * VO4 via esp_ldo_regulator.h (already included above). */
+#include "driver/sdmmc_host.h"   /* SDMMC host (slot 0, 4-bit) for the TF/microSD slot */
+#include "sdmmc_cmd.h"           /* sdmmc_card_t */
+#include "esp_vfs_fat.h"         /* esp_vfs_fat_sdmmc_mount / esp_vfs_fat_sdcard_unmount */
+#include "sd_pwr_ctrl_by_on_chip_ldo.h"  /* the P4 powers the SD 3.3V rail from an on-chip LDO (VO4) */
 
 static const char *TAG = "board.p4";
 
@@ -633,20 +634,50 @@ extern "C" void board_audio_write(const int16_t *stereo, size_t frames) {
     esp_codec_dev_write(s_codec, (void *)stereo, frames * 4);
 }
 
-/* --- TF/microSD over SPI (BOARD_HAS_SD, the sdcard_spi seam). Driven over SPI on the TF-slot pins so the P4
- * SDMMC host stays free for the on-board ESP32-C6 (esp-hosted WiFi/SDIO) — the SD and the C6 cannot both init
- * that single shared host, so the SD moves to SPI (see board.h). Same JC4880P443C TF pins as the SDMMC wiring,
- * remapped to SPI mode: CLK->SCLK, CMD->MOSI, DAT0->MISO, DAT3->CS; DAT1/DAT2 (40/41) are unused in SPI mode. */
-#define PIN_SD_SCLK GPIO_NUM_43   /* TF CLK  */
-#define PIN_SD_MOSI GPIO_NUM_44   /* TF CMD  */
-#define PIN_SD_MISO GPIO_NUM_39   /* TF DAT0 */
-#define PIN_SD_CS   GPIO_NUM_42   /* TF DAT3 (chip-select in SPI mode) */
+/* --- TF/microSD over the ESP32-P4 SDMMC peripheral (slot 0, 4-bit). --- */
+/* The P4 routes SDMMC through the GPIO matrix, so the slot pins are set explicitly (not fixed IO_MUX).
+ * These are the JC4880P443C TF-slot pins: CLK43 CMD44 D0..D3=39..42. The card supplies its own pull-ups on
+ * a populated board; SDMMC_SLOT_FLAG_INTERNAL_PULLUP is a belt-and-suspenders for cards/wiring that don't. */
+#define PIN_SD_CLK  GPIO_NUM_43
+#define PIN_SD_CMD  GPIO_NUM_44
+#define PIN_SD_D0   GPIO_NUM_39
+#define PIN_SD_D1   GPIO_NUM_40
+#define PIN_SD_D2   GPIO_NUM_41
+#define PIN_SD_D3   GPIO_NUM_42
 
-/* The card's 3.3V rail is fed by the P4 on-chip LDO channel VO4, which must be powered before any command
- * reaches the card — required in SPI mode too, not just SDMMC. Channel 4 + the TF pin map are from
- * giltal/RetroESP32-P4 (components/odroid/odroid_sdcard.c), the same reference that gave the ES8311 PA-enable. */
+/* CRITICAL for the P4: the SD card's 3.3V rail is NOT always-on — it's fed by the ESP32-P4's on-chip LDO
+ * channel VO4, which must be brought up (as host.pwr_ctrl_handle) BEFORE mounting. Without it the card is
+ * unpowered and every init command (CMD0/CMD8/ACMD41) times out (ESP_ERR_TIMEOUT / send_op_cond 0x107) even
+ * though the pins are correct. Channel 4 + the pin map (43/44/39-42) are from giltal/RetroESP32-P4
+ * (components/odroid/odroid_sdcard.c), the same reference that gave us the ES8311 PA-enable. */
 #define SD_LDO_CHAN_ID 4
-static esp_ldo_channel_handle_t s_sd_ldo = NULL;
+
+static sdmmc_card_t       *s_sd_card = nullptr;
+static sd_pwr_ctrl_handle_t s_sd_pwr = nullptr;
+
+static esp_err_t sd_try_mount(const char *mount_point, int width, sd_pwr_ctrl_handle_t pwr) {
+    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+    host.slot = SDMMC_HOST_SLOT_0;
+    host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;   /* matches the RetroESP32-P4 reference */
+    host.pwr_ctrl_handle = pwr;                 /* the on-chip LDO that powers the card's rail */
+
+    sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
+    slot.width = width;                 /* 4 = D0-D3; 1 = D0 only (fewer lines that must be good) */
+    slot.clk = PIN_SD_CLK;
+    slot.cmd = PIN_SD_CMD;
+    slot.d0  = PIN_SD_D0;
+    slot.d1  = PIN_SD_D1;
+    slot.d2  = PIN_SD_D2;
+    slot.d3  = PIN_SD_D3;
+    slot.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;   /* this board has no external CMD/DAT pull-ups */
+
+    esp_vfs_fat_sdmmc_mount_config_t mcfg = {};
+    mcfg.format_if_mount_failed = false;   /* never reformat the user's card */
+    mcfg.max_files              = 5;
+    mcfg.allocation_unit_size   = 16 * 1024;
+
+    return esp_vfs_fat_sdmmc_mount(mount_point, &host, &slot, &mcfg, &s_sd_card);
+}
 
 /* 480x800 panel; the fake-08 host runs the game at 128*3 = 384, centred (x=48). Thumbnail is a portrait
  * cover tile that sits in the top region above the deck with room for the breadcrumb + position bar. */
@@ -659,28 +690,63 @@ extern "C" void board_carousel_layout(board_carousel_layout_t *out) {
     out->info_scale = 3;   /* big MIPI panel: scale-3 Settings/About body text (scale 2 read too small) */
 }
 
-/* Fill this board's SD-over-SPI wiring and bring up the card's power rail. The app then runs sdcard_spi_mount()
- * with these fields (same seam as the S3). The on-chip LDO VO4 must power the card before any SPI command, so
- * acquire it here (idempotent); the DPHY uses a different LDO channel (3), so there's no clash. */
-extern "C" bool board_sd_config(sdcard_spi_config_t *out) {
-    if (!s_sd_ldo) {
-        esp_ldo_channel_config_t ldo = {};
-        ldo.chan_id    = SD_LDO_CHAN_ID;
-        ldo.voltage_mv = 3300;
-        esp_err_t lerr = esp_ldo_acquire_channel(&ldo, &s_sd_ldo);
+extern "C" esp_err_t board_sd_mount(const char *mount_point) {
+    if (s_sd_card) return ESP_ERR_INVALID_STATE;   /* already mounted */
+
+    /* Power the SD rail via the on-chip LDO (VO4, 3.3V) — REQUIRED before any SDMMC command reaches the card. */
+    if (!s_sd_pwr) {
+        sd_pwr_ctrl_ldo_config_t ldo = {};
+        ldo.ldo_chan_id = SD_LDO_CHAN_ID;
+        esp_err_t lerr = sd_pwr_ctrl_new_on_chip_ldo(&ldo, &s_sd_pwr);
         if (lerr != ESP_OK) {
-            ESP_LOGW(TAG, "SD LDO (VO%d) acquire failed (%s) — card unpowered, mount will fail",
+            ESP_LOGW(TAG, "SD LDO (VO%d) init failed (%s) — SD unpowered, mount will fail",
                      SD_LDO_CHAN_ID, esp_err_to_name(lerr));
-            s_sd_ldo = NULL;
+            s_sd_pwr = nullptr;
         }
     }
-    out->host     = SPI2_HOST;
-    out->pin_sclk = PIN_SD_SCLK;
-    out->pin_mosi = PIN_SD_MOSI;
-    out->pin_miso = PIN_SD_MISO;
-    out->pin_cs   = PIN_SD_CS;
-    out->owns_bus = true;   /* SD owns SPI2 exclusively on this board (the SDMMC host is left free for the C6) */
-    ESP_LOGI(TAG, "SD over SPI2: SCLK%d MOSI%d MISO%d CS%d, rail on LDO VO%d",
-             PIN_SD_SCLK, PIN_SD_MOSI, PIN_SD_MISO, PIN_SD_CS, SD_LDO_CHAN_ID);
-    return true;
+
+    /* Try 4-bit first (the reference config), then 1-bit as a fallback (a flaky D1-D3 line can time out 4-bit
+     * init while 1-bit — CLK/CMD/D0 only — still comes up). Power-cycle the LDO before the 1-bit retry. */
+    int width = 4;
+    esp_err_t err = sd_try_mount(mount_point, 4, s_sd_pwr);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "SD 4-bit mount failed (%s); power-cycling LDO + retrying 1-bit", esp_err_to_name(err));
+        s_sd_card = nullptr;
+        if (s_sd_pwr) {   /* power-cycle the card, like the reference does between attempts */
+            sd_pwr_ctrl_del_on_chip_ldo(s_sd_pwr);
+            s_sd_pwr = nullptr;
+            vTaskDelay(pdMS_TO_TICKS(300));
+            sd_pwr_ctrl_ldo_config_t ldo = {};
+            ldo.ldo_chan_id = SD_LDO_CHAN_ID;
+            if (sd_pwr_ctrl_new_on_chip_ldo(&ldo, &s_sd_pwr) != ESP_OK) s_sd_pwr = nullptr;
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+        width = 1;
+        err = sd_try_mount(mount_point, 1, s_sd_pwr);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "SD mount failed (%s) — no card, card not seated, or wiring/format issue",
+                 esp_err_to_name(err));
+        s_sd_card = nullptr;
+        return err;
+    }
+    ESP_LOGI(TAG, "SD mounted at %s (%lluMB, %d-bit, CLK%d CMD%d D0-3=%d/%d/%d/%d, LDO VO%d)",
+             mount_point, ((uint64_t)s_sd_card->csd.capacity) * s_sd_card->csd.sector_size / (1024 * 1024),
+             width, PIN_SD_CLK, PIN_SD_CMD, PIN_SD_D0, PIN_SD_D1, PIN_SD_D2, PIN_SD_D3, SD_LDO_CHAN_ID);
+    return ESP_OK;
+}
+
+/* Release the card AND the SDMMC host, so esp-hosted can claim the host for the ESP32-C6 (WC-6). The launcher
+ * calls this around a WiFi session; the host is handed back by board_sd_mount() afterwards.
+ *
+ * Do NOT add an sdmmc_host_deinit() here. esp_vfs_fat_sdcard_unmount() already deinitialises the host and frees
+ * the card (IDF components/fatfs/vfs/vfs_fat_sdmmc.c: unmount_card_core -> call_host_deinit + free); calling it
+ * again is a double-deinit that panics the board into a boot loop. The LDO VO4 rail is deliberately left up —
+ * it powers the card itself, is needed again on remount, and takes ~300 ms to settle if torn down. */
+extern "C" esp_err_t board_sd_unmount(const char *mount_point) {
+    if (!s_sd_card) return ESP_ERR_INVALID_STATE;
+    esp_err_t err = esp_vfs_fat_sdcard_unmount(mount_point, s_sd_card);
+    s_sd_card = nullptr;
+    ESP_LOGI(TAG, "SD unmounted, SDMMC host released -> %s", esp_err_to_name(err));
+    return err;
 }

@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P4 SD back on SDMMC — host handed to the radio — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8;
+        --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  :root[data-theme="light"]{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;--ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  :root[data-theme="dark"]{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;--border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)} .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;font-family:var(--mono)}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:9px;padding:.9rem 1.05rem;overflow-x:auto;font-size:.82rem;line-height:1.5;font-family:var(--mono)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  .nullres{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--warn);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left;vertical-align:top}
+  th{background:var(--codebg);font-family:var(--mono);font-size:.82rem}
+  td.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .bad{color:var(--bad);font-weight:600} .ok{color:var(--ok);font-weight:600} .warn{color:var(--warn);font-weight:600}
+  .diag{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.3rem;margin:1.3rem 0}
+  .diag h3{margin:.1rem 0 .4rem;font-size:.95rem}
+  .diag .sub{color:var(--muted);font-size:.82rem;margin:0 0 1rem}
+  .legend{font-size:.78rem;color:var(--muted);margin-top:.7rem}
+  .foot{margin-top:2.6rem;padding-top:1rem;border-top:1px solid var(--border);color:var(--muted);font-size:.85rem}
+  svg{max-width:100%;height:auto;display:block}
+  .goal{display:grid;grid-template-columns:auto 1fr;gap:.6rem 1rem;align-items:start;margin:1rem 0}
+  .pill{font:600 .72rem/1.6 var(--mono);padding:.05rem .55rem;border-radius:999px;white-space:nowrap;text-align:center}
+  .p-no{background:rgba(192,57,43,.14);color:var(--bad)}
+  .p-yes{background:rgba(26,127,75,.14);color:var(--ok)}
+  .p-part{background:rgba(168,99,0,.14);color:var(--warn)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="back"><a href="index.html">← worklog index</a></p>
+  <h1>P4 SD back on SDMMC · host handed to the radio on demand</h1>
+  <p class="date">2026-08-06 · <code>WC-6</code> step 1 — recover the throughput the SPI move cost, now that the radio is on-demand</p>
+
+  <div class="tldr">
+    Cover-art load <b class="ok">64.0 → 39.4 ms median, a 38% cut</b>. The P4's single SDMMC host is now
+    <b>handed back and forth</b>: the SD owns it while browsing and playing, and gives it up for the duration of a
+    WiFi session. Verified end to end in the launcher, including that the card is fully usable after the remount
+    (44 ms). <b>This is the loading-time win that the on-demand radio work did not deliver</b> — that change moved
+    nothing, but it was the precondition for this one.
+  </div>
+
+  <nav aria-label="Contents" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:.85rem 1.1rem;margin:1.4rem 0">
+    <div style="font:600 .74rem/1 var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:.55rem">On this page</div>
+    <ol style="margin:0;padding-left:1.2rem;columns:2;column-gap:2rem;font-size:.92rem">
+      <li><a href="#s1">Why the SD can have it back</a></li>
+      <li><a href="#s2">Measurements</a></li>
+      <li><a href="#s3">The trap: double-deinit</a></li>
+      <li><a href="#s4">Shape of the change</a></li>
+      <li><a href="#s5">Commands · board state</a></li>
+    </ol>
+  </nav>
+
+  <div class="diag">
+    <h3>Who owns the SDMMC host</h3>
+    <p class="sub">One host, two claimants. Ownership moves; it is never shared.</p>
+    <svg viewBox="0 0 840 210" role="img" aria-label="SDMMC host ownership moving between the SD card and the C6 radio">
+      <defs><marker id="a3" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--line)"/></marker></defs>
+      <style>
+        .bx{fill:var(--surface);stroke:var(--border);stroke-width:1.5}
+        .l{font:600 12px var(--mono);fill:var(--fg)} .s{font:10.5px var(--mono);fill:var(--muted)}
+        .w{stroke:var(--line);stroke-width:1.6;fill:none;marker-end:url(#a3)}
+        .sd{fill:rgba(26,127,75,.16);stroke:var(--ok);stroke-width:1.4}
+        .rf{fill:rgba(53,106,212,.16);stroke:var(--accent);stroke-width:1.4}
+      </style>
+      <text class="s" x="20" y="26">SDMMC host owner over a session</text>
+      <rect class="sd" x="20" y="38" width="300" height="34" rx="7"/>
+      <text class="l" x="170" y="60" text-anchor="middle">SD card (4-bit, 10.2 MB/s)</text>
+      <rect class="rf" x="320" y="38" width="200" height="34" rx="7"/>
+      <text class="l" x="420" y="60" text-anchor="middle">ESP32-C6 radio</text>
+      <rect class="sd" x="520" y="38" width="300" height="34" rx="7"/>
+      <text class="l" x="670" y="60" text-anchor="middle">SD card</text>
+
+      <path class="w" d="M320 98 L320 76"/>
+      <text class="s" x="326" y="110">unmount → host released (entering WIFI)</text>
+      <path class="w" d="M520 98 L520 76"/>
+      <text class="s" x="410" y="128">remount, 44 ms (leaving WIFI)</text>
+
+      <rect class="bx" x="20" y="146" width="390" height="52" rx="9"/>
+      <text class="l" x="34" y="168">cover load</text>
+      <text class="s" x="34" y="186">SPI 64.0 ms  →  SDMMC 39.4 ms  (−38%)</text>
+      <rect class="bx" x="430" y="146" width="390" height="52" rx="9"/>
+      <text class="l" x="444" y="168">why: the read, not the decode</text>
+      <text class="s" x="444" y="186">read 26.3 → 3.6 ms · decode ~29 ms unchanged</text>
+    </svg>
+    <p class="legend">Step 2 (<code>WC-6</code>) adds a third state — SD on SPI <i>while</i> the C6 holds the host — for downloads that need both at once.</p>
+  </div>
+
+  <h2 id="s1">1. Why the SD can have the host back</h2>
+  <p>The P4 has one SDMMC host: slot 0 is the TF card, slot 1 is the on-board C6. They cannot be initialised at the
+  same time, which is why the SD went to SPI — with an always-on radio there was no other option. Since the radio
+  became on-demand it is off for the overwhelming majority of the time, so nothing wants slot 1.</p>
+  <p>The open question was whether the host can be <i>handed over</i> rather than claimed once. It can — the original
+  finding was only about simultaneous init:</p>
+  <pre>board.p4: SD mounted at /sdcard (29820MB, 4-bit, CLK43 CMD44 D0-3=39/40/41/42, LDO VO4)
+board.p4: SD unmounted, SDMMC host released -> ESP_OK        <span style="color:var(--muted)">&lt;- entering Settings-&gt;WIFI</span>
+transport: Identified slave [esp32c6]
+wifi: radio up (internal heap 236615, tasks 15)
+wifi: radio down (internal heap 362255, tasks 9)             <span style="color:var(--muted)">&lt;- leaving the screen</span>
+board.p4: SD mounted at /sdcard (29820MB, 4-bit, ...)        <span style="color:var(--ok)">&lt;- 44 ms later</span>
+carousel: games: 19 entries in /sdcard                       <span style="color:var(--ok)">&lt;- card fully usable again</span>
+carousel: cd /sdcard/[Action-Adventure] (402 entries)</pre>
+
+  <h2 id="s2">2. Measurements</h2>
+  <p>Cover-art load (read + PNG decode), same folder and method, scrolling to force uncached loads:</p>
+  <table>
+    <tr><th>SD bus</th><th>n</th><th>min</th><th>median</th><th>mean</th><th>max</th></tr>
+    <tr><td><b>SDMMC 4-bit @40 MHz</b> (now)</td><td class="n">15</td><td class="n">31.6</td><td class="n"><b class="ok">39.4</b></td><td class="n">38.5</td><td class="n">45.9 ms</td></tr>
+    <tr><td>SPI 1-bit @20 MHz (before)</td><td class="n">10</td><td class="n">49.9</td><td class="n"><b>64.0</b></td><td class="n">66.2</td><td class="n">82.4 ms</td></tr>
+  </table>
+  <p>The mechanism, from the read/decode split measured separately on a ~38 KB average cover:</p>
+  <table>
+    <tr><th></th><th>read</th><th>throughput</th><th>decode</th></tr>
+    <tr><td>SDMMC 4-bit</td><td class="n"><b class="ok">3.6 ms</b></td><td class="n"><b>10.20 MB/s</b></td><td class="n">28.9 ms</td></tr>
+    <tr><td>SPI 20 MHz</td><td class="n">26.3 ms</td><td class="n">1.43 MB/s</td><td class="n">29.1 ms</td></tr>
+  </table>
+  <p>Read is <b>7.1× faster</b>; decode is unchanged and is now ~75% of what remains. Further gains have to come from
+  the decoder — <b>the bus is no longer the bottleneck</b>.</p>
+
+  <h2 id="s3">3. The trap: do not deinit the host yourself</h2>
+  <p>The first unmount added an explicit <code>sdmmc_host_deinit()</code> after the VFS unmount. That
+  <b class="bad">panics the board into a boot loop</b> — <code>Guru Meditation Error</code>, <code>MCAUSE 0x1f</code>,
+  immediately after the unmount log. Cause: <code>esp_vfs_fat_sdcard_unmount()</code> <b>already</b> releases the host
+  and frees the card (IDF <code>vfs_fat_sdmmc.c</code>, <code>unmount_card_core()</code>):</p>
+  <pre>if (pdrv_num == 1) {
+    call_host_deinit(&amp;card-&gt;host);
+    free(card);
+}</pre>
+  <p>So the explicit call is a double-deinit through freed state. Unmount, and nothing else — the comment on
+  <code>board_sd_unmount()</code> says so, so it doesn't get re-added. Also deliberate: the <b>LDO VO4 rail stays
+  powered</b> across the handover — it powers the card, is needed again on remount, and tearing it down costs ~300 ms
+  of settling.</p>
+
+  <h2 id="s4">4. Shape of the change</h2>
+  <ul>
+    <li><code>board.{h,cpp}</code> — back to <code>BOARD_HAS_SDMMC</code> + <code>board_sd_mount()</code>, plus a new
+      <code>board_sd_unmount()</code> that releases the host. The SPI seam is gone from this board; step 2 restores it
+      as the <i>network-session</i> mode.</li>
+    <li><code>main.cpp</code> — the <code>#elif BOARD_HAS_SDMMC</code> mount branch is back.</li>
+    <li><code>carousel_launcher.cpp</code> — <code>run_wifi()</code> unmounts before <code>wifi_mgr_acquire()</code>
+      and remounts after <code>wifi_mgr_release()</code>, including on the acquire-failure path so a dead radio doesn't
+      cost the card.</li>
+  </ul>
+  <p><b>Sequencing lives in the app, not the wifi component.</b> <code>wifi_manager</code> still knows nothing about
+  storage and the board owns the driver; the launcher is the only place that knows both. Safe because nothing on the
+  WiFi screen touches storage and the launcher holds no open file handles — cover art is decoded into PSRAM at browse
+  time, not streamed. <b>The S3 is untouched</b> — native radio, no shared host, still SPI.</p>
+
+  <h2 id="s5">5. Commands · board state</h2>
+  <pre>make flash APP=pico-e32-fake08 BOARD=guition-jc4880p443c PORT=/dev/ttyACM0 \
+     DEFS="-D LAUNCHER=1 -D INPUT_BACKEND=serial"     # menu-driving test build
+make flash APP=pico-e32-fake08 BOARD=guition-jc4880p443c PORT=/dev/ttyACM0 DEFS="-D LAUNCHER=1"   # shipped</pre>
+  <p>Handover test: boot, <code>d o d</code> to Settings → WIFI, <code>o</code> (unmount + radio up), <code>x</code>
+  (radio down + remount), then <code>x u o</code> back into Games to prove the card still reads. Both boards left on
+  the shipped touch build.</p>
+
+  <p class="foot">pico-e32 worklog · 2026-08-06 · source: <code>docs/worklog/2026-08-06-p4-sd-sdmmc-handover.md</code> ·
+  backlog <code>WC-6</code> in <code>docs/pico-e32-todo.md</code></p>
+</div>
+</body>
+</html>
