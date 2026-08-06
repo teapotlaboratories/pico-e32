@@ -17,7 +17,8 @@ teardown, on both boards**, not just an RF stop.
 - **The up/down cycle is repeatable and doesn't leak** — the main risk going in was that `esp_hosted_deinit()`
   wouldn't allow a later re-init. It does. Two full cycles on each board, second bring-up within 48 bytes (P4) of
   the first.
-- **Memory back when idle: 126.5 KB (P4), 38.0 KB (S3).**
+- **Internal RAM back when idle: 125.7 KB (P4), 38.0 KB (S3)** — and the task count drops 15 → 9 on the P4
+  (6 tasks, including esp-hosted's priority-23 set) and 9 → 8 on the S3, so they are gone rather than idling.
 - **Honest null result: this did NOT improve loading time.** Cover-art load is unchanged at a 64.0 ms median with
   the radio off vs on. The idle radio was not stealing measurable throughput from the SD path. Goal 1 is not met
   by this change; goals 2 and 3 are (see §5 for exactly how far each is substantiated).
@@ -52,23 +53,31 @@ guards a one-shot allocation is reset so the next bring-up starts clean.
 
 ## 3. Measurements
 
-**Radio up/down cycle, P4** (`radio up` / `radio down` log the free heap):
+The `radio up` / `radio down` logs report **internal-RAM** free size and the FreeRTOS task count. Internal RAM
+is the meaningful figure — on the P4 the total heap is PSRAM-dominated (~32 MB), which hides a six-figure delta,
+and internal RAM is what actually runs out. The task count directly answers "did the stack's tasks go away, or
+are they just idle?".
 
-| event | free heap | note |
-|---|---|---|
-| acquire #1 | 32,692,900 | bring-up ~2.27 s (esp-hosted handshake + C6 identify) |
-| release #1 | 32,819,384 | **+126,484 B recovered** |
-| acquire #2 | 32,692,852 | within **48 B** of the first — no leak |
-| release #2 | 32,819,372 | +126,520 B |
+**Radio up/down cycle, P4** (~565 KB internal RAM total):
+
+| event | internal free | tasks | note |
+|---|---|---|---|
+| acquire #1 | 224,555 | 15 | bring-up ~2.27 s (esp-hosted handshake + C6 identify) |
+| release #1 | 350,247 | **9** | **+125,692 B and 6 tasks gone** |
+| acquire #2 | 224,507 | 15 | within **48 B** of the first — no leak |
+| release #2 | 350,235 | 9 | +125,728 B |
 
 **Radio up/down cycle, S3:**
 
-| event | free heap | note |
-|---|---|---|
-| acquire #1 | 1,343,092 | bring-up ~0.13 s; autoconnect joined, IP 192.168.7.228 |
-| release #1 | 1,381,108 | **+38,016 B recovered** |
-| acquire #2 | 1,342,108 | |
-| release #2 | 1,381,092 | down-heap within 16 B of the first cycle |
+| event | internal free | tasks | note |
+|---|---|---|---|
+| acquire #1 | 97,383 | 9 | bring-up ~0.13 s; autoconnect joined, IP 192.168.7.228 |
+| release #1 | 135,403 | **8** | **+38,020 B and 1 task gone** (the wifi driver task) |
+| acquire #2 | 96,403 | 9 | |
+| release #2 | 135,383 | 8 | down-figure within 20 B of the first cycle |
+
+Six tasks on the P4 is esp-hosted's transport/RPC set plus the wifi driver task — the priority-23 residents this
+change was meant to remove. They are gone, not idling.
 
 **Cover-art load on the P4 — the loading-time question**, same folder and method both runs (scroll the carousel
 to force uncached loads):
@@ -101,10 +110,11 @@ Pre-existing, not introduced here, but it lives in this flow.
 - **Battery — improved, by construction, not measured.** On the P4 the C6 is never brought up at boot and is
   unlinked when idle; that is a whole companion chip not running WiFi firmware. No bench power meter here, so
   the magnitude is unquantified — stated as structural, not measured.
-- **Cores for the game — improved structurally, frame time not measured.** esp-hosted's priority-23 tasks and the
-  wifi driver task simply don't exist unless something acquired the radio, and a cart launch forces a teardown.
-  The launcher-side null result above suggests the idle radio's CPU cost was small, so the honest expectation is
-  a small win, not a large one. A gameplay frame-time comparison was not run.
+- **Cores for the game — the residency claim is now measured; the frame-time effect is not.** The task count
+  proves the tasks actually go away (P4 15 → 9, S3 9 → 8), so nothing wifi-related is scheduled during play, and
+  125.7 KB of internal RAM comes back on the P4. What was *not* measured is the resulting gameplay frame time.
+  Given the launcher-side null result above, the honest expectation is a small win, not a large one — the value
+  here is mostly the internal RAM and the removed contention, not a visible fps change.
 
 ## 6. Commands run (reproduce)
 

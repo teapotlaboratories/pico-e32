@@ -57,7 +57,12 @@ esp_err_t wifi_mgr_acquire(void);
 void wifi_mgr_release(void);
 
 /* Force the radio down NOW, whatever the refcount — used when launching a cart: a game never needs the network
- * and must not share the CPU (or, on the P4, the SDIO bus) with it. Safe to call when already down. */
+ * and must not share the CPU (or, on the P4, the SDIO bus) with it. Safe to call when already down.
+ *
+ * NOTE for future consumers: this deliberately ignores outstanding references and does NOT notify their holders.
+ * A long-running user (an OTA or a download) can therefore have the radio pulled out from under it and will see
+ * its next call fail — write those to tolerate that (check wifi_mgr_is_up(), handle an error mid-transfer) rather
+ * than assuming a held reference guarantees the stack stays up. */
 void wifi_mgr_shutdown(void);
 
 /* Is the radio currently up? (Up != connected — see wifi_mgr_status for that.) */
