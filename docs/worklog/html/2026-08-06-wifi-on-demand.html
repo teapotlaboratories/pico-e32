@@ -53,8 +53,9 @@
     <code>wifi_mgr_release()</code> brings it up only for whoever needs it, and the last release tears the stack
     <b>completely</b> down — <code>esp_wifi_deinit</code>, netif destroyed, and on the P4
     <code>esp_hosted_deinit()</code> so the <b>ESP32-C6 stops being linked at all</b>. Launching a cart forces it
-    down regardless. Memory returned when idle: <b class="ok">126.5 KB</b> (P4), <b class="ok">38.0 KB</b> (S3),
-    with no leak across repeated cycles.
+    down regardless. <b>Internal RAM</b> returned when idle: <b class="ok">125.7 KB</b> (P4), <b class="ok">38.0 KB</b> (S3), and the
+    task count drops <b>15 → 9</b> (P4) / <b>9 → 8</b> (S3) — the priority-23 residents are <b>gone, not idling</b>.
+    No leak across repeated cycles.
   </div>
 
   <div class="nullres">
@@ -120,8 +121,8 @@
       <text class="s" x="34" y="218">P4 also: esp_hosted_deinit → C6 unlinked</text>
 
       <rect class="bx" x="430" y="164" width="390" height="60" rx="9"/>
-      <text class="l" x="444" y="186">memory returned while idle</text>
-      <text class="s" x="444" y="204">P4  126,484 B     S3  38,016 B</text>
+      <text class="l" x="444" y="186">internal RAM + tasks returned while idle</text>
+      <text class="s" x="444" y="204">P4  125,692 B, 15→9 tasks    S3  38,020 B, 9→8</text>
       <text class="s" x="444" y="218">re-acquire lands within 48 B — no leak</text>
     </svg>
     <p class="legend">Boot sits entirely in the first OFF block: on the P4 the C6 is never reset and esp-hosted's priority-23 tasks never exist.</p>
@@ -149,22 +150,28 @@ esp_hosted_deinit();                          /* drops the C6 link — the actua
   Everything guarding a one-shot allocation is reset so the next bring-up starts clean.</p>
 
   <h2 id="s3">3. Measurements</h2>
-  <p><b>Up/down cycle, P4</b> — the <code>radio up</code>/<code>radio down</code> logs carry the free heap:</p>
+  <p>The <code>radio up</code>/<code>radio down</code> logs report <b>internal-RAM</b> free size and the FreeRTOS
+  task count. Internal RAM is the figure that matters — the P4's total heap is PSRAM-dominated (~32 MB), which
+  hides a six-figure delta, and internal RAM is what actually runs out. The task count answers "did the tasks go
+  away, or are they just idle?".</p>
+  <p><b>Up/down cycle, P4</b> (~565 KB internal RAM total):</p>
   <table>
-    <tr><th>event</th><th>free heap</th><th>note</th></tr>
-    <tr><td>acquire #1</td><td class="n">32,692,900</td><td>bring-up ~2.27 s (esp-hosted handshake + C6 identify)</td></tr>
-    <tr><td>release #1</td><td class="n">32,819,384</td><td><b class="ok">+126,484 B recovered</b></td></tr>
-    <tr><td>acquire #2</td><td class="n">32,692,852</td><td>within <b>48 B</b> of the first — no leak</td></tr>
-    <tr><td>release #2</td><td class="n">32,819,372</td><td>+126,520 B</td></tr>
+    <tr><th>event</th><th>internal free</th><th>tasks</th><th>note</th></tr>
+    <tr><td>acquire #1</td><td class="n">224,555</td><td class="n">15</td><td>bring-up ~2.27 s (esp-hosted handshake + C6 identify)</td></tr>
+    <tr><td>release #1</td><td class="n">350,247</td><td class="n"><b>9</b></td><td><b class="ok">+125,692 B and 6 tasks gone</b></td></tr>
+    <tr><td>acquire #2</td><td class="n">224,507</td><td class="n">15</td><td>within <b>48 B</b> of the first — no leak</td></tr>
+    <tr><td>release #2</td><td class="n">350,235</td><td class="n">9</td><td>+125,728 B</td></tr>
   </table>
   <p><b>Up/down cycle, S3:</b></p>
   <table>
-    <tr><th>event</th><th>free heap</th><th>note</th></tr>
-    <tr><td>acquire #1</td><td class="n">1,343,092</td><td>bring-up ~0.13 s; autoconnect joined, IP 192.168.7.228</td></tr>
-    <tr><td>release #1</td><td class="n">1,381,108</td><td><b class="ok">+38,016 B recovered</b></td></tr>
-    <tr><td>acquire #2</td><td class="n">1,342,108</td><td></td></tr>
-    <tr><td>release #2</td><td class="n">1,381,092</td><td>down-heap within 16 B of the first cycle</td></tr>
+    <tr><th>event</th><th>internal free</th><th>tasks</th><th>note</th></tr>
+    <tr><td>acquire #1</td><td class="n">97,383</td><td class="n">9</td><td>bring-up ~0.13 s; autoconnect joined, IP 192.168.7.228</td></tr>
+    <tr><td>release #1</td><td class="n">135,403</td><td class="n"><b>8</b></td><td><b class="ok">+38,020 B and 1 task gone</b> (the wifi driver task)</td></tr>
+    <tr><td>acquire #2</td><td class="n">96,403</td><td class="n">9</td><td></td></tr>
+    <tr><td>release #2</td><td class="n">135,383</td><td class="n">8</td><td>down-figure within 20 B of the first cycle</td></tr>
   </table>
+  <p>Six tasks on the P4 is esp-hosted's transport/RPC set plus the wifi driver task — exactly the priority-23
+  residents this change set out to remove.</p>
   <p><b>Cover-art load on the P4 — the loading-time question.</b> Same folder and method both runs (scroll the
   carousel to force uncached loads):</p>
   <table>
@@ -196,10 +203,10 @@ esp_hosted_deinit();                          /* drops the C6 link — the actua
       unlinked when idle: a whole companion chip not running WiFi firmware. No bench power meter here, so the
       magnitude is unquantified — stated as structural, not measured.</div>
     <span class="pill p-part">partly</span>
-    <div><b>Cores for the game</b> — structural, frame time not measured. esp-hosted's priority-23 tasks and the
-      wifi driver task don't exist unless something acquired the radio, and a cart launch forces a teardown. The
-      launcher-side null result suggests the idle radio's CPU cost was small, so the honest expectation is a small
-      win. A gameplay frame-time comparison was not run.</div>
+    <div><b>Cores for the game</b> — residency now <i>measured</i>, frame-time effect not. The task count proves the
+      tasks actually go away (P4 15 → 9, S3 9 → 8), so nothing wifi-related is scheduled during play, and 125.7 KB
+      of internal RAM comes back on the P4. What was not measured is the resulting gameplay frame time; given the
+      launcher null result, expect a small win — the real value is the internal RAM and removed contention.</div>
   </div>
 
   <h2 id="s6">6. Commands · board state</h2>

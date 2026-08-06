@@ -8,7 +8,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "esp_system.h"   /* esp_get_free_heap_size — the up/down logs double as teardown evidence */
+#include "esp_heap_caps.h"   /* internal-RAM free size: the scarce resource, unlike PSRAM-dominated total heap */
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
@@ -43,7 +43,9 @@ static int                s_refs     = 0;        /* live wifi_mgr_acquire() refe
 static volatile bool      s_initing  = false;    /* a bring-up is in flight (see wifi_mgr_bringup) */
 static portMUX_TYPE       s_init_mux = portMUX_INITIALIZER_UNLOCKED;   /* statically init'd: usable before init */
 
-static void retry_timer_cb(void *arg) { (void)arg; esp_wifi_connect(); }
+/* The timer can be dispatched just as a teardown runs (esp_timer_stop does not wait for an in-flight
+ * callback), so re-check before touching the stack. */
+static void retry_timer_cb(void *arg) { (void)arg; if (s_inited) esp_wifi_connect(); }
 
 /* Disconnects mean two different things, so they get two different policies:
  *   - during a wifi_mgr_connect() call: retry a bounded number of times, then report failure, so the menu
@@ -117,7 +119,8 @@ static esp_err_t wifi_mgr_init_once(void) {
     ESP_ERROR_CHECK(esp_wifi_start());
 
     s_inited = true;
-    ESP_LOGI(TAG, "radio up (free heap %u)", (unsigned)esp_get_free_heap_size());
+    ESP_LOGI(TAG, "radio up (internal heap %u, tasks %u)",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), (unsigned)uxTaskGetNumberOfTasks());
     return ESP_OK;
 }
 
@@ -179,7 +182,8 @@ static void wifi_mgr_teardown(void) {
 
     s_inited = false;
     xSemaphoreGive(s_lock);
-    ESP_LOGI(TAG, "radio down (free heap %u)", (unsigned)esp_get_free_heap_size());
+    ESP_LOGI(TAG, "radio down (internal heap %u, tasks %u)",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), (unsigned)uxTaskGetNumberOfTasks());
 }
 
 esp_err_t wifi_mgr_acquire(void) {
@@ -216,6 +220,9 @@ bool wifi_mgr_is_up(void) { return s_inited; }
 int wifi_mgr_scan(wifi_ap_t *out, int max) {
     if (!s_inited || !out || max <= 0) return -1;
     xSemaphoreTake(s_lock, portMAX_DELAY);
+    /* Re-check under the lock: teardown takes this same mutex, so a caller that passed the test above and then
+     * waited here can be resumed on a stack that has since been deinitialised. */
+    if (!s_inited) { xSemaphoreGive(s_lock); return -1; }
 
     int count = -1;
     wifi_scan_config_t sc = { .show_hidden = false };
@@ -252,6 +259,7 @@ esp_err_t wifi_mgr_connect(const char *ssid, const char *pass, int timeout_ms) {
     if (!s_inited || !ssid || !ssid[0]) return ESP_ERR_INVALID_ARG;
 
     xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (!s_inited) { xSemaphoreGive(s_lock); return ESP_ERR_INVALID_STATE; }   /* torn down while we waited */
     esp_err_t ret;
     wifi_config_t wc = { 0 };
     /* memcpy, not strlcpy: an SSID may be exactly 32 bytes and is not NUL-terminated in wifi_config_t, so
