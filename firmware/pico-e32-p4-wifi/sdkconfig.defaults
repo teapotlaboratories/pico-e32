@@ -1,0 +1,7 @@
+# esp-hosted over SDIO to the ESP32-C6 (host side = the P4). Pins are set below to the Guition JC4880P443C
+# wiring (defaults differ). Clock 40 MHz; drop to 20 MHz if SDIO sync is flaky.
+CONFIG_ESP_WIFI_REMOTE_LIBRARY_HOSTED=y
+CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE=y
+CONFIG_ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ=40000
+CONFIG_ESP_HOSTED_SDIO_BUS_WIDTH=4
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
