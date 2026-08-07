@@ -35,7 +35,7 @@ the launcher's WIFI screen in `firmware/pico-e32-fake08/main/carousel_launcher.c
     SDMMC host entirely for the C6. `board_sd_config()` powers the card rail (on-chip LDO VO4) + fills the SPI wiring.
   - Verified: one boot mounts the SD over SPI **and** identifies the C6 (`Identified slave [esp32c6]`, STA up) with the
     launcher rendering. Driver-level connect proven earlier (joined `Tukang Ketoprak`, IP 192.168.7.212).
-- **`WC-4a` — OTA firmware update over WiFi — 🟡 IN PROGRESS (2026-08-06).** Update the handheld from Settings
+- **`WC-4a` — OTA firmware update over WiFi — ✅ DONE, hardware-verified on both boards; MERGED to main 2026-08-06 (pico-e32 `#33`).** Update the handheld from Settings
   instead of a USB cable.
   - **Why now:** the infrastructure already exists — the 16 MB table has `otadata` + two 4 MB app slots
     (`firmware/pico-e32-fake08/partitions.csv`, added in `WC-1`), and the radio is a clean acquire/release away.
