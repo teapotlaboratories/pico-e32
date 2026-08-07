@@ -60,7 +60,18 @@ Verified no `ESP_LOG` string was caught by the sweep.
 `Tukang Ketoprak` renders with `T` and `K` in the accent and the rest white; labels are white; the accent still
 means "selected". Both boards build.
 
-## 5. Board state
+## 5. Follow-up: the capitals colour
+
+Shipped first using the **accent**, which was wrong for two reasons that only became obvious side by side: the
+accent already means *selected row*, and it is **user-configurable** — so capitals changed colour with the theme,
+making case marking a theme decision rather than a property of the text.
+
+Rendered five candidates at actual UI size (accent / caps-bright-rest-dimmed / amber / cyan / caps-bright-rest-
+slightly-dim) and the owner picked **cyan**, now a fixed `s_case` independent of the accent. On the panel it
+separates cleanly from the blue accent — better than the offline render suggested, which is the usual reason to
+check on glass. `case_col()` still falls back to `fg` wherever the colour would be invisible or redundant.
+
+## 6. Board state
 
 P4 on the `FB_DUMP`/serial preview build during capture — **reflash the shipped touch build before calling it
 known-good.** S3 built, not flashed with this change yet.
