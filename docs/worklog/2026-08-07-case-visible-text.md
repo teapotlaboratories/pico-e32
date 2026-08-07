@@ -10,7 +10,8 @@ mixed-case string in the UI rendered uppercase — a mistyped password was indis
 - **Growing the cell to 3×6** gives true descenders but makes every line 20% taller — a re-layout of every screen
   on both boards, for five letters.
 - **The owner's idea beat both:** keep the single set of cap-shaped letterforms as the default and carry case in
-  **colour** — a capital takes the accent. No new glyphs, no ambiguity, no cell change, no re-layout.
+  **colour** — a capital takes a fixed highlight (cyan; §5 covers why not the accent). No new glyphs, no
+  ambiguity, no cell change, no re-layout.
 - **Putting it on the panel immediately found the flaw:** every UI label was an uppercase literal, so the entire
   interface went accent-blue. Fixed by lowercasing **108 display literals**; they render as the same cap shapes,
   unmarked.
@@ -35,9 +36,9 @@ as unverifiable. Drawing it is what caught that.
 
 ## 2. What shipped
 
-Case is carried by colour. `case_col(c, fg, bg)` returns the accent for `A-Z` and `fg` otherwise, and falls back
-to `fg` when the accent would collide with the current background — otherwise a capital on a highlighted row
-(whose background *is* the accent) would vanish. Wired into `draw_text` and the transparent `glyphs_into` used
+Case is carried by colour. `case_col(c, fg, bg)` returns the highlight for `A-Z` and `fg` otherwise, and stands
+down entirely on any non-default background: where a caller inverts a row, fg/bg are a contrasting pair and a
+third fixed colour dropped into it reads worse than either. Wired into `draw_text` and the transparent `glyphs_into` used
 for folder tiles.
 
 `glyph_rows()` still folds for *lookup* — there is one glyph per letter — but case now survives as colour.
@@ -75,3 +76,37 @@ check on glass. `case_col()` still falls back to `fg` wherever the colour would 
 
 P4 on the `FB_DUMP`/serial preview build during capture — **reflash the shipped touch build before calling it
 known-good.** S3 built, not flashed with this change yet.
+
+## 7. Review pass — eight findings, one of them a regression I introduced
+
+**The highlighted-row protection had silently stopped working.** `case_col()` guarded with
+`(s_case == bg || s_case == fg)`, which was correct only while `s_case` *was* the accent — an equality that
+happened to catch inverted rows. Making it a fixed cyan broke that by construction: a fixed colour can never
+equal the accent, so a capital on a selected pill rendered **cyan on accent**, the lowest-contrast text on the
+screen (worst with the green theme). Both the code comment and the `WC-2` entry still described protection the
+code no longer had. Now the highlight stands down whenever `bg != s_bg` — on an inverted row the caller has
+already chosen a contrasting pair, and dropping a third fixed colour into it is never an improvement.
+
+**Two literals escaped the sweep**, and one of them was the most-visited heading in the launcher:
+`"SD CARD"` (the library breadcrumb, built as a `std::string` ternary rather than passed to a draw call) and
+`"OPEN"` (the network-list sub-label, which on a highlighted row also bypassed the deliberate `fg = s_bg`
+contrast choice). The sweep matched *call sites*, so anything assembled before the call was invisible to it —
+worth remembering if this is ever repeated.
+
+**`snprintf`-built strings were never literals at all**, so they were never in scope: `"%uMB FREE"`, `"%uK"` on
+the download and confirm screens, and the board name. Units rendered cyan next to white digits, on the one
+screen where the user is watching a number change.
+
+**`"%dX%d"` coloured a multiplication sign** — `480X800` with the `X` marked as though it were a capital letter.
+Actively misleading rather than merely noisy.
+
+**Folder-tile capitals ignored the dim factor.** `draw_folder_tile` dims its text to ~47% for the side peeks to
+say "not selected", but the highlight substituted full-brightness cyan regardless, punching straight through the
+cue. `glyphs_into()` now takes the highlight colour as a parameter, dimmed by the caller alongside the body text.
+
+Fixed all eight, plus the stale prose here and in the area doc. Nothing was wrong with the control flow — the
+insertion points, the `val_max` clamp, and leaving `KB_LOW`/`KB_UPP` alone all checked out.
+
+**Worth keeping:** two of these (the missed literals, the `snprintf` strings) are the same mistake in different
+clothes — I verified the *mechanism* on the panel and assumed the *sweep* was complete because the screens I
+happened to open looked right. The screens I did not open were the ones still broken.
