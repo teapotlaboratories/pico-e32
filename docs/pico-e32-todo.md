@@ -74,7 +74,7 @@ Detail lives in **[`firmware/pico-e32-wifi-networking.md`](firmware/pico-e32-wif
 | item | what | status |
 |---|---|---|
 | `WC-1` | S3 WiFi foundation — `components/wifi`, scan/connect/persist, on-screen keyboard | ✅ done |
-| `WC-2` | lowercase font glyphs (a typed lowercase password displays uppercase) | open |
+| `WC-2` | case-visible text — solved with colour, not glyphs (capitals take the accent) | ✅ done |
 | `WC-3` | P4 WiFi via the ESP32-C6 (esp-hosted + `esp_wifi_remote`) | ✅ done |
 | `WC-4` | build on the foundation: **OTA** ✅, NTP clock, network cart downloads | `WC-4a` OTA done; `WC-4b` open |
 | `WC-5` | radio off by default, on-demand acquire/release with full teardown | ✅ done |

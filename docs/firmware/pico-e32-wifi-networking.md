@@ -17,7 +17,42 @@ the launcher's WIFI screen in `firmware/pico-e32-fake08/main/carousel_launcher.c
   `WC-3`). Settings → **WIFI** submenu: status, scan the air, deck-driven **on-screen keyboard** for the password,
   connect + persist. `BOARD_HAS_WIFI` gates the menu. OTA-ready 16 MB partition table added. Verified on the S3:
   scan → keyboard → connect → persist → boot auto-reconnect (joined `Tukang Ketoprak`, IP 192.168.7.228).
-- **`WC-2` — lowercase font glyphs.** The PICO-8 font (`pico8_font.h`) is **uppercase-only** (`glyph_rows` upper-cases
+- **`WC-2` — case-visible text — ✅ DONE, hardware-verified (2026-08-07). Resolved by COLOUR, not glyphs.**
+  - **The problem, stated properly.** `glyph_rows()` folds `a-z` to `A-Z`
+    (`carousel_launcher.cpp`: `if (c >= 'a' && c <= 'z') c -= 32;`), so **every mixed-case string in the UI
+    renders uppercase** — not just the password. Confirmed on the panel: an SSID shows as
+    `TUKANG KETOPRAK`, a version as `OTA-TEST-2`. The fold is *intentional and documented* in
+    `assets/pico8_font.h` ("PICO-8 renders lowercase as caps"), so this is a deliberate behaviour change, not
+    a bug fix — PICO-8 itself has no descender lowercase.
+  - **Where it actually hurts:** the WiFi **password field**. You cannot see what you typed, so a mistyped
+    password is indistinguishable from a wrong one. Everywhere else (SSID lists, cart and folder names,
+    version strings) all-caps is legible and arguably on-style.
+  - **The hard constraint:** glyphs are **3 wide × 5 tall** on a shared baseline (row 4), advancing 4 px and
+    6 px per line. **A 5-row cell has no descender row**, so `g j p q y` cannot descend. Real lowercase in
+    this cell means x-height forms (rows 2–4) plus ascenders (rows 0–1) for `b d f h k l t`, and the five
+    descender letters sitting on the baseline — legible, but they will read as small-caps-ish. Growing the
+    cell to 6 rows is the only way to get true descenders, and that changes the height of **every** line of
+    text on every screen.
+  - **Blast radius:** the table is shared with `components/fake08/fps_hud.cpp` (digits only, so additive
+    entries are safe there). The font is a **hand-authored placeholder** carrying no third-party data and is
+    not fake-08's, so editing it raises no 1-to-1 porting concern.
+  - **What was actually built.** Neither of the glyph options. Drawing them settled it: in a 3×5 cell with no
+    descender row, lowercase `a`, `g` and `q` are *the same three rows* — "Tukang" rendered as "Tukana". A font
+    that cannot separate a from g is useless for the password field this exists for. Growing to 3×6 fixed that
+    but cost a 20% height increase on every line, i.e. a re-layout of every screen on both boards.
+    **The owner's idea replaced both:** keep the one set of (cap-shaped) letterforms as the default, and carry
+    case in **colour** — a capital is drawn in the accent. No new glyphs, no ambiguity, no cell-height change,
+    no re-layout.
+  - **The catch, found by putting it on the panel:** every UI label was an uppercase string literal, so the
+    whole interface turned accent-blue. Fixed by rewriting **108 display literals to lowercase** — they render
+    as the same cap shapes, unmarked — leaving the accent to mean "selected row" and "a real capital in data".
+    The keyboard's `KB_LOW`/`KB_UPP` rows are *character data*, not labels, and were deliberately left alone;
+    a pleasant side effect is that shifting to `KB_UPP` now visibly turns the keys accent.
+  - `case_col()` falls back to `fg` whenever the accent would collide with the current background, so capitals
+    stay visible on a highlighted row instead of vanishing into it.
+  - **Verify:** `FB_DUMP` captures of (a) the password field mid-typing showing the actual characters, and
+    (b) the WiFi list against a real mixed-case SSID; plus both boards building, since the font is shared.
+  - **Original note:** The PICO-8 font (`pico8_font.h`) is **uppercase-only** (`glyph_rows` upper-cases
   input), so a typed lowercase WiFi password *displays* as uppercase — it is **stored** with correct case, so the
   join works, but the user can't visually distinguish case. Add lowercase glyphs (a…z) so the password field (and any
   future mixed-case text) reads true. Low priority, isolated to the font table + `glyph_rows`.
