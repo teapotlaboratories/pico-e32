@@ -57,9 +57,9 @@ static uint16_t *s_scratch = nullptr;
 /* The font has ONE set of letterforms (cap-shaped), so case cannot be carried by shape — a 3x5 cell has no
  * descender row, and lowercase drawn without one makes a/g/q identical, which is useless in the password field
  * this exists for. Case is carried by COLOUR instead (WC-2): the shapes are the default, and a capital is drawn
- * in the accent. No cell-height change, so no re-layout.
+ * in a fixed highlight. No cell-height change, so no re-layout.
  *
- * Deliberately NOT the accent. The accent means "selected row" and is user-configurable, so reusing it both
+ * The highlight is deliberately NOT the accent. The accent means "selected row" and is user-configurable, so reusing it both
  * collided with selection and made capitals change colour with the theme — case is a property of the text, not
  * a theme choice. s_case is fixed (see the definition), NOT the accent.
  *
@@ -75,6 +75,7 @@ static inline uint16_t case_col(char c, uint16_t fg, uint16_t bg) {
     if (c < 'A' || c > 'Z')  return fg;
     if (bg == s_accent)      return fg;        /* inverted row: keep the caller's contrasting pair */
     if (fg == s_dim)         return s_case_dim;/* deliberately-dim row: match its weight */
+    if (fg == s_accent)      return fg;        /* caller is already emphasising this value — don't two-tone it */
     if (fg == s_case || fg == bg) return fg;   /* already this colour, or invisible either way */
     return s_case;
 }
@@ -855,7 +856,7 @@ static void run_wifi_scan_connect(void) {
     }
     int sel = 0;
     for (;;) {
-        int pick = wifi_list("networks", "o join   x back", items, subs, n, &sel);
+        int pick = wifi_list("networks", "O join   X back", items, subs, n, &sel);
         if (pick < 0) return;
         char pass[WIFI_PASS_MAXLEN + 1] = { 0 };
         if (!aps[pick].open && !keyboard_input("password", pass, WIFI_PASS_MAXLEN)) continue;
@@ -901,7 +902,7 @@ static void run_wifi(void) {
         board_lcd_fill(s_bg);
         draw_text_centered(s_W / 2, s_crumb_y, "wifi", HS, s_fg, s_bg);
         blit_round_rect(s_W / 2 - 26, s_crumb_y + HS * 8, 52, 3, 1, s_accent);
-        draw_text_centered(s_W / 2, s_crumb_y + HS * 8 + 12, "o select   x back", VS, s_dim, s_bg);
+        draw_text_centered(s_W / 2, s_crumb_y + HS * 8 + 12, "O select   X back", VS, s_dim, s_bg);
         board_draw_touch_deck();
         int y = s_crumb_y + HS * 8 + VS * 8 + 30;
         if (st.connected) {
@@ -1013,7 +1014,7 @@ static void run_update(void) {
     int sel = 0;
     uint8_t prev = input_poll();
     for (;;) {
-        header("o select   x back");
+        header("O select   X back");
         int y = s_crumb_y + HS * 8 + VS * 8 + 30;
         draw_kv(y, "current", cur, VS, VS, s_fg, s_fg);   y += VS * 11;
         y += VS * 10;
@@ -1068,7 +1069,7 @@ static void run_update(void) {
         }
 
         /* Offer it, with the version actually on the other end — never install without showing what. */
-        header("o install   x cancel");
+        header("O install   X cancel");
         y = s_crumb_y + HS * 8 + VS * 8 + 30;
         /* These strings come from the MANIFEST, i.e. off the network, and draw_kv right-aligns without
          * clipping: a long enough value overruns its label and a longer one produces a negative x that goes
@@ -1143,7 +1144,7 @@ static void run_settings(void) {
         board_lcd_fill(s_bg);
         draw_text_centered(s_W / 2, s_crumb_y, "settings", HS, s_fg, s_bg);
         blit_round_rect(s_W / 2 - 26, s_crumb_y + HS * 8, 52, 3, 1, s_accent);
-        draw_text_centered(s_W / 2, s_crumb_y + HS * 8 + 12, "l/r adjust  o open  x back", VS, s_dim, s_bg);
+        draw_text_centered(s_W / 2, s_crumb_y + HS * 8 + 12, "L/R adjust  O open  X back", VS, s_dim, s_bg);
         board_draw_touch_deck();
         for (int i = 0; i < nrows; i++) {
             int ry = y0 + i * dy;
