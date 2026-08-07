@@ -58,10 +58,15 @@ static uint16_t *s_scratch = nullptr;
  *
  * Deliberately NOT the accent. The accent means "selected row" and is user-configurable, so reusing it both
  * collided with selection and made capitals change colour with the theme — case is a property of the text, not
- * a theme choice. s_case is fixed. Falls back to fg wherever it would be invisible (drawn on itself) or
- * pointless (the text is already that colour). */
+ * a theme choice. s_case is fixed (see the definition), NOT the accent.
+ *
+ * It only applies on the normal background. Anywhere the caller has inverted the row — a selected pill, a
+ * highlighted key — fg/bg are chosen as a contrasting PAIR, and dropping a third fixed colour into that pair
+ * lands cyan-on-accent, the worst contrast on screen. When s_case *was* the accent an equality test caught
+ * that by luck; a fixed colour can never equal the accent, so test the background explicitly. */
 static inline uint16_t case_col(char c, uint16_t fg, uint16_t bg) {
     if (c < 'A' || c > 'Z') return fg;
+    if (bg != s_bg) return fg;                        /* inverted/highlighted row — keep the caller's pair */
     return (s_case == bg || s_case == fg) ? fg : s_case;
 }
 
@@ -211,12 +216,14 @@ static void blit_round_rect(int x, int y, int w, int h, int radius, uint16_t col
 }
 
 /* Render `str` transparently INTO a buffer (only the glyph pixels are written; the tile art shows through the
- * gaps). Used to place a folder's name on its thumbnail. Capitals take the accent (WC-2); unknown glyphs
- * skipped. No bg here — this draws over artwork — so case_col gets fg for both, which is the right fallback. */
-static void glyphs_into(uint16_t *buf, int bufw, int bufh, int x0, int y0, const char *str, int scale, uint16_t fg) {
+ * gaps). Used to place a folder's name on its thumbnail. Capitals take `hi` (WC-2) — passed in already dimmed
+ * by the caller, because the side peeks dim their text to say "not selected" and a full-brightness capital
+ * would punch straight through that cue. Unknown glyphs skipped. */
+static void glyphs_into(uint16_t *buf, int bufw, int bufh, int x0, int y0, const char *str, int scale,
+                        uint16_t fg, uint16_t hi) {
     int len = (int)strlen(str);
     for (int ci = 0; ci < len; ci++) {
-        const uint16_t cc = case_col(str[ci], fg, fg);
+        const uint16_t cc = (str[ci] >= 'A' && str[ci] <= 'Z') ? hi : fg;
         const char *const *g = glyph_rows(str[ci]);
         if (!g) continue;
         int ox = x0 + ci * 4 * scale;
@@ -270,12 +277,13 @@ static void draw_folder_tile(int w, int h, bool isUp, int dim, const char *name)
             if ((int)l2.size() > per) l2 = l2.substr(0, per - 1) + ".";
         }
         uint16_t fg = dimrgb(232, 235, 245, dim);
+        uint16_t hi = dimrgb(110, 220, 220, dim);   /* s_case, dimmed the same as the body text */
         int ny = fy + fh + h * 9 / 100;
         int tw1 = (int)l1.size() * 4 * scale;
-        glyphs_into(s_scratch, w, h, (w - tw1) / 2, ny, l1.c_str(), scale, fg);
+        glyphs_into(s_scratch, w, h, (w - tw1) / 2, ny, l1.c_str(), scale, fg, hi);
         if (!l2.empty()) {
             int tw2 = (int)l2.size() * 4 * scale;
-            glyphs_into(s_scratch, w, h, (w - tw2) / 2, ny + 6 * scale, l2.c_str(), scale, fg);
+            glyphs_into(s_scratch, w, h, (w - tw2) / 2, ny + 6 * scale, l2.c_str(), scale, fg, hi);
         }
     }
 }
@@ -365,7 +373,7 @@ static void render(const std::vector<Entry> &entries, int sel, const std::string
 
     if (full) {
         board_lcd_fill(s_bg);
-        std::string crumb = (curdir == floor) ? std::string("SD CARD") : display_name(basename_of(curdir));
+        std::string crumb = (curdir == floor) ? std::string("sd card") : display_name(basename_of(curdir));
         draw_text_centered(s_W / 2, s_crumb_y, crumb.c_str(), 3, s_fg, s_bg);
         blit_round_rect(s_W / 2 - 26, s_crumb_y + 24, 52, 3, 1, s_accent);
         board_draw_touch_deck();
@@ -833,7 +841,7 @@ static void run_wifi_scan_connect(void) {
     static const char *subs[16];
     for (int i = 0; i < n; i++) {
         items[i] = aps[i].ssid;
-        snprintf(subbuf[i], sizeof subbuf[i], "%s", aps[i].open ? "OPEN" : rssi_bars(aps[i].rssi));
+        snprintf(subbuf[i], sizeof subbuf[i], "%s", aps[i].open ? "open" : rssi_bars(aps[i].rssi));
         subs[i] = subbuf[i];
     }
     int sel = 0;
@@ -948,7 +956,7 @@ static void ota_draw_progress(size_t done, size_t total) {
     if (pct > 0) blit_round_rect(bx, y, (bw * pct) / 100, bh, 3, s_accent);
 
     char line[40];
-    snprintf(line, sizeof line, "%d%%  %uK / %uK", pct,
+    snprintf(line, sizeof line, "%d%%  %uk / %uk", pct,
              (unsigned)(done / 1024), (unsigned)(total / 1024));
     int ty = y + bh + 10;
     blit_round_rect(s_gx + 20, ty, s_gw - 40, VS * 6, 0, s_bg);          /* clear the old figures */
@@ -1063,7 +1071,7 @@ static void run_update(void) {
         fit_text(bv, sizeof bv, rel.build,   val_max);
         draw_kv(y, "current", cur,  VS, VS, s_dim, s_dim);   y += VS * 11;
         draw_kv(y, "new",     nv,   VS, VS, s_fg, s_accent); y += VS * 11;
-        char sz[24]; snprintf(sz, sizeof sz, "%uK", (unsigned)(rel.size / 1024));
+        char sz[24]; snprintf(sz, sizeof sz, "%uk", (unsigned)(rel.size / 1024));
         draw_kv(y, "size",    sz,   VS, VS, s_fg, s_fg);     y += VS * 11;
         if (bv[0]) { draw_kv(y, "built", bv, VS, VS, s_dim, s_dim); y += VS * 11; }
 
@@ -1196,9 +1204,9 @@ static void run_about(void) {
     const esp_app_desc_t *d = esp_app_get_description();
     const char *boardname =
 #if CONFIG_IDF_TARGET_ESP32P4
-        "ESP32-P4";
+        "esp32-p4";
 #else
-        "ESP32-S3";
+        "esp32-s3";
 #endif
     const int HS = s_info_scale + 1;   /* ABOUT header */
     const int VS = s_info_scale;       /* info rows */
@@ -1212,8 +1220,8 @@ static void run_about(void) {
     board_draw_touch_deck();
 
     /* 7 info rows evenly packed between the subtitle and the band bottom (above the deck) — fits any panel. */
-    char panel[24];  snprintf(panel, sizeof panel, "%dX%d", s_W, s_H);
-    char psram[24];  snprintf(psram, sizeof psram, "%uMB FREE",
+    char panel[24];  snprintf(panel, sizeof panel, "%dx%d", s_W, s_H);
+    char psram[24];  snprintf(psram, sizeof psram, "%umb free",
                               (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / (1024 * 1024)));
     int y = top + PS * 7 + VS * 8 + 16, dy = (CB_BOT - y) / 7; if (dy < VS * 8) dy = VS * 8;
     draw_kv(y, "board",      boardname,               VS, VS, s_fg, s_fg);  y += dy;
