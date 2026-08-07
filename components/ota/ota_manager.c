@@ -74,6 +74,28 @@ static bool json_num(const char *js, const char *key, size_t *out) {
     return true;
 }
 
+/* Open `c` and follow redirects, returning the final status code (<0 on transport error).
+ *
+ * esp_http_client_open() + fetch_headers() does NOT follow 3xx — that lives in esp_http_client_perform(),
+ * which we cannot use because the body has to be streamed into flash a chunk at a time. Real hosting
+ * redirects constantly (GitHub releases hand off to objects.githubusercontent.com; most CDNs and bare-domain
+ * rules do the same), so without this the first non-bench endpoint fails as a bare "not found". */
+#define MAX_REDIRECTS 4
+static int open_following_redirects(esp_http_client_handle_t c) {
+    for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
+        esp_err_t err = esp_http_client_open(c, 0);
+        if (err != ESP_OK) { ESP_LOGE(TAG, "open: %s", esp_err_to_name(err)); return -1; }
+        esp_http_client_fetch_headers(c);
+        int status = esp_http_client_get_status_code(c);
+        if (status != 301 && status != 302 && status != 303 && status != 307 && status != 308) return status;
+        if (hop == MAX_REDIRECTS) { ESP_LOGE(TAG, "too many redirects (%d)", hop); return status; }
+        esp_http_client_set_redirection(c);      /* adopts the Location header */
+        esp_http_client_close(c);
+        ESP_LOGI(TAG, "following redirect (%d), hop %d", status, hop + 1);
+    }
+    return -1;
+}
+
 esp_err_t ota_check(const char *manifest_url, ota_release_t *out, int timeout_ms) {
     if (!manifest_url || !out) return ESP_ERR_INVALID_ARG;
     memset(out, 0, sizeof *out);
@@ -88,11 +110,8 @@ esp_err_t ota_check(const char *manifest_url, ota_release_t *out, int timeout_ms
     esp_http_client_handle_t c = esp_http_client_init(&cfg);
     if (!c) return ESP_FAIL;
 
-    esp_err_t err = esp_http_client_open(c, 0);
-    if (err != ESP_OK) { ESP_LOGE(TAG, "manifest open: %s", esp_err_to_name(err)); esp_http_client_cleanup(c); return err; }
-
-    esp_http_client_fetch_headers(c);
-    int status = esp_http_client_get_status_code(c);
+    int status = open_following_redirects(c);
+    if (status < 0) { esp_http_client_cleanup(c); return ESP_FAIL; }
     if (status != 200) {
         ESP_LOGE(TAG, "manifest HTTP %d", status);
         esp_http_client_close(c); esp_http_client_cleanup(c);
@@ -161,16 +180,16 @@ esp_err_t ota_apply(const ota_release_t *r, ota_progress_fn cb, void *user) {
     esp_http_client_handle_t c = esp_http_client_init(&cfg);
     if (!c) return ESP_FAIL;
 
-    esp_err_t err = esp_http_client_open(c, 0);
-    if (err != ESP_OK) { esp_http_client_cleanup(c); return err; }
-    esp_http_client_fetch_headers(c);
-    if (esp_http_client_get_status_code(c) != 200) {
+    int status = open_following_redirects(c);
+    if (status < 0) { esp_http_client_cleanup(c); return ESP_FAIL; }
+    if (status != 200) {
+        ESP_LOGE(TAG, "image HTTP %d", status);
         esp_http_client_close(c); esp_http_client_cleanup(c);
         return ESP_ERR_NOT_FOUND;
     }
 
     esp_ota_handle_t h = 0;
-    err = esp_ota_begin(slot, r->size, &h);
+    esp_err_t err = esp_ota_begin(slot, r->size, &h);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_begin: %s", esp_err_to_name(err));
         esp_http_client_close(c); esp_http_client_cleanup(c);
