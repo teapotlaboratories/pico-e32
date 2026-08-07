@@ -45,7 +45,10 @@ static int s_title_y, s_title_scale, s_body_y, s_body_dy, s_body_scale, s_info_s
 
 static int      s_W = 480, s_H = 800;
 static uint16_t s_bg, s_fg, s_dim, s_missing, s_accent, s_platform, s_titlebar, s_track;
-static uint16_t s_case;   /* capitals (WC-2) — fixed, NOT the accent: see case_col */
+#define CASE_R 110
+#define CASE_G 220
+#define CASE_B 220   /* one definition of the case colour; see case_col */
+static uint16_t s_case, s_case_dim;   /* capitals (WC-2) — fixed, NOT the accent: see case_col */
 
 /* one reusable PSRAM scratch buffer, sized to the largest thing blitted (the 384x384 centre window) */
 static uint16_t *s_scratch = nullptr;
@@ -60,14 +63,20 @@ static uint16_t *s_scratch = nullptr;
  * collided with selection and made capitals change colour with the theme — case is a property of the text, not
  * a theme choice. s_case is fixed (see the definition), NOT the accent.
  *
- * It only applies on the normal background. Anywhere the caller has inverted the row — a selected pill, a
- * highlighted key — fg/bg are chosen as a contrasting PAIR, and dropping a third fixed colour into that pair
- * lands cyan-on-accent, the worst contrast on screen. When s_case *was* the accent an equality test caught
- * that by luck; a fixed colour can never equal the accent, so test the background explicitly. */
+ * Two things it must respect, and an earlier attempt got both wrong by testing `bg != s_bg`:
+ *   - A true INVERSION (a selected pill, a highlighted key) picks fg/bg as a contrasting pair, and a third
+ *     fixed colour dropped into that lands cyan-on-accent — the worst contrast on screen. Stand down there.
+ *     That is `bg == s_accent` specifically, NOT "any background that isn't the default": the password field
+ *     and the keys draw on plain panels (s_platform / s_titlebar), and standing down on those removed case
+ *     marking from the password field, i.e. from the one screen this feature exists for.
+ *   - A DIMMED row (fg == s_dim) is dim on purpose — context, not focus. A full-brightness capital punches
+ *     through that, so dimmed rows get the dimmed highlight. */
 static inline uint16_t case_col(char c, uint16_t fg, uint16_t bg) {
-    if (c < 'A' || c > 'Z') return fg;
-    if (bg != s_bg) return fg;                        /* inverted/highlighted row — keep the caller's pair */
-    return (s_case == bg || s_case == fg) ? fg : s_case;
+    if (c < 'A' || c > 'Z')  return fg;
+    if (bg == s_accent)      return fg;        /* inverted row: keep the caller's contrasting pair */
+    if (fg == s_dim)         return s_case_dim;/* deliberately-dim row: match its weight */
+    if (fg == s_case || fg == bg) return fg;   /* already this colour, or invisible either way */
+    return s_case;
 }
 
 static const char *const *glyph_rows(char c) {
@@ -277,7 +286,7 @@ static void draw_folder_tile(int w, int h, bool isUp, int dim, const char *name)
             if ((int)l2.size() > per) l2 = l2.substr(0, per - 1) + ".";
         }
         uint16_t fg = dimrgb(232, 235, 245, dim);
-        uint16_t hi = dimrgb(110, 220, 220, dim);   /* s_case, dimmed the same as the body text */
+        uint16_t hi = dimrgb(CASE_R, CASE_G, CASE_B, dim);   /* the case colour, dimmed like the body text */
         int ny = fy + fh + h * 9 / 100;
         int tw1 = (int)l1.size() * 4 * scale;
         glyphs_into(s_scratch, w, h, (w - tw1) / 2, ny, l1.c_str(), scale, fg, hi);
@@ -1258,7 +1267,8 @@ std::string carousel_launcher_run(Host *host, const std::string &start_dir) {
     s_platform = board_lcd_rgb565(26, 30, 46);
     s_titlebar = board_lcd_rgb565(10, 12, 20);
     s_track    = board_lcd_rgb565(54, 60, 82);   /* position-bar track — clearly visible against the bg */
-    s_case     = board_lcd_rgb565(110, 220, 220);  /* capitals: cyan (WC-2) */
+    s_case     = board_lcd_rgb565(CASE_R, CASE_G, CASE_B);  /* capitals: cyan (WC-2) */
+    s_case_dim = dimrgb(CASE_R, CASE_G, CASE_B, 128);       /* ...at s_dim's weight, for context rows */
 
     /* pull the per-panel layout from the board (see boards/<board>/board.cpp) */
     board_carousel_layout_t L;

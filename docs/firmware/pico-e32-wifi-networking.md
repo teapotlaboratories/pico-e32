@@ -48,7 +48,8 @@ the launcher's WIFI screen in `firmware/pico-e32-fake08/main/carousel_launcher.c
     whole interface turned accent-blue. Fixed by rewriting **108 display literals to lowercase** — they render
     as the same cap shapes, unmarked — leaving the accent to mean "selected row" and "a real capital in data".
     The keyboard's `KB_LOW`/`KB_UPP` rows are *character data*, not labels, and were deliberately left alone;
-    a pleasant side effect is that shifting to `KB_UPP` now visibly turns the keys accent.
+    shifting to `KB_UPP` marks the keys, which doubles as a caps indicator (this briefly regressed — see the
+    worklog §8 — because the inversion guard was written as "any non-default background").
   - `case_col()` applies only on the normal background: where a caller has inverted the row (a selected pill, a
     highlighted key) fg/bg are a contrasting pair and the highlight stands down, so capitals never land as
     cyan-on-accent.

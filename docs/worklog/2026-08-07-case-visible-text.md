@@ -110,3 +110,30 @@ insertion points, the `val_max` clamp, and leaving `KB_LOW`/`KB_UPP` alone all c
 **Worth keeping:** two of these (the missed literals, the `snprintf` strings) are the same mistake in different
 clothes — I verified the *mechanism* on the panel and assumed the *sweep* was complete because the screens I
 happened to open looked right. The screens I did not open were the ones still broken.
+
+## 8. Second review pass — the fix broke the thing it was protecting
+
+The `bg != s_bg` guard from §7 was too broad. It was meant to stand down on *inverted* rows (a selected pill,
+where fg/bg are a contrasting pair), but it fired on **any** non-default background — and the password field
+draws on `s_platform`, the keyboard keys on `s_titlebar`. Both are plain panels, not inversions.
+
+Net effect: **the password field had no case marking at all** — the single screen this whole feature exists for —
+and the "shifting turns the keys accent" caps indicator I put in the PR body and the docs did not exist either.
+Two claims documented, neither true of the merged code.
+
+Corrected to test the inversion specifically (`bg == s_accent`) rather than "not the default background". Also
+from the same pass:
+
+- **Dimmed rows now get a dimmed highlight** (`s_case_dim`). `case_col` guarded on `bg` but never `fg`, so a
+  context row drawn in `s_dim` — the confirm screen's `current`/`built`, the About build date — rendered
+  full-brightness capitals through a row that is dim on purpose. The About row's lone bright `A` in
+  "Aug  7 2026" read as a rendering fault rather than case information.
+- **The case colour had two definitions.** The folder-tile highlight restated its RGB as a literal, so retuning
+  `s_case` would have left tiles on the old cyan with no compile error. One `CASE_R/G/B` now feeds both.
+- **Known and left as-is:** on the *selected* row case marking still stands down, so the SSID you are about to
+  join is the one whose case is hidden. Fixing that needs a colour that contrasts against the accent rather than
+  the background, which is a design question rather than a bug fix — noted here rather than guessed at.
+
+**The pattern, twice now:** each fix was verified on the screens I happened to open, and each broke a screen I
+did not. The password field was never re-captured after §7's change; the review caught it by reading the code
+paths instead of the pixels.
