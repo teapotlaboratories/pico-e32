@@ -75,15 +75,22 @@ When unsure whether a change counts as "doc-only," treat it as code and branch.
 
 ### Merging pull requests
 
-**Run a code review before every merge — the built-in `/review` is sufficient.** Run `/review <PR#>` (or
-`/review` on the local branch) at least once on the branch/PR being merged and resolve what it surfaces
-before merging. It is the lightweight, in-session review: **not** billed and **not** owner-only, so the agent
-runs it itself — no need to wait on the owner. **The merge gate is satisfied once `/review` has run and its
-findings are addressed**; the agent must not merge before then.
+**Run a code review before every merge, and the ordinary in-session review is sufficient.** Run it at least
+once on the branch/PR being merged and resolve what it surfaces. It is **not** billed and **not** owner-only:
+**the agent runs it itself and must not wait on the owner for it.** **The merge gate is satisfied once that
+review has run and its findings are addressed**; the agent must not merge before then.
 
-**`/code-review ultra` is an optional deeper pass, not required.** `/code-review ultra <PR#>` (a GitHub PR)
-or `/code-review ultra` (the local branch) is the billed cloud review — **user-triggered, so the agent cannot
-launch it**. Worth asking the owner for on larger or riskier changes, but a merge does not wait on it.
+**Use whichever invocation actually works in the current session** — what matters is that a review ran, not
+which command produced it. Reviews are exposed as skills, and which ones the agent may invoke can change
+between sessions: at time of writing `code-review` (e.g. `code-review <PR#>`) is agent-invokable, while
+`review` is sometimes restricted to the owner typing `/review`. **If one is blocked, use the other rather than
+stalling** — a blocked invocation is not a reason to park a finished branch, nor to ask the owner to run
+something the agent can run itself. Only if *every* review path is unavailable should the agent say so and ask.
+
+**`/code-review ultra` is an optional deeper pass, not required.** `/code-review ultra <PR#>` is the billed
+cloud review — **user-triggered, so the agent cannot launch it**. Worth asking the owner for on larger or
+riskier changes (anything that can brick a device, touch boot-slot selection, or is hard to reverse), but a
+merge does not wait on it.
 
 **Default merge strategy: rebase + merge** (`gh pr merge --rebase`). Replay the
 branch's commits onto the base so `main` stays linear — no merge bubbles. Prefer
