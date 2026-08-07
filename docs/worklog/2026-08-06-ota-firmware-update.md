@@ -320,3 +320,35 @@ Throughput: **P4 218 KB/s** (1.66 MB / 7.6 s, over the C6), **S3 180 KB/s** (1.6
 Both boards reflashed to the shipped touch build (`-D LAUNCHER=1`) with **no manifest URL configured**, so
 SYSTEM UPDATE reports `NO UPDATE URL IN BUILD` rather than pointing at a bench laptop. The test server, images
 and manifests live only in the scratchpad and are not committed.
+
+### 15. A bench endpoint: `tools/ota_server.py`
+
+Serving the update by hand (build → copy → `sha256sum` → hand-write JSON → `python3 -m http.server`) is exactly
+the process that produced the vacuous power-pull "passes" in §12 and the stale-hash confusion before it. Wrapped
+it up as `tools/ota_server.py`.
+
+The design point: **the manifest is derived from the image, never typed.**
+
+| field | source |
+|---|---|
+| `target` | chip id in the image header (`esp_image_header_t`, uint16 @ `0x0C`) |
+| `version` | app descriptor (`esp_app_desc_t.version` @ `0x30`) |
+| `sha256` | hash of the file on disk |
+| `size` | length of the file on disk |
+
+A manifest that disagrees with its binary is precisely what the device-side checks are for — wrong `target` is
+refused up front, wrong `sha256`/`size` aborts after a wasted transfer. Deriving all four makes that class of
+mistake unauthorable. It also advertises the machine's **LAN IP**, not `127.0.0.1`, since a board cannot reach
+localhost, and it prints the two gotchas that cost time here: the generated `sdkconfig` must be deleted for
+`sdkconfig.defaults` to apply, and re-serving the running build is *correctly* `ALREADY UP TO DATE`.
+
+Verified rather than assumed:
+
+- Parsed both real binaries — `esp32p4` / `esp32s3` correctly distinguished, versions matching what the boards
+  report (`81a7673-dirty` / `81a7673`), and both `sha256` values cross-checked against `sha256sum`.
+- **A board consumed its output**: pointed an S3 build at the generated URL and got
+  `ota: manifest: 81a7673 for esp32s3 (1438624 bytes)` — fetch, parse, target match and version compare all
+  against the script's own manifest.
+
+Lives in `tools/` alongside the other bench utilities (`fb_screenshot.py`, `capture_frame.sh`) — one home
+for this kind of thing rather than a second script directory.
