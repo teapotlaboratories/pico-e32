@@ -50,8 +50,20 @@ static uint16_t s_bg, s_fg, s_dim, s_missing, s_accent, s_platform, s_titlebar, 
 static uint16_t *s_scratch = nullptr;
 
 /* ---------- tiny PICO-8 font text (3x5 glyphs, '#'=on) ---------- */
+/* The font has ONE set of letterforms (cap-shaped), so case cannot be carried by shape — a 3x5 cell has no
+ * descender row, and lowercase drawn without one makes a/g/q identical, which is useless in the password field
+ * this exists for. Case is carried by COLOUR instead (WC-2): the shapes are the default, and a capital is drawn
+ * in the accent. No cell-height change, so no re-layout.
+ *
+ * The accent is also the selected-row colour, so a capital on a highlighted row would be invisible (or on an
+ * accent-coloured value, pointless). Fall back to fg whenever the highlight would collide. */
+static inline uint16_t case_col(char c, uint16_t fg, uint16_t bg) {
+    if (c < 'A' || c > 'Z') return fg;
+    return (s_accent == bg || s_accent == fg) ? fg : s_accent;
+}
+
 static const char *const *glyph_rows(char c) {
-    if (c >= 'a' && c <= 'z') c -= 32;
+    if (c >= 'a' && c <= 'z') c -= 32;   /* one glyph per letter; case is colour, not shape */
     const size_t n = sizeof(PICO8_FONT_GLYPHS) / sizeof(PICO8_FONT_GLYPHS[0]);
     for (size_t i = 0; i < n; i++)
         if (PICO8_FONT_GLYPHS[i].c == c) return PICO8_FONT_GLYPHS[i].rows;
@@ -70,13 +82,14 @@ static int draw_text(int x, int y, const char *str, int scale, uint16_t fg, uint
     for (int ci = 0; ci < len; ci++) {
         const char *const *g = glyph_rows(str[ci]);
         if (!g) continue;
+        const uint16_t cc = case_col(str[ci], fg, bg);   /* capitals stand out; see case_col */
         int ox = ci * 4 * scale;
         for (int r = 0; r < 5; r++)
             for (int c = 0; c < 3; c++)
                 if (g[r][c] == '#')
                     for (int sy = 0; sy < scale; sy++)
                         for (int sx = 0; sx < scale; sx++)
-                            buf[(r * scale + sy) * tw + (ox + c * scale + sx)] = fg;
+                            buf[(r * scale + sy) * tw + (ox + c * scale + sx)] = cc;
     }
     board_lcd_blit(x, y, tw, th, buf);
     heap_caps_free(buf);
@@ -195,10 +208,12 @@ static void blit_round_rect(int x, int y, int w, int h, int radius, uint16_t col
 }
 
 /* Render `str` transparently INTO a buffer (only the glyph pixels are written; the tile art shows through the
- * gaps). Used to place a folder's name on its thumbnail. Uppercased via glyph_rows; unknown glyphs skipped. */
+ * gaps). Used to place a folder's name on its thumbnail. Capitals take the accent (WC-2); unknown glyphs
+ * skipped. No bg here — this draws over artwork — so case_col gets fg for both, which is the right fallback. */
 static void glyphs_into(uint16_t *buf, int bufw, int bufh, int x0, int y0, const char *str, int scale, uint16_t fg) {
     int len = (int)strlen(str);
     for (int ci = 0; ci < len; ci++) {
+        const uint16_t cc = case_col(str[ci], fg, fg);
         const char *const *g = glyph_rows(str[ci]);
         if (!g) continue;
         int ox = x0 + ci * 4 * scale;
@@ -208,7 +223,7 @@ static void glyphs_into(uint16_t *buf, int bufw, int bufh, int x0, int y0, const
                     for (int sy = 0; sy < scale; sy++)
                         for (int sx = 0; sx < scale; sx++) {
                             int px = ox + c * scale + sx, py = y0 + r * scale + sy;
-                            if (px >= 0 && px < bufw && py >= 0 && py < bufh) buf[py * bufw + px] = fg;
+                            if (px >= 0 && px < bufw && py >= 0 && py < bufh) buf[py * bufw + px] = cc;
                         }
     }
 }
@@ -354,7 +369,7 @@ static void render(const std::vector<Entry> &entries, int sel, const std::string
     }
 
     if (N == 0) {
-        if (full) draw_text_centered(s_W / 2, s_ty + s_th / 2, "EMPTY", 4, s_fg, s_bg);
+        if (full) draw_text_centered(s_W / 2, s_ty + s_th / 2, "empty", 4, s_fg, s_bg);
         return;
     }
 
@@ -498,15 +513,15 @@ void carousel_fb_dump(void) {
 
 /* ================= main menu (Games / Settings / About) ================= */
 
-static const char *const MENU_ITEMS[] = { "GAMES", "SETTINGS", "ABOUT" };
+static const char *const MENU_ITEMS[] = { "games", "settings", "about" };
 #define MENU_N 3
 
 /* Launcher accent theme — the one live Settings knob (self-contained, no board API). */
 static const struct { uint8_t r, g, b; const char *name; } ACCENTS[] = {
-    {  90, 162, 255, "BLUE"  },
-    {  80, 200, 140, "GREEN" },
-    { 240, 180,  70, "AMBER" },
-    { 235, 120, 180, "PINK"  },
+    {  90, 162, 255, "blue"  },
+    {  80, 200, 140, "green" },
+    { 240, 180,  70, "amber" },
+    { 235, 120, 180, "pink"  },
 };
 #define ACCENT_N (int)(sizeof(ACCENTS) / sizeof(ACCENTS[0]))
 static int s_accent_idx = 0;
@@ -594,8 +609,8 @@ static void draw_menu_row(int i, int sel) {
 static void render_menu(int sel, bool full) {
     if (full) {
         board_lcd_fill(s_bg);
-        draw_text_centered(s_W / 2, s_title_y, "PICO-E32", s_title_scale, s_accent, s_bg);
-        draw_text_centered(s_W / 2, s_title_y + s_title_scale * 8, "PICO-8 HANDHELD", 2, s_dim, s_bg);
+        draw_text_centered(s_W / 2, s_title_y, "pico-e32", s_title_scale, s_accent, s_bg);
+        draw_text_centered(s_W / 2, s_title_y + s_title_scale * 8, "pico-8 handheld", 2, s_dim, s_bg);
         board_draw_touch_deck();
     }
     for (int i = 0; i < MENU_N; i++) draw_menu_row(i, sel);
@@ -622,7 +637,7 @@ static void draw_kv(int y, const char *label, const char *value, int lscale, int
  * in place (must hold maxlen+1); returns true if the user pressed OK, false if BACK. */
 static const char *const KB_LOW[4]  = { "1234567890", "qwertyuiop", "asdfghjkl@", "zxcvbnm.-_" };
 static const char *const KB_UPP[4]  = { "!?#$%&*()+", "QWERTYUIOP", "ASDFGHJKL:", "ZXCVBNM,;/" };
-static const char *const KB_CTRL[5] = { "aA", "SPACE", "DEL", "BACK", "OK" };
+static const char *const KB_CTRL[5] = { "aA", "space", "del", "back", "ok" };
 #define KB_COLS 10
 #define KB_ROWS 4        /* character rows; row 4 is the control row */
 
@@ -708,7 +723,7 @@ static bool keyboard_input(const char *title, char *out, int maxlen) {
     }
 }
 
-/* A modal message ("CONNECTING...", "CONNECTED", "SCAN FAILED", ...); if wait_x, block until X. */
+/* A modal message ("connecting...", "connected", "scan failed", ...); if wait_x, block until X. */
 static void wifi_msg(const char *title, const char *msg, uint16_t col, bool wait_x) {
     const int HS = s_info_scale + 1;
     board_lcd_fill(s_bg);
@@ -799,16 +814,16 @@ struct SdHostLoan {
     ~SdHostLoan() {
 #ifdef BOARD_HAS_SDMMC
         if (lent && board_sd_mount(s_sd_mount.c_str()) != ESP_OK)
-            wifi_msg("WIFI", "SD REMOUNT FAILED", s_missing, true);   /* don't fail silently into an empty carousel */
+            wifi_msg("wifi", "sd remount failed", s_missing, true);   /* don't fail silently into an empty carousel */
 #endif
     }
 };
 
 static void run_wifi_scan_connect(void) {
-    wifi_msg("WIFI", "SCANNING...", s_dim, false);
+    wifi_msg("wifi", "scanning...", s_dim, false);
     static wifi_ap_t aps[16];
     int n = wifi_mgr_scan(aps, 16);
-    if (n <= 0) { wifi_msg("WIFI", n == 0 ? "NO NETWORKS" : "SCAN FAILED", s_dim, true); return; }
+    if (n <= 0) { wifi_msg("wifi", n == 0 ? "no networks" : "scan failed", s_dim, true); return; }
 
     static const char *items[16];
     static char subbuf[16][8];
@@ -820,17 +835,17 @@ static void run_wifi_scan_connect(void) {
     }
     int sel = 0;
     for (;;) {
-        int pick = wifi_list("NETWORKS", "O JOIN   X BACK", items, subs, n, &sel);
+        int pick = wifi_list("networks", "o join   x back", items, subs, n, &sel);
         if (pick < 0) return;
         char pass[WIFI_PASS_MAXLEN + 1] = { 0 };
-        if (!aps[pick].open && !keyboard_input("PASSWORD", pass, WIFI_PASS_MAXLEN)) continue;
-        wifi_msg("WIFI", "CONNECTING...", s_accent, false);
+        if (!aps[pick].open && !keyboard_input("password", pass, WIFI_PASS_MAXLEN)) continue;
+        wifi_msg("wifi", "connecting...", s_accent, false);
         if (wifi_mgr_connect(aps[pick].ssid, pass, 15000) == ESP_OK) {
             wifi_mgr_save(aps[pick].ssid, pass);
-            wifi_msg("WIFI", "CONNECTED", s_accent, true);
+            wifi_msg("wifi", "connected", s_accent, true);
             return;
         }
-        wifi_msg("WIFI", "FAILED TO CONNECT", s_missing, true);   /* back to the list to retry */
+        wifi_msg("wifi", "failed to connect", s_missing, true);   /* back to the list to retry */
     }
 }
 
@@ -838,7 +853,7 @@ static void run_wifi(void) {
     /* The radio is off until someone asks for it (WC-5). Hold a reference for as long as this screen is open and
      * drop it on the way out, which tears the stack (and, on the P4, the C6) back down. The bring-up is blocking
      * — ~2.3 s on the P4 for the esp-hosted handshake — so tell the user what the wait is. */
-    wifi_msg("WIFI", "STARTING RADIO...", s_dim, false);
+    wifi_msg("wifi", "starting radio...", s_dim, false);
     /* WC-6: this board's SD and its C6 radio share one SDMMC host, so the SD has to give it up while the radio
      * is in use. Safe here because nothing in this screen touches storage, and the launcher holds no open file
      * handles (cover art is decoded into PSRAM at browse time, not streamed).
@@ -851,7 +866,7 @@ static void run_wifi(void) {
 
     esp_err_t werr = wifi_mgr_acquire();
     if (werr != ESP_OK) {                  /* no radio (P4: the C6 link never came up) — say so, don't pretend */
-        wifi_msg("WIFI", "RADIO UNAVAILABLE", s_missing, true);
+        wifi_msg("wifi", "radio unavailable", s_missing, true);
         return;                            /* ~SdHostLoan gives the card back */
     }
     /* Rejoin the saved network so the screen opens showing the real state rather than a bare OFFLINE. Failure is
@@ -864,20 +879,20 @@ static void run_wifi(void) {
     for (;;) {
         wifi_status_t st; wifi_mgr_status(&st);
         board_lcd_fill(s_bg);
-        draw_text_centered(s_W / 2, s_crumb_y, "WIFI", HS, s_fg, s_bg);
+        draw_text_centered(s_W / 2, s_crumb_y, "wifi", HS, s_fg, s_bg);
         blit_round_rect(s_W / 2 - 26, s_crumb_y + HS * 8, 52, 3, 1, s_accent);
-        draw_text_centered(s_W / 2, s_crumb_y + HS * 8 + 12, "O SELECT   X BACK", VS, s_dim, s_bg);
+        draw_text_centered(s_W / 2, s_crumb_y + HS * 8 + 12, "o select   x back", VS, s_dim, s_bg);
         board_draw_touch_deck();
         int y = s_crumb_y + HS * 8 + VS * 8 + 30;
         if (st.connected) {
-            draw_kv(y, "STATUS", "ONLINE", VS, VS, s_accent, s_fg);      y += VS * 11;
-            draw_kv(y, "SSID",   st.ssid, VS, VS, s_fg, s_fg);           y += VS * 11;
-            draw_kv(y, "IP",     st.ip,   VS, VS, s_fg, s_fg);           y += VS * 11;
+            draw_kv(y, "status", "online", VS, VS, s_accent, s_fg);      y += VS * 11;
+            draw_kv(y, "ssid",   st.ssid, VS, VS, s_fg, s_fg);           y += VS * 11;
+            draw_kv(y, "ip",     st.ip,   VS, VS, s_fg, s_fg);           y += VS * 11;
         } else {
-            draw_kv(y, "STATUS", "OFFLINE", VS, VS, s_dim, s_dim);       y += VS * 11;
+            draw_kv(y, "status", "offline", VS, VS, s_dim, s_dim);       y += VS * 11;
         }
         y += VS * 10;
-        const char *actions[2] = { st.connected ? "SCAN / RECONNECT" : "SCAN & CONNECT", "FORGET NETWORK" };
+        const char *actions[2] = { st.connected ? "scan / reconnect" : "scan & connect", "forget network" };
         for (int i = 0; i < 2; i++)
             draw_pill_row(y + i * wifi_row_dy(), actions[i], NULL, i == sel);
         for (;;) {
@@ -893,7 +908,7 @@ static void run_wifi(void) {
             if (p & (INPUT_DOWN | INPUT_UP)) { sel ^= 1; break; }
             if (p & INPUT_O) {
                 if (sel == 0) run_wifi_scan_connect();
-                else { wifi_mgr_forget(); wifi_msg("WIFI", "FORGOTTEN", s_dim, true); }
+                else { wifi_mgr_forget(); wifi_msg("wifi", "forgotten", s_dim, true); }
                 prev = input_poll();   /* the button that closed the submenu may still be held — see run_settings */
                 break;
             }
@@ -964,25 +979,25 @@ static void run_update(void) {
 
     auto header = [&](const char *sub) {
         board_lcd_fill(s_bg);
-        draw_text_centered(s_W / 2, s_crumb_y, "SYSTEM UPDATE", HS, s_fg, s_bg);
+        draw_text_centered(s_W / 2, s_crumb_y, "system update", HS, s_fg, s_bg);
         blit_round_rect(s_W / 2 - 26, s_crumb_y + HS * 8, 52, 3, 1, s_accent);
         draw_text_centered(s_W / 2, s_crumb_y + HS * 8 + 12, sub, VS, s_dim, s_bg);
         board_draw_touch_deck();
     };
 
     if (!OTA_MANIFEST_URL[0]) {           /* no endpoint compiled in — say so rather than fail obscurely */
-        wifi_msg("UPDATE", "NO UPDATE URL IN BUILD", s_missing, true);
+        wifi_msg("update", "no update url in build", s_missing, true);
         return;
     }
 
     int sel = 0;
     uint8_t prev = input_poll();
     for (;;) {
-        header("O SELECT   X BACK");
+        header("o select   x back");
         int y = s_crumb_y + HS * 8 + VS * 8 + 30;
-        draw_kv(y, "CURRENT", cur, VS, VS, s_fg, s_fg);   y += VS * 11;
+        draw_kv(y, "current", cur, VS, VS, s_fg, s_fg);   y += VS * 11;
         y += VS * 10;
-        draw_pill_row(y, "CHECK FOR UPDATE", NULL, sel == 0);
+        draw_pill_row(y, "check for update", NULL, sel == 0);
 
         bool act = false;
         while (!act) {
@@ -996,58 +1011,58 @@ static void run_update(void) {
         }
 
         /* --- one network session: radio up (and, on the P4, the SD host lent out) for check + install --- */
-        wifi_msg("UPDATE", "STARTING RADIO...", s_dim, false);
+        wifi_msg("update", "starting radio...", s_dim, false);
         SdHostLoan sd_host;
         sd_host.lend();
-        if (wifi_mgr_acquire() != ESP_OK) { wifi_msg("UPDATE", "RADIO UNAVAILABLE", s_missing, true); return; }
+        if (wifi_mgr_acquire() != ESP_OK) { wifi_msg("update", "radio unavailable", s_missing, true); return; }
 
-        wifi_msg("UPDATE", "CONNECTING...", s_dim, false);
+        wifi_msg("update", "connecting...", s_dim, false);
         esp_err_t cerr = wifi_mgr_autoconnect(15000);
         if (cerr != ESP_OK) {
             wifi_mgr_release();
             /* "no saved network" and "the join failed" send the user to different places — the first to the WiFi
              * screen to join one, the second to try again or move closer. Don't collapse them into one message. */
-            wifi_msg("UPDATE", cerr == ESP_ERR_NOT_FOUND ? "NO SAVED WIFI - JOIN ONE FIRST" : "CANT REACH NETWORK",
+            wifi_msg("update", cerr == ESP_ERR_NOT_FOUND ? "no saved wifi - join one first" : "cant reach network",
                      s_missing, true);                          /* ~SdHostLoan gives the card back */
             prev = input_poll();
             continue;          /* back to the screen: a transient failure should be retryable in place */
         }
 
-        wifi_msg("UPDATE", "CHECKING...", s_dim, false);
+        wifi_msg("update", "checking...", s_dim, false);
         ota_release_t rel;
         esp_err_t err = ota_check(OTA_MANIFEST_URL, &rel, 10000);
         if (err != ESP_OK) {
             wifi_mgr_release();
-            const char *cm = "CHECK FAILED";
-            if (err == ESP_ERR_INVALID_RESPONSE)     cm = "BAD MANIFEST";
-            else if (err == ESP_ERR_INVALID_VERSION) cm = "UPDATE IS FOR ANOTHER BOARD";
-            wifi_msg("UPDATE", cm, s_missing, true);
+            const char *cm = "check failed";
+            if (err == ESP_ERR_INVALID_RESPONSE)     cm = "bad manifest";
+            else if (err == ESP_ERR_INVALID_VERSION) cm = "update is for another board";
+            wifi_msg("update", cm, s_missing, true);
             prev = input_poll();
             continue;
         }
         if (!ota_is_newer(&rel)) {
             wifi_mgr_release();
-            wifi_msg("UPDATE", "ALREADY UP TO DATE", s_accent, true);
+            wifi_msg("update", "already up to date", s_accent, true);
             prev = input_poll();
             continue;
         }
 
         /* Offer it, with the version actually on the other end — never install without showing what. */
-        header("O INSTALL   X CANCEL");
+        header("o install   x cancel");
         y = s_crumb_y + HS * 8 + VS * 8 + 30;
         /* These strings come from the MANIFEST, i.e. off the network, and draw_kv right-aligns without
          * clipping: a long enough value overruns its label and a longer one produces a negative x that goes
          * straight to the panel blit. Clamp to what the row can actually hold. */
-        const int val_px  = s_gw - 24 - 24 - (int)strlen("CURRENT") * 4 * VS;
+        const int val_px  = s_gw - 24 - 24 - (int)strlen("current") * 4 * VS;
         const int val_max = val_px / (4 * VS) > 0 ? val_px / (4 * VS) : 1;
         char nv[OTA_VERSION_MAXLEN + 1], bv[32];
         fit_text(nv, sizeof nv, rel.version, val_max);
         fit_text(bv, sizeof bv, rel.build,   val_max);
-        draw_kv(y, "CURRENT", cur,  VS, VS, s_dim, s_dim);   y += VS * 11;
-        draw_kv(y, "NEW",     nv,   VS, VS, s_fg, s_accent); y += VS * 11;
+        draw_kv(y, "current", cur,  VS, VS, s_dim, s_dim);   y += VS * 11;
+        draw_kv(y, "new",     nv,   VS, VS, s_fg, s_accent); y += VS * 11;
         char sz[24]; snprintf(sz, sizeof sz, "%uK", (unsigned)(rel.size / 1024));
-        draw_kv(y, "SIZE",    sz,   VS, VS, s_fg, s_fg);     y += VS * 11;
-        if (bv[0]) { draw_kv(y, "BUILT", bv, VS, VS, s_dim, s_dim); y += VS * 11; }
+        draw_kv(y, "size",    sz,   VS, VS, s_fg, s_fg);     y += VS * 11;
+        if (bv[0]) { draw_kv(y, "built", bv, VS, VS, s_dim, s_dim); y += VS * 11; }
 
         prev = input_poll();
         bool go = false, done_choosing = false;
@@ -1062,22 +1077,22 @@ static void run_update(void) {
         }
         if (!go) { wifi_mgr_release(); prev = input_poll(); continue; }   /* cancelled the install, not the screen */
 
-        header("DOWNLOADING   X CANCEL");
+        header("downloading   x cancel");
         s_ota_pct = -1;
         err = ota_apply(&rel, ota_progress_cb, NULL);
         wifi_mgr_release();
 
         if (err == ESP_OK) {
-            wifi_msg("UPDATE", "INSTALLED - REBOOTING", s_accent, false);
+            wifi_msg("update", "installed - rebooting", s_accent, false);
             vTaskDelay(pdMS_TO_TICKS(1200));
             esp_restart();                       /* new image boots pending-verify; the launcher confirms it */
         }
         /* Every failure below left the running firmware untouched — say which, don't just say "failed". */
-        const char *why = "UPDATE FAILED";
-        if (err == ESP_ERR_INVALID_CRC)        why = "BAD IMAGE - NOT INSTALLED";
-        else if (err == ESP_ERR_INVALID_SIZE)  why = "WRONG SIZE - NOT INSTALLED";
-        else if (err == ESP_ERR_INVALID_STATE) why = "CANCELLED";
-        wifi_msg("UPDATE", why, s_missing, true);
+        const char *why = "update failed";
+        if (err == ESP_ERR_INVALID_CRC)        why = "bad image - not installed";
+        else if (err == ESP_ERR_INVALID_SIZE)  why = "wrong size - not installed";
+        else if (err == ESP_ERR_INVALID_STATE) why = "cancelled";
+        wifi_msg("update", why, s_missing, true);
         prev = input_poll();          /* the loop is real: failures land back on the screen, not in Settings */
     }
 }
@@ -1106,9 +1121,9 @@ static void run_settings(void) {
     const int dy = LS * 12;
     auto draw_all = [&]() {
         board_lcd_fill(s_bg);
-        draw_text_centered(s_W / 2, s_crumb_y, "SETTINGS", HS, s_fg, s_bg);
+        draw_text_centered(s_W / 2, s_crumb_y, "settings", HS, s_fg, s_bg);
         blit_round_rect(s_W / 2 - 26, s_crumb_y + HS * 8, 52, 3, 1, s_accent);
-        draw_text_centered(s_W / 2, s_crumb_y + HS * 8 + 12, "L/R ADJUST  O OPEN  X BACK", VS, s_dim, s_bg);
+        draw_text_centered(s_W / 2, s_crumb_y + HS * 8 + 12, "l/r adjust  o open  x back", VS, s_dim, s_bg);
         board_draw_touch_deck();
         for (int i = 0; i < nrows; i++) {
             int ry = y0 + i * dy;
@@ -1116,7 +1131,7 @@ static void run_settings(void) {
             uint16_t lc = hl ? s_accent : s_fg;
             switch (kinds[i]) {
             case R_ACCENT: {
-                draw_kv(ry, "ACCENT", ACCENTS[s_accent_idx].name, LS, VS, lc, s_fg);
+                draw_kv(ry, "accent", ACCENTS[s_accent_idx].name, LS, VS, lc, s_fg);
                 int vw = (int)strlen(ACCENTS[s_accent_idx].name) * 4 * VS;
                 int sw = LS * 13, sh = LS * 7;
                 blit_round_rect(s_gx + s_gw - 24 - vw - 14 - sw, ry + (LS * 5 - sh) / 2, sw, sh, 5, s_accent);
@@ -1124,23 +1139,23 @@ static void run_settings(void) {
 #ifdef BOARD_HAS_WIFI
             case R_WIFI: {
                 wifi_status_t st; wifi_mgr_status(&st);
-                draw_kv(ry, "WIFI", st.connected ? st.ssid : "OFF", LS, VS, lc, st.connected ? s_accent : s_dim);
+                draw_kv(ry, "wifi", st.connected ? st.ssid : "off", LS, VS, lc, st.connected ? s_accent : s_dim);
                 break; }
 #endif
 #ifdef BOARD_HAS_WIFI
             case R_UPDATE: {
-                /* "SYSTEM UPDATE" + a full git-describe version is wider than the row and the two collide
+                /* "system update" + a full git-describe version is wider than the row and the two collide
                  * mid-line (seen on the panel, not in any log). Shorten both: the screen this opens is titled
                  * SYSTEM UPDATE, and the short hash is the part anyone reads. */
                 char v[OTA_VERSION_MAXLEN + 1]; ota_current_version(v, sizeof v);
                 char *dash = strchr(v, '-');
                 if (dash) *dash = '\0';            /* drop the "-dirty"/"-N-gxxxx" tail */
                 if (strlen(v) > 10) v[10] = '\0';
-                draw_kv(ry, "UPDATE", v, LS, VS, lc, s_dim);
+                draw_kv(ry, "update", v, LS, VS, lc, s_dim);
                 break; }
 #endif
-            case R_BRIGHT: draw_kv(ry, "BRIGHTNESS", "SOON", LS, VS, hl ? s_accent : s_dim, s_dim); break;
-            case R_VOL:    draw_kv(ry, "VOLUME",     "SOON", LS, VS, hl ? s_accent : s_dim, s_dim); break;
+            case R_BRIGHT: draw_kv(ry, "brightness", "soon", LS, VS, hl ? s_accent : s_dim, s_dim); break;
+            case R_VOL:    draw_kv(ry, "volume",     "soon", LS, VS, hl ? s_accent : s_dim, s_dim); break;
             }
             if (hl) blit_round_rect(s_gx + 6, ry + 2, 4, LS * 5, 2, s_accent);   /* selection caret */
         }
@@ -1186,11 +1201,11 @@ static void run_about(void) {
     const int VS = s_info_scale;       /* info rows */
     const int PS = s_info_scale + 2;   /* PICO-E32 wordmark */
     board_lcd_fill(s_bg);
-    draw_text_centered(s_W / 2, s_crumb_y, "ABOUT", HS, s_fg, s_bg);
+    draw_text_centered(s_W / 2, s_crumb_y, "about", HS, s_fg, s_bg);
     blit_round_rect(s_W / 2 - 26, s_crumb_y + HS * 8, 52, 3, 1, s_accent);
     int top = s_crumb_y + HS * 8 + 16;
-    draw_text_centered(s_W / 2, top, "PICO-E32", PS, s_accent, s_bg);
-    draw_text_centered(s_W / 2, top + PS * 7, "FAKE-08 ON Z8LUA", VS, s_dim, s_bg);
+    draw_text_centered(s_W / 2, top, "pico-e32", PS, s_accent, s_bg);
+    draw_text_centered(s_W / 2, top + PS * 7, "fake-08 on z8lua", VS, s_dim, s_bg);
     board_draw_touch_deck();
 
     /* 7 info rows evenly packed between the subtitle and the band bottom (above the deck) — fits any panel. */
@@ -1198,14 +1213,14 @@ static void run_about(void) {
     char psram[24];  snprintf(psram, sizeof psram, "%uMB FREE",
                               (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / (1024 * 1024)));
     int y = top + PS * 7 + VS * 8 + 16, dy = (CB_BOT - y) / 7; if (dy < VS * 8) dy = VS * 8;
-    draw_kv(y, "BOARD",      boardname,               VS, VS, s_fg, s_fg);  y += dy;
-    draw_kv(y, "PANEL",      panel,                    VS, VS, s_fg, s_fg);  y += dy;
-    draw_kv(y, "VERSION",    d ? d->version : "?",     VS, VS, s_fg, s_fg);  y += dy;
-    draw_kv(y, "IDF",        d ? d->idf_ver : "?",     VS, VS, s_fg, s_fg);  y += dy;
-    draw_kv(y, "BUILT",      d ? d->date : "?",        VS, VS, s_fg, s_fg);  y += dy;
-    draw_kv(y, "PSRAM",      psram,                    VS, VS, s_fg, s_fg);  y += dy;
+    draw_kv(y, "board",      boardname,               VS, VS, s_fg, s_fg);  y += dy;
+    draw_kv(y, "panel",      panel,                    VS, VS, s_fg, s_fg);  y += dy;
+    draw_kv(y, "version",    d ? d->version : "?",     VS, VS, s_fg, s_fg);  y += dy;
+    draw_kv(y, "idf",        d ? d->idf_ver : "?",     VS, VS, s_fg, s_fg);  y += dy;
+    draw_kv(y, "built",      d ? d->date : "?",        VS, VS, s_fg, s_fg);  y += dy;
+    draw_kv(y, "psram",      psram,                    VS, VS, s_fg, s_fg);  y += dy;
     /* maintainer as one centered line — label+value won't both fit the column side by side (kept small: it's long) */
-    draw_text_centered(s_W / 2, y, "MAINTAINER: ALDWIN HERMANUDIN", 2, s_dim, s_bg);
+    draw_text_centered(s_W / 2, y, "maintainer: aldwin hermanudin", 2, s_dim, s_bg);
 
     uint8_t prev = input_poll();   /* seed with held buttons so a press carried in from the previous screen doesn't re-fire */
     for (;;) {
