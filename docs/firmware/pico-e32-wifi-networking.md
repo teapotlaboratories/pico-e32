@@ -62,6 +62,12 @@ the launcher's WIFI screen in `firmware/pico-e32-fake08/main/carousel_launcher.c
     no network reports cleanly rather than hanging.
   - **Out of scope here:** signature verification (needs a signing key + secure boot decision — file separately if
     wanted), and delta updates.
+  - **Bench endpoint:** [`tools/ota_server.py`](../../tools/ota_server.py) serves built images plus a
+    manifest for each and prints the `CONFIG_PICO_E32_OTA_MANIFEST_URL` line to paste. It reads `target`,
+    `version`, `sha256` and `size` **out of the image** (chip id from the image header, version from the app
+    descriptor) rather than taking them on trust, so a manifest cannot disagree with the binary it describes —
+    which is the exact failure the device-side checks exist to catch. Bench only: plain HTTP, no signing.
+
 - **`WC-4b` — NTP clock and network cart downloads.** (was the rest of `WC-4`)
   **Original note:** NTP clock (About/real-time), OTA firmware update (partition table already
   OTA-ready), and network cart downloads (non-Splore). Each layers on `WC-1`. These are the **consumers** of the
