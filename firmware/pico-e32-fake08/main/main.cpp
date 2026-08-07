@@ -17,6 +17,7 @@
 #include "esp_heap_caps.h"
 
 #include "board.h"    /* board_lcd_init() — the app owns board bring-up */
+#include "ota_manager.h"   /* confirm a freshly-installed image once the board is up (WC-4a) */
 #include "host.h"
 #if defined(LAUNCHER) || defined(FB_DUMP)
 #include "carousel_launcher.h"   /* native cover-art carousel + the shared compressed FB_DUMP helper */
@@ -188,6 +189,16 @@ extern "C" void app_main(void) {
      * over to the radio for the duration of a WiFi session (board_sd_unmount) and remounts after — see WC-6. */
     sd_ret = board_sd_mount(SD_MOUNT_POINT);
 #endif
+
+    /* Confirm a freshly-installed image HERE, on the one path every boot takes (WC-4a).
+     *
+     * With rollback armed, an OTA'd image boots as PENDING_VERIFY and reverts unless it confirms itself. The
+     * bar for "this image is good" is that the board came up: display, then SD attempted. Deliberately NOT
+     * inside the launcher — that only runs when the card mounted, so a boot with no card would silently revert
+     * a perfectly good update, and the retry would then fail with esp_ota_begin returning
+     * ESP_ERR_OTA_ROLLBACK_INVALID_STATE. Deliberately not the first line of app_main either: an image that
+     * panics during board bring-up should still be allowed to roll back. */
+    ota_mark_valid();
 
     /* fake-08 boot sequence (mirrors source/main.cpp:39-51). Pass the board's panel size so the host
      * centres the game blit for this geometry (S3 320x480, P4 480x800). */

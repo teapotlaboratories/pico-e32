@@ -352,3 +352,47 @@ Verified rather than assumed:
 
 Lives in `tools/` alongside the other bench utilities (`fb_screenshot.py`, `capture_frame.sh`) — one home
 for this kind of thing rather than a second script directory.
+
+### 16. Review pass — five findings, one of them serious
+
+**1. `ota_mark_valid()` sat on a path many boots never reach — MAJOR.** With rollback armed, an OTA'd image
+boots `PENDING_VERIFY` and reverts unless it confirms itself. The only confirm call lived inside
+`carousel_launcher_run()`, which `main.cpp` invokes **only when `sd_ret == ESP_OK`** (and not under
+`FORCE_FLASH_CART`, and not if the PSRAM scratch alloc fails). So: update succeeds → reboot → card absent or
+failed to mount → launcher never runs → **the good update silently rolls back**. Worse, the retry is then
+blocked: with the app still pending-verify `esp_ota_begin()` returns `ESP_ERR_OTA_ROLLBACK_INVALID_STATE`,
+surfacing only as a generic "UPDATE FAILED".
+
+Moved to `app_main`, after board + SD bring-up and before the cart ladder — deliberately not the first line
+either, so an image that panics during bring-up can still roll back. Verified by the log ordering flipping:
+
+| | before | after |
+|---|---|---|
+| `carousel layout` | 1201 ms | 1849 ms |
+| `new image confirmed good` | 1324 ms | **1773 ms** |
+
+Confirm now precedes the launcher, so a card-less boot still confirms.
+
+**2. The `OTA_INSECURE` escape hatch was dead code.** `-D OTA_INSECURE=1` becomes a CMake cache variable, and
+only `main/CMakeLists.txt` forwards names into compile definitions — `components/ota` forwarded nothing. Against
+a self-signed bench server the build would still validate against the CA bundle and fail, with the loud "never
+ship this" warning never printing. Exactly the trap documented in §5, missed one directory over. Now forwarded,
+and the CMake shouts when it is on.
+
+**3. The confirm screen drew manifest-controlled strings with no width bound.** `draw_kv` right-aligns by string
+length and nothing clips, so a long `version` (up to 47 chars) or `build` runs into its own label and, far
+enough, hands a **negative x** to the panel blit. Same overlap bug fixed one screen over in §9 — the settings row
+got a guard, the confirm screen did not. Added `fit_text()`, clamped to what the row actually holds.
+
+**4. No redirect handling.** `esp_http_client_open` + `fetch_headers` does not follow 3xx (that is
+`esp_http_client_perform`, which we cannot use — the body is streamed into flash). Real hosting redirects
+constantly, so the first non-bench endpoint would have failed as a bare "not found". Both fetches now follow up
+to 4 hops via `esp_http_client_set_redirection()`.
+
+**5. The `for(;;)` in `run_update` was dead** — every path returned, so a transient AP hiccup dumped the user
+back to Settings instead of letting them press CHECK again. Recoverable outcomes now `continue`.
+
+Also confirmed sound by the review, worth recording: acquire/release is balanced on every `run_update` exit and
+always precedes the `~SdHostLoan` remount; `esp_ota_abort` is reached exactly once per failure path; the
+over-long-body check happens *before* the write; and `ota_server.py`'s header offsets and chip-id table are
+correct.

@@ -944,6 +944,19 @@ static bool ota_progress_cb(size_t done, size_t total, void *user) {
     return !(input_poll() & INPUT_X);
 }
 
+/* Copy `src` into `dst`, clipped to `max_chars` glyphs (ellipsis on the tail when it does not fit). Used for
+ * anything drawn from a manifest: draw_kv right-aligns by string length and neither it nor draw_text clips, so
+ * an over-long value walks left through its own label and, far enough, hands a negative x to the panel blit. */
+static void fit_text(char *dst, size_t dst_sz, const char *src, int max_chars) {
+    if (!dst || dst_sz == 0) return;
+    if (max_chars < 1) max_chars = 1;
+    if ((size_t)max_chars > dst_sz - 1) max_chars = (int)dst_sz - 1;
+    size_t n = strnlen(src ? src : "", (size_t)max_chars);
+    memcpy(dst, src ? src : "", n);
+    dst[n] = '\0';
+    if (src && src[n] != '\0' && n >= 1) dst[n - 1] = '~';   /* the font has no ellipsis glyph */
+}
+
 static void run_update(void) {
     const int HS = s_info_scale + 1, VS = s_info_scale;
     char cur[OTA_VERSION_MAXLEN + 1];
@@ -996,7 +1009,8 @@ static void run_update(void) {
              * screen to join one, the second to try again or move closer. Don't collapse them into one message. */
             wifi_msg("UPDATE", cerr == ESP_ERR_NOT_FOUND ? "NO SAVED WIFI - JOIN ONE FIRST" : "CANT REACH NETWORK",
                      s_missing, true);                          /* ~SdHostLoan gives the card back */
-            return;
+            prev = input_poll();
+            continue;          /* back to the screen: a transient failure should be retryable in place */
         }
 
         wifi_msg("UPDATE", "CHECKING...", s_dim, false);
@@ -1008,22 +1022,32 @@ static void run_update(void) {
             if (err == ESP_ERR_INVALID_RESPONSE)     cm = "BAD MANIFEST";
             else if (err == ESP_ERR_INVALID_VERSION) cm = "UPDATE IS FOR ANOTHER BOARD";
             wifi_msg("UPDATE", cm, s_missing, true);
-            return;
+            prev = input_poll();
+            continue;
         }
         if (!ota_is_newer(&rel)) {
             wifi_mgr_release();
             wifi_msg("UPDATE", "ALREADY UP TO DATE", s_accent, true);
-            return;
+            prev = input_poll();
+            continue;
         }
 
         /* Offer it, with the version actually on the other end — never install without showing what. */
         header("O INSTALL   X CANCEL");
         y = s_crumb_y + HS * 8 + VS * 8 + 30;
-        draw_kv(y, "CURRENT", cur,         VS, VS, s_dim, s_dim); y += VS * 11;
-        draw_kv(y, "NEW",     rel.version, VS, VS, s_fg, s_accent); y += VS * 11;
+        /* These strings come from the MANIFEST, i.e. off the network, and draw_kv right-aligns without
+         * clipping: a long enough value overruns its label and a longer one produces a negative x that goes
+         * straight to the panel blit. Clamp to what the row can actually hold. */
+        const int val_px  = s_gw - 24 - 24 - (int)strlen("CURRENT") * 4 * VS;
+        const int val_max = val_px / (4 * VS) > 0 ? val_px / (4 * VS) : 1;
+        char nv[OTA_VERSION_MAXLEN + 1], bv[32];
+        fit_text(nv, sizeof nv, rel.version, val_max);
+        fit_text(bv, sizeof bv, rel.build,   val_max);
+        draw_kv(y, "CURRENT", cur,  VS, VS, s_dim, s_dim);   y += VS * 11;
+        draw_kv(y, "NEW",     nv,   VS, VS, s_fg, s_accent); y += VS * 11;
         char sz[24]; snprintf(sz, sizeof sz, "%uK", (unsigned)(rel.size / 1024));
-        draw_kv(y, "SIZE",    sz,          VS, VS, s_fg, s_fg);   y += VS * 11;
-        if (rel.build[0]) { draw_kv(y, "BUILT", rel.build, VS, VS, s_dim, s_dim); y += VS * 11; }
+        draw_kv(y, "SIZE",    sz,   VS, VS, s_fg, s_fg);     y += VS * 11;
+        if (bv[0]) { draw_kv(y, "BUILT", bv, VS, VS, s_dim, s_dim); y += VS * 11; }
 
         prev = input_poll();
         bool go = false, done_choosing = false;
@@ -1036,7 +1060,7 @@ static void run_update(void) {
             if (p & INPUT_X) { go = false; done_choosing = true; }
             vTaskDelay(pdMS_TO_TICKS(40));
         }
-        if (!go) { wifi_mgr_release(); return; }
+        if (!go) { wifi_mgr_release(); prev = input_poll(); continue; }   /* cancelled the install, not the screen */
 
         header("DOWNLOADING   X CANCEL");
         s_ota_pct = -1;
@@ -1054,7 +1078,7 @@ static void run_update(void) {
         else if (err == ESP_ERR_INVALID_SIZE)  why = "WRONG SIZE - NOT INSTALLED";
         else if (err == ESP_ERR_INVALID_STATE) why = "CANCELLED";
         wifi_msg("UPDATE", why, s_missing, true);
-        return;
+        prev = input_poll();          /* the loop is real: failures land back on the screen, not in Settings */
     }
 }
 
@@ -1227,11 +1251,6 @@ std::string carousel_launcher_run(Host *host, const std::string &start_dir) {
     input_init();   /* the selected backend (touch when shipped, serial for headless HITL) — same seam the game uses */
 
     apply_accent();
-
-    /* Reaching the launcher is the evidence a freshly-installed image is good, so confirm it here and cancel the
-     * pending rollback. Before this point a panic would (correctly) revert to the previous firmware. Not gated on
-     * BOARD_HAS_WIFI: rollback is a property of the firmware, not of how the image arrived. */
-    ota_mark_valid();
 
 #ifdef BOARD_HAS_WIFI
     /* Deliberately nothing here: the radio stays OFF at boot (WC-5). It is brought up only by whoever needs it
