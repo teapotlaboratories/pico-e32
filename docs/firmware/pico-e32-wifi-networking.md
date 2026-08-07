@@ -46,13 +46,14 @@ the launcher's WIFI screen in `firmware/pico-e32-fake08/main/carousel_launcher.c
     no re-layout.
   - **The catch, found by putting it on the panel:** every UI label was an uppercase string literal, so the
     whole interface turned accent-blue. Fixed by rewriting **108 display literals to lowercase** — they render
-    as the same cap shapes, unmarked — leaving the accent to mean "selected row" and "a real capital in data".
+    as the same cap shapes, unmarked — leaving the accent to mean "selected row" alone — capitals take a separate fixed cyan.
     The keyboard's `KB_LOW`/`KB_UPP` rows are *character data*, not labels, and were deliberately left alone;
     shifting to `KB_UPP` marks the keys, which doubles as a caps indicator (this briefly regressed — see the
     worklog §8 — because the inversion guard was written as "any non-default background").
-  - `case_col()` applies only on the normal background: where a caller has inverted the row (a selected pill, a
-    highlighted key) fg/bg are a contrasting pair and the highlight stands down, so capitals never land as
-    cyan-on-accent.
+  - `case_col()` stands down on a true inversion (`bg == s_accent`) so capitals never land as cyan-on-accent,
+    and on rows the caller already treats specially — dimmed context rows get a dimmed highlight, accent-
+    emphasised values keep their emphasis. It DOES apply on plain panels (`s_platform`, `s_titlebar`), which is
+    what makes the password field and the keyboard work.
   - **Verify:** `FB_DUMP` captures of (a) the password field mid-typing showing the actual characters, and
     (b) the WiFi list against a real mixed-case SSID; plus both boards building, since the font is shared.
   - **Original note:** The PICO-8 font (`pico8_font.h`) is **uppercase-only** (`glyph_rows` upper-cases

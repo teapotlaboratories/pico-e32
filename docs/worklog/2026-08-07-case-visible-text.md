@@ -36,9 +36,10 @@ as unverifiable. Drawing it is what caught that.
 
 ## 2. What shipped
 
-Case is carried by colour. `case_col(c, fg, bg)` returns the highlight for `A-Z` and `fg` otherwise, and stands
-down entirely on any non-default background: where a caller inverts a row, fg/bg are a contrasting pair and a
-third fixed colour dropped into it reads worse than either. Wired into `draw_text` and the transparent `glyphs_into` used
+Case is carried by colour. `case_col(c, fg, bg)` returns the highlight for `A-Z` and `fg` otherwise. It stands
+down where the caller has already made a colour decision: a true inversion (`bg == s_accent`), a deliberately
+dim context row (which gets the *dimmed* highlight), and an accent-emphasised value. It does apply on plain
+panels — the password field and the keyboard keys — which §8 covers, because a first attempt got that wrong. Wired into `draw_text` and the transparent `glyphs_into` used
 for folder tiles.
 
 `glyph_rows()` still folds for *lookup* — there is one glyph per letter — but case now survives as colour.
@@ -51,15 +52,14 @@ accent's existing meaning — selected row.
 
 Fixed by rewriting **108 display literals to lowercase** (`"STATUS"` → `"status"`), which render as the identical
 cap shapes with no marking. Deliberately untouched: `KB_LOW`/`KB_UPP`, which are the *characters the keyboard
-types*, not labels. Nice side effect — shifting into `KB_UPP` now turns the keys accent, which reads as a caps
-indicator for free.
+types*, not labels. Nice side effect — shifting into `KB_UPP` marks the keys, which reads as a caps indicator for free.
 
 Verified no `ESP_LOG` string was caught by the sweep.
 
 ## 4. Result
 
-`Tukang Ketoprak` renders with `T` and `K` in the accent and the rest white; labels are white; the accent still
-means "selected". Both boards build.
+`Tukang Ketoprak` renders with `T` and `K` highlighted and the rest white; labels are white; the accent still
+means "selected". (§5 changed the highlight from the accent to a fixed cyan; §8 fixed where it applies.) Both boards build.
 
 ## 5. Follow-up: the capitals colour
 
@@ -137,3 +137,29 @@ from the same pass:
 **The pattern, twice now:** each fix was verified on the screens I happened to open, and each broke a screen I
 did not. The password field was never re-captured after §7's change; the review caught it by reading the code
 paths instead of the pixels.
+
+## 9. Third review pass — the symmetric case, and button legends
+
+**`case_col` handled dim rows but not accent-emphasised ones.** §8 added a carve-out for `fg == s_dim`; the
+mirror case was missed. Where a caller deliberately draws a *value* in the accent on the normal background —
+the Settings row showing a connected SSID, the confirm screen's `new` version — capitals fell through to the
+cyan, so the row came out two colours and the "accent means connected/new" cue broke. A version string like
+`OTA-TEST-2` rendered almost entirely cyan, defeating the emphasis it was given. Now an accent foreground is
+left alone, exactly as `s_dim` is.
+
+**The lowercase sweep hit character data, not just labels.** `"O SELECT   X BACK"` became
+`"o select   x back"` — but `O` and `X` are *button legends*: the touch deck draws literal `O` and `X` glyphs
+(`boards/…/board.cpp`), so the hint said lowercase `o` while the button beside it said `O`. Worse, under this
+change's own convention an unmarked letter asserts "this is lowercase", which is simply false here. Restored as
+`O select   X back` — the legend keeps its case (and gets marked, correctly), the words stay lowercase. This is
+the same label-vs-character-data line that was drawn correctly for `KB_LOW`/`KB_UPP` and missed here.
+
+**Documentation drift, three places.** The block comment still opened with "a capital is drawn in the accent"
+two lines before "Deliberately NOT the accent"; this worklog's §2-§4 still described the rule that §8 reverted;
+and the `WC-2` one-liner in the master TODO — the line most likely to be read — still said "capitals take the
+accent". All corrected, and this file now says at the top that §8 holds the shipped rule, because burying the
+correction at the end is what the review (rightly) called out.
+
+**Three passes, three regressions of the same shape:** each fix was checked against the screens it was about,
+and broke or mis-stated one it wasn't. What caught all three was reading the call sites rather than looking at
+pixels — the pixels looked fine every time.
