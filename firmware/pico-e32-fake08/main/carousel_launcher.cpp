@@ -45,6 +45,7 @@ static int s_title_y, s_title_scale, s_body_y, s_body_dy, s_body_scale, s_info_s
 
 static int      s_W = 480, s_H = 800;
 static uint16_t s_bg, s_fg, s_dim, s_missing, s_accent, s_platform, s_titlebar, s_track;
+static uint16_t s_case;   /* capitals (WC-2) — fixed, NOT the accent: see case_col */
 
 /* one reusable PSRAM scratch buffer, sized to the largest thing blitted (the 384x384 centre window) */
 static uint16_t *s_scratch = nullptr;
@@ -55,11 +56,13 @@ static uint16_t *s_scratch = nullptr;
  * this exists for. Case is carried by COLOUR instead (WC-2): the shapes are the default, and a capital is drawn
  * in the accent. No cell-height change, so no re-layout.
  *
- * The accent is also the selected-row colour, so a capital on a highlighted row would be invisible (or on an
- * accent-coloured value, pointless). Fall back to fg whenever the highlight would collide. */
+ * Deliberately NOT the accent. The accent means "selected row" and is user-configurable, so reusing it both
+ * collided with selection and made capitals change colour with the theme — case is a property of the text, not
+ * a theme choice. s_case is fixed. Falls back to fg wherever it would be invisible (drawn on itself) or
+ * pointless (the text is already that colour). */
 static inline uint16_t case_col(char c, uint16_t fg, uint16_t bg) {
     if (c < 'A' || c > 'Z') return fg;
-    return (s_accent == bg || s_accent == fg) ? fg : s_accent;
+    return (s_case == bg || s_case == fg) ? fg : s_case;
 }
 
 static const char *const *glyph_rows(char c) {
@@ -1247,6 +1250,7 @@ std::string carousel_launcher_run(Host *host, const std::string &start_dir) {
     s_platform = board_lcd_rgb565(26, 30, 46);
     s_titlebar = board_lcd_rgb565(10, 12, 20);
     s_track    = board_lcd_rgb565(54, 60, 82);   /* position-bar track — clearly visible against the bg */
+    s_case     = board_lcd_rgb565(110, 220, 220);  /* capitals: cyan (WC-2) */
 
     /* pull the per-panel layout from the board (see boards/<board>/board.cpp) */
     board_carousel_layout_t L;
