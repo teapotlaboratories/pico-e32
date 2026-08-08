@@ -359,6 +359,13 @@ extern "C" void app_main(void) {
     ESP_LOGI(TAG, "CELESTE_START: begin_game + load_room(0,0) (skip title for fc-scheduled HITL)");
 #endif
 
+/* From here the cart owns the machine: every branch below is a frame loop that does not return. Arm the only
+ * way back — hold MENU to restart into the launcher (IN-6) — ONCE, above the ladder rather than inside one
+ * branch, because there are five (MEASURE_FPS / TELEMETRY / FB_DUMP / GC_MANUAL / shipped) and a gesture that
+ * works only in the shipped build is worse than none: the dev builds are where it gets exercised. Not armed
+ * before this point, since in the launcher MENU is not an exit. */
+input_exit_enable(true);
+
 #ifdef MEASURE_FPS
     /* Opt-in fps measurement (DEFS='-D MEASURE_FPS=1'). Run our own loop, paced to the target fps, and
      * time Step() (fake-08's _update/_draw in the VM) vs drawFrame() (our unpack → RGB565 → 2× → blit)
@@ -635,7 +642,7 @@ extern "C" void app_main(void) {
         }
     }
 #else
-    ESP_LOGI(TAG, "entering GameLoop");
+    ESP_LOGI(TAG, "entering GameLoop (hold MENU to return to the launcher)");
     vm->GameLoop(); /* fake-08's own loop; never returns */
 #endif
 }

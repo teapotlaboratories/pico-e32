@@ -8,6 +8,8 @@ if(NOT DEFINED INPUT_BACKEND OR "${INPUT_BACKEND}" STREQUAL "")
 endif()
 
 set(_input_src "input_${INPUT_BACKEND}.c")
+# input_exit.c is compiled with EVERY backend: the hold-MENU-to-exit gesture (IN-6) belongs to the device,
+# not to one input source, and each backend calls input_exit_check() from inside its own input_poll().
 if(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/${_input_src}")
     message(FATAL_ERROR "input: unknown INPUT_BACKEND='${INPUT_BACKEND}' (no ${_input_src}); use stub|serial|touch|i2c|scheduled")
 endif()
@@ -20,10 +22,10 @@ endif()
 # USB-Serial-JTAG (CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG — the ESP32-P4 board); the S3 (UART console) links it
 # but never calls it. Both targets support the peripheral, so requiring it unconditionally is harmless.
 idf_component_register(
-    SRCS "${_input_src}"
+    SRCS "${_input_src}" "input_exit.c"
     INCLUDE_DIRS "."
     PRIV_INCLUDE_DIRS "${CMAKE_CURRENT_LIST_DIR}/../../assets"
-    REQUIRES esp_driver_uart esp_driver_usb_serial_jtag
+    REQUIRES esp_driver_uart esp_driver_usb_serial_jtag esp_system esp_timer
 )
 # PRIV_INCLUDE_DIRS assets/: the touch backend (input_touch.c) renders O/X/MENU labels from
 # assets/pico8_font.h via the portable deck. Private — only this component's own sources use it.

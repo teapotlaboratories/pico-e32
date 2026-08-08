@@ -199,3 +199,24 @@ See [`docs/worklog/2026-07-18-celeste-playtest-clear.md`](../worklog/2026-07-18-
     `miss/fed` per lead k — the one number the sim cannot give. Should read ~0 on the tuned k=2 path.
     *Still open:* sweep the reported miss-rate vs lead k and host `low_latency` to confirm it moves as
     predicted (the clear already proves it is ~0 at k=2). Dev/HITL-only — compiles out of production.
+
+- **IN-6 — exit a running cart back to the launcher. 🟡 IN PROGRESS (2026-08-07).**
+  - **The gap.** Once a cart launches there is *no way back*. `main.cpp` calls `vm->GameLoop()`, which by design
+    never returns; the deck's **MENU** button maps to `INPUT_PAUSE` → `Vm::togglePauseMenu()`, which freezes the
+    cart and pauses audio but **renders no options and offers no exit** (upstream leaves it at
+    `vm.cpp:1247  //todo: pause menu here, but for now just load bios`). A power-cycle is the only way out, so a
+    launcher holding 3145 carts plays exactly one per boot. Found while writing the all-views report.
+  - **Why the obvious implementations do not work.** `input_poll()` is **destructive** on the serial backend —
+    it drains the UART/USB-JTAG buffer and decrements hold counters — so a second watcher task would *steal*
+    input from the VM. And the app cannot check anything itself, because it is blocked inside `GameLoop()`.
+    The only per-frame code paths are `ESP32Host::scanInput()` (in the **fake-08 submodule**, so a separate repo
+    PR plus a gitlink bump) and `input_poll()` itself (ours).
+  - **Approach:** a shared helper in `components/input`, called by each backend from inside its `input_poll()`,
+    that counts consecutive polls with `INPUT_PAUSE` held and, past a threshold (~1.2 s), reboots. The launcher
+    is ~1.8 s away with the SD already mounted and the radio off, so a restart *is* the return path — no VM
+    unwind, no submodule change. Long-press rather than a tap, so it cannot be confused with PICO-8's pause.
+  - **Verify:** hold MENU in a running cart on **both** boards and land back in the carousel; a short tap still
+    pauses (audio stops) and does not reboot; the launcher's own screens are unaffected (they exit with X).
+  - **Not this item:** a real CONTINUE / EXIT overlay, which is what upstream's `//todo` intends. That needs
+    rendering inside fake-08's loop and unwinding a loop documented never to return — a deliberate divergence in
+    ported code, and it can supersede this later.

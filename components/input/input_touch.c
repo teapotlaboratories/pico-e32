@@ -43,6 +43,7 @@ uint8_t input_poll(void) {
             ESP_LOGI(TAG, "touch (%d,%d) -> 0x%02x", xs[i], ys[i], bit[i]);
     }
     was = (n > 0);
+    input_exit_check(held);   /* hold MENU -> back to the launcher (IN-6) */
     return held;
 }
 

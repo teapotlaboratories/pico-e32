@@ -185,6 +185,7 @@ uint8_t input_poll(void) {
             ++i;                                       /* still in the future */
         }
     }
+    input_exit_check(held);   /* hold MENU -> back to the launcher (IN-6) */
     return held;
 }
 
