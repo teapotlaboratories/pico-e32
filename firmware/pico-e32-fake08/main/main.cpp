@@ -368,10 +368,14 @@ extern "C" void app_main(void) {
 /* From here the cart owns the machine: every branch below is a frame loop that does not return. Arm the only
  * way back — hold MENU to restart into the launcher (IN-6) — ONCE, above the ladder rather than inside one
  * branch, because there are five (MEASURE_FPS / TELEMETRY / FB_DUMP / GC_MANUAL / shipped) and a gesture that
- * works only in the shipped build is worse than none: the dev builds are where it gets exercised. Not armed
- * before this point, since in the launcher MENU is not an exit — and not armed AT ALL unless a reboot would
- * actually reach the launcher, so a card-less or non-LAUNCHER boot cannot lose a session to a gesture that
- * would only replay the same cart. */
+ * works only in the shipped build is worse than none. Not armed before this point, since in the launcher MENU
+ * is not an exit — and not armed AT ALL unless a reboot would actually reach the launcher, so a card-less or
+ * non-LAUNCHER boot cannot lose a session to a gesture that would only replay the same cart.
+ *
+ * Note what that gate means in practice: the documented dev invocations (MEASURE_FPS / TELEMETRY / GC_MANUAL)
+ * all use -D FORCE_FLASH_CART=1 without -D LAUNCHER=1, so launcher_is_boot_dest is false and the gesture is
+ * inert in them. That is correct — those builds have no launcher to return to — but it does mean the position
+ * above the ladder buys uniformity, not dev-build coverage. A LAUNCHER build with a card exercises it. */
 input_exit_enable(launcher_is_boot_dest);
 
 #ifdef MEASURE_FPS

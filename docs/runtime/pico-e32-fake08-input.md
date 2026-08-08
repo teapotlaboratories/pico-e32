@@ -201,11 +201,19 @@ See [`docs/worklog/2026-07-18-celeste-playtest-clear.md`](../worklog/2026-07-18-
     predicted (the clear already proves it is ~0 at k=2). Dev/HITL-only — compiles out of production.
 
 - **IN-6 — exit a running cart back to the launcher. 🟡 IN PROGRESS (2026-08-07).**
-  - **The gap.** Once a cart launches there is *no way back*. `main.cpp` calls `vm->GameLoop()`, which by design
-    never returns; the deck's **MENU** button maps to `INPUT_PAUSE` → `Vm::togglePauseMenu()`, which freezes the
-    cart and pauses audio but **renders no options and offers no exit** (upstream leaves it at
-    `vm.cpp:1247  //todo: pause menu here, but for now just load bios`). A power-cycle is the only way out, so a
-    launcher holding 3145 carts plays exactly one per boot. Found while writing the all-views report.
+  - **The gap — corrected 2026-08-08, the original statement of it was wrong.** `main.cpp` calls
+    `vm->GameLoop()`, which by design never returns, and the deck's **MENU** maps to `INPUT_PAUSE` →
+    `Vm::togglePauseMenu()`. This was written up as "renders no options and offers no exit", citing
+    `vm.cpp:1247  //todo: pause menu here` — but **that line is inside a fully commented-out function and
+    describes nothing that runs.** The live path is `Vm::Step()` → `__z8_tick()`, whose `__ispaused()` branch
+    calls `__f08_menu_update()` + `__f08_menu_draw()` every frame and renders a working, navigable menu:
+    **continue / reset cart / exit to menu / exit to settings** (`p8GlobalLuaFunctions.h`). So a cart is not a
+    one-way trip, and "3145 carts plays exactly one per boot" was false.
+  - **What the real gap is.** `exit to menu` runs `__loaddefaultcart` → `QueueCartChange("__FAKE08-DEFAULT.p8")`
+    — fake-08's built-in **plain-text cart browser**, not our cover-art carousel. The carousel is native code in
+    `main.cpp` that runs *before* `GameLoop()`, so the VM has no way to return to it; redirecting that menu item
+    would mean changing the **submodule**. `IN-6` is therefore a convenience — a way back to *our* launcher
+    without a submodule change — not the only way out of a cart, and it should be justified as such.
   - **Why the obvious implementations do not work.** `input_poll()` is **destructive** on the serial backend —
     it drains the UART/USB-JTAG buffer and decrements hold counters — so a second watcher task would *steal*
     input from the VM. And the app cannot check anything itself, because it is blocked inside `GameLoop()`.

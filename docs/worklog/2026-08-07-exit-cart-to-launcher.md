@@ -19,6 +19,27 @@ knowing the answer. Reading the code rather than guessing:
 So MENU freezes and silences the cart; pressing it again resumes. There is no exit. A launcher holding 3145
 carts plays exactly one per boot.
 
+> ### ⚠️ CORRECTION (2026-08-08, third review round) — the four bullets above are WRONG
+>
+> `vm.cpp:1247` is inside a **fully commented-out function**. It describes nothing that runs, and I cited dead
+> code as evidence for the whole feature. The live path is `Vm::Step()` → `__z8_tick()`, whose `__ispaused()`
+> branch calls `__f08_menu_update()` + `__f08_menu_draw()` **every frame** and renders a working, navigable
+> menu: **continue / reset cart / exit to menu / exit to settings** (`p8GlobalLuaFunctions.h:212`). `exit to
+> menu` → `__loaddefaultcart` → `QueueCartChange("__FAKE08-DEFAULT.p8")`, so "`LoadBiosCart()` is never reached
+> from a pause" is wrong too, and **"3145 carts plays exactly one per boot" is false** — you could always leave
+> a cart and pick another.
+>
+> Worse: **I had a photograph of that exact menu.** The first bench-camera frame I took this session, and
+> described in detail, shows `CONTINUE / RESET CART / EXIT TO MENU / EXIT TO SETTINGS` on the P4 panel — I had
+> pressed `p` while a cart ran. I looked straight at the refutation of my own premise and did not register it,
+> because I was reading the screen for "is the board alive" and not for "is what I wrote true".
+>
+> **What survives.** `exit to menu` lands in fake-08's built-in **plain-text cart browser**, not our cover-art
+> carousel. The carousel is native code in `main.cpp` that runs *before* `GameLoop()`, so the VM cannot return
+> to it and redirecting that menu item means changing the **submodule** — the exact cost this design avoids. So
+> `IN-6` is still worth having, but as a *convenience that reaches our launcher*, not as the only way out of a
+> cart. Everything below was written under the wrong premise; the mechanism and the bugs are unaffected.
+
 Worth recording: I had internalised this while scripting the screen captures — every capture run took the
 in-game shot **last**, because the board had to be reset afterwards — and never wrote it down as a defect. The
 constraint was visible in my own tooling for days.
@@ -165,6 +186,8 @@ Files:
 - `components/input/input_{serial,touch,scheduled,stub,i2c}.c` — an `input_exit_check()` call on **every**
   return path of each backend's `input_poll()`, the stub and i2c skeleton included (§5a says why)
 - `components/input/host_test/test_input_scheduled.c` — stubs the hook so the host test still links
+- `components/input/host_test/test_input_exit.c` (new) + `stubs/esp_timer.h`, `stubs/esp_system.h`,
+  `run.sh`, `.gitignore` — the fake-clock host test pinning the timing, six cases, both regressions covered
 - `firmware/pico-e32-fake08/main/main.cpp` — `input_exit_enable(launcher_is_boot_dest)` **above** the five-way
   loop ladder, so the gesture exists only when a reboot would actually reach the launcher
 - `docs/runtime/pico-e32-fake08-input.md` — the `IN-6` spec

@@ -1,4 +1,14 @@
-/* input_exit — hold MENU in a running cart to get back to the launcher (IN-6).
+/* input_exit — hold MENU in a running cart to get back to the NATIVE launcher (IN-6).
+ *
+ * What MENU already does, stated correctly: this fake-08 fork DOES render a pause menu. __z8_tick()'s
+ * __ispaused() branch calls __f08_menu_update()/__f08_menu_draw() every frame, giving
+ * continue / reset cart / exit to menu / exit to settings (p8GlobalLuaFunctions.h). The commented-out
+ * `//todo: pause menu here` in vm.cpp is dead code and describes nothing that runs.
+ *
+ * So this gesture is NOT "the only way out" — it is a way back to OUR launcher. "exit to menu" runs
+ * __loaddefaultcart -> QueueCartChange("__FAKE08-DEFAULT.p8"), fake-08's built-in plain-text cart browser.
+ * The cover-art carousel is native code in main.cpp that runs before GameLoop(), so the VM cannot return to
+ * it; redirecting that menu item would mean changing the submodule, which is the cost this avoids.
  *
  * Why this lives in the input layer rather than the app or the Host:
  *   - app_main is blocked inside Vm::GameLoop(), which by design never returns, so there is nowhere in the app
@@ -20,11 +30,6 @@
  * A HOLD, not a tap: a tap must keep meaning PICO-8's own pause (Vm::togglePauseMenu). */
 #include <stdbool.h>
 #include "input.h"
-#include "esp_system.h"
-#include "esp_timer.h"
-#include "esp_log.h"
-
-static const char *TAG = "input.exit";
 
 /* Wall-clock, not a poll count: the poll cadence is the game loop's and varies by build (a telemetry or
  * measure-fps loop does not run at 60 Hz), so counting polls would silently change the gesture's length.
@@ -49,6 +54,15 @@ static const char *TAG = "input.exit";
 static bool s_armed = false;
 
 void input_exit_enable(bool on) { s_armed = on; }
+
+/* Everything the gesture needs lives inside the #if, so `-D INPUT_EXIT_HOLD_MS=0` compiles the feature out
+ * cleanly — no unused TAG, no esp_timer/esp_system dependency pulled in for nothing. */
+#if INPUT_EXIT_HOLD_MS > 0
+#include "esp_system.h"
+#include "esp_timer.h"
+#include "esp_log.h"
+static const char *TAG = "input.exit";
+#endif
 
 void input_exit_check(uint8_t held) {
 #if INPUT_EXIT_HOLD_MS > 0
