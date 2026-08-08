@@ -212,7 +212,12 @@ See [`docs/worklog/2026-07-18-celeste-playtest-clear.md`](../worklog/2026-07-18-
     The only per-frame code paths are `ESP32Host::scanInput()` (in the **fake-08 submodule**, so a separate repo
     PR plus a gitlink bump) and `input_poll()` itself (ours).
   - **Approach:** a shared helper in `components/input`, called by each backend from inside its `input_poll()`,
-    that counts consecutive polls with `INPUT_PAUSE` held and, past a threshold (~1.2 s), reboots. The launcher
+    that measures how long `INPUT_PAUSE` has been held in **wall-clock** (`esp_timer_get_time`) and reboots past
+    a threshold (1.2 s, `INPUT_EXIT_HOLD_MS`). Wall-clock, **not** a poll count: the poll cadence is the game
+    loop's, and four of `main.cpp`'s five loops are not 60 Hz, so "N consecutive polls" would silently mean a
+    different duration in each. A hold also has to be *unbroken* — consecutive held polls more than
+    `INPUT_EXIT_MAX_GAP_MS` (250 ms) apart restart the measurement, so a tap followed by a long stall (a
+    `carousel_fb_dump()` transfer, a GC pause, a slow SD read) cannot be mistaken for a hold. The launcher
     is ~1.8 s away with the SD already mounted and the radio off, so a restart *is* the return path — no VM
     unwind, no submodule change. Long-press rather than a tap, so it cannot be confused with PICO-8's pause.
   - **Verify:** hold MENU in a running cart on **both** boards and land back in the carousel; a short tap still

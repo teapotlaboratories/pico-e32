@@ -10,8 +10,12 @@
  * So each backend calls this from inside its own input_poll(), which is the one per-frame path we own.
  *
  * Restart IS the return path: the launcher is ~1.8 s from reset with the SD already mounted and the radio off
- * (WC-5), so rebooting is cheaper and far safer than unwinding a loop documented never to return. Nothing is
- * lost that was not already lost — PICO-8 carts keep persistent state via cartdata, which is flushed on write.
+ * (WC-5), so rebooting is cheaper and far safer than unwinding a loop documented never to return.
+ *
+ * What that costs, stated plainly: cart save state IS discarded. fake-08's dset() only pokes into RAM at
+ * 0x5e00 (Vm::vm_dset); the blob reaches disk from CloseCart(), vm_load() and a cartdata() key change only —
+ * none of which run on this path. So anything a cart saved since it loaded is gone. A real CONTINUE / EXIT
+ * overlay (upstream's `//todo` in vm.cpp) is what would fix that; this gesture is the cheap way out until then.
  *
  * A HOLD, not a tap: a tap must keep meaning PICO-8's own pause (Vm::togglePauseMenu). */
 #include <stdbool.h>
@@ -30,6 +34,15 @@ static const char *TAG = "input.exit";
 #define INPUT_EXIT_HOLD_MS 1200
 #endif
 
+/* Wall-clock alone is not enough: it measures the time between two polls that happened to see MENU held, and
+ * says nothing about what happened in between. A single serial byte holds INPUT_PAUSE for INPUT_HOLD_FRAMES
+ * polls, so a *tap* followed by any long stall — carousel_fb_dump()'s multi-second serial transfer, a GC
+ * pause, a slow SD read — would come back to a poll >1.2 s after the first and reboot from a tap. So a hold
+ * is only unbroken if consecutive held polls stay close together; a bigger gap restarts the measurement. */
+#ifndef INPUT_EXIT_MAX_GAP_MS
+#define INPUT_EXIT_MAX_GAP_MS 250
+#endif
+
 /* Off until the app says otherwise: in the LAUNCHER, MENU is not an exit (its screens leave with X, and a
  * resting thumb on the deck should not reboot the device). The app arms this immediately before handing
  * control to the VM, so the gesture only exists while a cart is actually running. */
@@ -40,9 +53,13 @@ void input_exit_enable(bool on) { s_armed = on; }
 void input_exit_check(uint8_t held) {
 #if INPUT_EXIT_HOLD_MS > 0
     static int64_t since = 0;                  /* us at which the current unbroken hold started; 0 = not held */
+    static int64_t last  = 0;                  /* us of the previous held poll, to detect a break in the run */
     if (!s_armed || !(held & INPUT_PAUSE)) { since = 0; return; }
     int64_t now = esp_timer_get_time();
-    if (since == 0) { since = now; return; }
+    if (since == 0 || now - last > (int64_t)INPUT_EXIT_MAX_GAP_MS * 1000) {
+        since = now; last = now; return;       /* first held poll, or the run was broken by a stall */
+    }
+    last = now;
     if (now - since < (int64_t)INPUT_EXIT_HOLD_MS * 1000) return;
     since = 0;
     ESP_LOGW(TAG, "MENU held %d ms — returning to the launcher (restart)", INPUT_EXIT_HOLD_MS);

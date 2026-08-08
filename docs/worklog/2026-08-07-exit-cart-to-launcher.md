@@ -85,6 +85,37 @@ Also unverified for the same reason: that a *short* tap still reaches the VM as 
 triggering the exit. The code path is the same `held & INPUT_PAUSE` the VM already consumes and the timer simply
 does not reach 1.2 s, but it is reasoning, not a measurement.
 
+## 5a. Review round (2026-08-08) — seven findings, all real
+
+The review pass on PR #35 found seven, and none were style. Four changed the code:
+
+**The host test stopped linking.** `components/input/host_test/run.sh` compiles `test_input_scheduled.c` as one
+translation unit against stub IDF headers; adding `input_exit_check()` to `input_scheduled.c` broke it with
+`undefined reference to input_exit_check`. It passed on `main` and fails on the branch — a test the repo ships
+and I never ran. Fixed with a stub definition in the test.
+
+**The gesture armed where there is no launcher to return to.** The carousel is gated on `LAUNCHER` *and*
+`sd_ret == ESP_OK`, but arming was unconditional. On a card-less boot of the shipped build, holding MENU
+rebooted into *the same cart from the top* while logging "returning to the launcher" — the user loses the
+session and gains nothing. Now gated on `launcher_is_boot_dest`.
+
+**A tap plus a stall could reboot the device.** The threshold compared two polls that happened to see MENU
+held, with no requirement that anything happened in between. One serial byte holds `INPUT_PAUSE` for
+`INPUT_HOLD_FRAMES` polls, so a tap followed by `carousel_fb_dump()`'s multi-second transfer (or a GC pause, or
+a slow SD read) landed a "held" poll >1.2 s after the first and rebooted. Fixed with
+`INPUT_EXIT_MAX_GAP_MS` (250 ms): held polls further apart than that restart the measurement.
+
+**`INPUT_EXIT_HOLD_MS` was unreachable.** `DEFS='-D X=Y'` only sets a CMake cache variable; every other tunable
+is plumbed with `target_compile_definitions`. So the documented escape hatch — `-D INPUT_EXIT_HOLD_MS=0` to
+compile the gesture out — silently built the 1200 ms default with a live gesture, and so did the 30 ms test
+threshold §5 describes. Now plumbed.
+
+The other three were comments and docs asserting things that were not true: that nothing is lost on exit (cart
+save state **is** discarded — `dset()` only pokes RAM, and the serialising paths are all bypassed by
+`esp_restart()`); that every backend calls the hook (`input_stub.c` and `input_i2c.c` did not — now they do,
+which matters because the i2c file is the IN-3 skeleton for the physical-button handheld); and the spec entry
+in the input doc, which described the **poll-counting** design this work deliberately rejected.
+
 ## 6. PARKED (2026-08-07) — state for whoever picks this up
 
 **Working, uncommitted, held out of the weekday no-commit window.** Everything below is in the tree, both

@@ -96,6 +96,31 @@ USB-Serial-JTAG transport batches input at roughly 1 Hz here — sending <code>p
 30 ms threshold and the real 1200 ms was restored after. Detect → restart → launcher is measured; the feel of the
 hold, and that a short tap still reaches PICO-8's pause, need a finger on the deck with the touch backend.</div>
 
+<h2>Review round — seven findings, all real</h2>
+<p>The review on PR #35 found seven, none of them style. Four changed the code.</p>
+<div class="nullres"><b class="warn">The host test stopped linking.</b> <code>host_test/run.sh</code> compiles
+<code>test_input_scheduled.c</code> as one translation unit against stub IDF headers; adding
+<code>input_exit_check()</code> broke it with <code>undefined reference</code>. It passes on <code>main</code> and
+failed on the branch — a test the repo ships and I never ran.</div>
+<ul>
+<li><b>Armed where there is no launcher to return to.</b> The carousel needs <code>LAUNCHER</code> <i>and</i> a
+mounted card, but arming was unconditional. On a card-less boot, holding MENU rebooted into <b>the same cart from
+the top</b> while logging "returning to the launcher" — session lost, nothing gained. Now gated on
+<code>launcher_is_boot_dest</code>.</li>
+<li><b>A tap plus a stall could reboot the device.</b> The threshold compared two polls that saw MENU held, with
+nothing required in between. One serial byte holds PAUSE for several polls, so a tap followed by
+<code>carousel_fb_dump()</code>'s multi-second transfer landed a "held" poll &gt;1.2 s later and rebooted. Fixed
+with <code>INPUT_EXIT_MAX_GAP_MS</code> (250 ms).</li>
+<li><b><code>INPUT_EXIT_HOLD_MS</code> was unreachable.</b> <code>DEFS='-D X=Y'</code> only sets a CMake cache
+variable, so the documented escape hatch (<code>=0</code> to compile the gesture out) silently built the 1200 ms
+default with a live gesture. Now plumbed via <code>target_compile_definitions</code>.</li>
+</ul>
+<p>The other three were comments and docs asserting untrue things: that nothing is lost on exit (cart save state
+<b>is</b> discarded — <code>dset()</code> only pokes RAM and every serialising path is bypassed by
+<code>esp_restart()</code>); that every backend calls the hook (the stub and the i2c skeleton did not — now they
+do, which matters because that file is the IN-3 skeleton for the physical-button handheld); and the input spec,
+which described the <b>poll-counting</b> design this work deliberately rejected.</p>
+
 <h2>Parked</h2>
 <p>Working and uncommitted, held out of the weekday no-commit window. To finish: commit on a branch, run a review,
 and do the one test the bench cannot — hold MENU on the deck for ~1.2 s with a touch build, and confirm a short
