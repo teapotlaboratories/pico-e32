@@ -52,12 +52,28 @@ void input_exit_enable(bool on) { s_armed = on; }
 
 void input_exit_check(uint8_t held) {
 #if INPUT_EXIT_HOLD_MS > 0
-    static int64_t since = 0;                  /* us at which the current unbroken hold started; 0 = not held */
-    static int64_t last  = 0;                  /* us of the previous held poll, to detect a break in the run */
-    if (!s_armed || !(held & INPUT_PAUSE)) { since = 0; return; }
+    static int64_t since = 0;                  /* us at which the current run started; 0 = no run in progress */
+    static int64_t last  = 0;                  /* us of the most recent poll that actually saw MENU held */
+    if (!s_armed) { since = 0; return; }
     int64_t now = esp_timer_get_time();
-    if (since == 0 || now - last > (int64_t)INPUT_EXIT_MAX_GAP_MS * 1000) {
-        since = now; last = now; return;       /* first held poll, or the run was broken by a stall */
+    const int64_t gap = (int64_t)INPUT_EXIT_MAX_GAP_MS * 1000;
+
+    /* A poll that does not report MENU is NOT proof the user let go. On the P4's shipped touch backend,
+     * board_touch_read() returns 0 on any GT911 I2C hiccup and — routinely — on every poll where the
+     * controller's buffer-ready bit is clear because it has not posted a new frame since the last read. At a
+     * 60 Hz poll that happens constantly, so zeroing the run on one empty poll made the gesture essentially
+     * unfirable on the very build that ships. Only silence for longer than the gap ends a run; that is the
+     * same tolerance already granted between two held polls, applied consistently.
+     *
+     * The residual: taps spaced closer together than the gap keep one run alive, so mashing MENU at ~5/s for
+     * a solid 1.2 s would trip the exit. That is a deliberate act, not a slip, and it is the price of the
+     * dropout tolerance the shipped sensor needs. */
+    if (!(held & INPUT_PAUSE)) {
+        if (since != 0 && now - last > gap) since = 0;
+        return;
+    }
+    if (since == 0 || now - last > gap) {
+        since = now; last = now; return;       /* first held poll, or the run was broken by a real stall */
     }
     last = now;
     if (now - since < (int64_t)INPUT_EXIT_HOLD_MS * 1000) return;

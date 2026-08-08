@@ -39,10 +39,14 @@ costs a separate repo PR plus a gitlink bump — and `input_poll()` itself, whic
 
 ## 3. Approach
 
-A shared helper in `components/input`, called from inside each backend's `input_poll()`, counting consecutive
-polls with `INPUT_PAUSE` held; past ~1.2 s it reboots. The launcher is ~1.8 s from reset with the SD already
-mounted and the radio off, so **restart is the return path** — no VM unwind, no submodule change, no risk of
-half-torn-down state.
+A shared helper in `components/input`, called from inside each backend's `input_poll()`, measuring how long
+`INPUT_PAUSE` has been held in **wall-clock** and rebooting past 1.2 s. The launcher is ~1.8 s from reset with
+the SD already mounted and the radio off, so **restart is the return path** — no VM unwind, no submodule
+change, no risk of half-torn-down state.
+
+(Wall-clock is the *corrected* design. This started as a count of consecutive held polls, which §4 explains was
+wrong in four of the five loops; a later review round then found that requiring the polls to be *consecutive*
+was wrong too — see §5a.)
 
 Long-press rather than a tap, deliberately: a tap must keep meaning PICO-8's pause.
 
@@ -116,6 +120,38 @@ save state **is** discarded — `dset()` only pokes RAM, and the serialising pat
 which matters because the i2c file is the IN-3 skeleton for the physical-button handheld); and the spec entry
 in the input doc, which described the **poll-counting** design this work deliberately rejected.
 
+## 5b. Second review round — the fix for one finding created a worse one
+
+Re-reviewing the seven fixes found five more, and the first is the most serious defect this feature has had.
+
+**The gesture would barely have fired on the hardware it ships on.** Closing the tap-plus-stall hole in §5a
+introduced `INPUT_EXIT_MAX_GAP_MS`, but the function still zeroed the run on **any single poll that did not
+report MENU**. That reads as harmless until you look at what the shipped P4 backend actually returns:
+`board_touch_read()` gives 0 on any GT911 I²C hiccup *and*, routinely, on every poll where the controller's
+buffer-ready bit (`0x814E:7`) is clear because it has not posted a new frame since the last read. At a 60 Hz
+poll that is constant, not exceptional — so across the ~72 consecutive polls a 1.2 s hold needs, the run would
+almost always be reset partway and the user would simply see the gesture "not work", with nothing logged.
+
+Two things about this are worth keeping:
+
+- It is **P4-only**. The S3's FT6236 read is level-based and unaffected. So the one board that could not be
+  driven over serial is the one board the bug lived on — which is exactly why "verified over serial" was never
+  the same as verified.
+- It was **created by fixing the previous finding**, and it is strictly worse than the bug it replaced. A false
+  positive that needs a multi-second stall to trigger is a nuisance; a false negative on the normal path means
+  the feature does not exist.
+
+Now a poll without MENU no longer ends a run on its own — only silence for longer than the gap does, which is
+the same tolerance already granted *between* held polls. Residual, and accepted deliberately: taps closer
+together than 250 ms keep one run alive, so mashing MENU at ~5/s for a solid 1.2 s trips the exit. That is a
+deliberate act, and it is the price of the dropout tolerance the sensor needs.
+
+The other four were smaller: `input_touch.c` and `input_scheduled.c` returned early on `!s_ok` **before** the
+hook, breaking the very invariant the previous round had bought by adding the call to the stub and i2c
+backends; §3 of this file still described the rejected poll-counting design (the previous round fixed that
+wording in the runtime doc but not here); the §6 file list had gone stale against its own §5a; and the branch
+committed an HTML render with no `index.html` card, which `.ai/AGENTS.md` requires.
+
 ## 6. PARKED (2026-08-07) — state for whoever picks this up
 
 **Working, uncommitted, held out of the weekday no-commit window.** Everything below is in the tree, both
@@ -124,9 +160,13 @@ targets build, and the mechanism is verified on the P4.
 Files:
 - `components/input/input_exit.c` (new) — the gesture; wall-clock threshold, armed via `input_exit_enable()`
 - `components/input/input.h` — declarations
-- `components/input/CMakeLists.txt` — compiles `input_exit.c` with **every** backend; `REQUIRES esp_timer`
-- `components/input/input_{serial,touch,scheduled}.c` — one `input_exit_check(held)` call each, before returning
-- `firmware/pico-e32-fake08/main/main.cpp` — `input_exit_enable(true)` **above** the five-way loop ladder
+- `components/input/CMakeLists.txt` — compiles `input_exit.c` with **every** backend; `REQUIRES esp_system
+  esp_timer`; plumbs `INPUT_EXIT_HOLD_MS` / `INPUT_EXIT_MAX_GAP_MS` through `target_compile_definitions`
+- `components/input/input_{serial,touch,scheduled,stub,i2c}.c` — an `input_exit_check()` call on **every**
+  return path of each backend's `input_poll()`, the stub and i2c skeleton included (§5a says why)
+- `components/input/host_test/test_input_scheduled.c` — stubs the hook so the host test still links
+- `firmware/pico-e32-fake08/main/main.cpp` — `input_exit_enable(launcher_is_boot_dest)` **above** the five-way
+  loop ladder, so the gesture exists only when a reboot would actually reach the launcher
 - `docs/runtime/pico-e32-fake08-input.md` — the `IN-6` spec
 
 **To finish it:**

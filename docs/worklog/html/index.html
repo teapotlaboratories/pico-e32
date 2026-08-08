@@ -30,6 +30,18 @@
       linked from this index (see <a href="../../../.ai/AGENTS.md">.ai/AGENTS.md</a> → Worklogs).</p>
     <ul class="entries">
       <li>
+        <span class="d">2026-08-07</span>
+        <a class="t" href="2026-08-07-exit-cart-to-launcher.html">Exit a running cart back to the launcher</a>
+        <span class="s">Once a cart launched there was <strong>no way back</strong> short of a power cycle —
+          <code>GameLoop()</code> never returns and MENU pauses without offering anything. Holding MENU now restarts
+          into the carousel; restart <em>is</em> the return path at ~1.8&nbsp;s. Two implementations ruled out first
+          (a watcher task can't poll — <code>input_poll()</code> is destructive on serial; the app is blocked in the
+          loop). Then two review rounds found twelve things, the worst of them <strong>created by fixing an earlier
+          finding</strong>: resetting the hold on any MENU-less poll made the gesture almost unfirable on the P4,
+          whose touch read returns nothing whenever the GT911 has no new frame — the one board serial testing
+          couldn't reach. <code>IN-6</code>.</span>
+      </li>
+      <li>
         <span class="d">2026-08-06</span>
         <a class="t" href="2026-08-06-p4-sd-sdmmc-handover.html">P4 SD back on SDMMC · host handed to the radio</a>
         <span class="s">Cover-art load <strong>64.0 → 39.4 ms median (−38%)</strong>. The P4's single SDMMC host is

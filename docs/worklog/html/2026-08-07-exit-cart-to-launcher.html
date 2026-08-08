@@ -121,6 +121,26 @@ default with a live gesture. Now plumbed via <code>target_compile_definitions</c
 do, which matters because that file is the IN-3 skeleton for the physical-button handheld); and the input spec,
 which described the <b>poll-counting</b> design this work deliberately rejected.</p>
 
+<h2>Second review round — the fix for one finding created a worse one</h2>
+<div class="nullres"><b class="warn">The gesture would barely have fired on the hardware it ships on.</b> Closing
+the tap-plus-stall hole added a gap window, but the function still zeroed the run on <b>any single poll that did
+not report MENU</b>. On the shipped P4 backend <code>board_touch_read()</code> returns 0 on any GT911 I²C hiccup
+<i>and</i>, routinely, on every poll where the buffer-ready bit is clear because the controller has not posted a
+new frame. At a 60&nbsp;Hz poll that is constant — so across the ~72 polls a 1.2&nbsp;s hold needs, the run was
+almost always reset partway and the user would just see the gesture "not work", with nothing logged.</div>
+<p>Two things worth keeping about it. It is <b>P4-only</b> — the S3's FT6236 read is level-based and unaffected —
+so the one board that could not be driven over serial is the board the bug lived on, which is precisely why
+"verified over serial" was never the same as verified. And it was <b>created by fixing the previous finding</b>,
+and is strictly worse than what it replaced: a false positive needing a multi-second stall is a nuisance; a false
+negative on the normal path means the feature does not exist.</p>
+<p>Now a MENU-less poll no longer ends a run on its own — only silence longer than the gap does, the same
+tolerance already granted between held polls. Accepted residual: taps closer than 250&nbsp;ms keep one run alive,
+so mashing MENU at ~5/s for a solid 1.2&nbsp;s trips the exit.</p>
+<p>The other four were smaller: two backends returned early on <code>!s_ok</code> <b>before</b> the hook, breaking
+the very invariant the previous round bought; the approach section still described the rejected poll-counting
+design; the file list had gone stale against its own review section; and the branch committed an HTML render with
+no index card, which the repo rules require.</p>
+
 <h2>Parked</h2>
 <p>Working and uncommitted, held out of the weekday no-commit window. To finish: commit on a branch, run a review,
 and do the one test the bench cannot — hold MENU on the deck for ~1.2 s with a touch build, and confirm a short
