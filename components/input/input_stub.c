@@ -5,7 +5,9 @@
 #include "input.h"
 
 esp_err_t   input_init(void)         { return ESP_OK; }
-uint8_t     input_poll(void)         { return 0; }
+/* Calls input_exit_check even though the mask is always 0: every backend routes through it, so a backend
+ * that later grows real buttons inherits the exit gesture instead of silently lacking it (IN-6). */
+uint8_t     input_poll(void)         { input_exit_check(0); return 0; }
 void        input_set_frame(uint32_t fc) { (void)fc; }   /* no-op: only the scheduled backend uses the fc */
 const char *input_backend_name(void) { return "stub"; }
 

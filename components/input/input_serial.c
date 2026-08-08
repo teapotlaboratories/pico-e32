@@ -108,6 +108,7 @@ uint8_t input_poll(void) {
     for (int b = 0; b < 7; ++b) {
         if (s_hold[b] > 0) { s_hold[b]--; held |= (uint8_t)(1u << b); }
     }
+    input_exit_check(held);   /* hold MENU -> back to the launcher (IN-6) */
     return held;
 }
 

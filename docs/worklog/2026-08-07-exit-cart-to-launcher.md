@@ -1,0 +1,188 @@
+# 2026-08-07 — Exit a running cart back to the launcher (`IN-6`)
+
+> **Running log — appended as the work happens.**
+
+Goal: make the cart launcher a launcher. Today, once you pick a cart there is no way back to the carousel short
+of power-cycling the board.
+
+## 1. The gap, and how it surfaced
+
+Found by being asked a plain product question — "when in the game, how do I exit to the main menu?" — and not
+knowing the answer. Reading the code rather than guessing:
+
+- `main.cpp:639` → `vm->GameLoop(); /* fake-08's own loop; never returns */`
+- the deck's **MENU** button → `INPUT_PAUSE` (`board.cpp:541`) → `Vm::togglePauseMenu()`, which flips a flag,
+  saves draw state and pauses audio — **and nothing renders menu items or acts on them**
+- upstream leaves the intent behind, commented out: `vm.cpp:1247  //todo: pause menu here, but for now just load bios`
+- `LoadBiosCart()` is only ever reached on a *cart load error*, never from a pause
+
+So MENU freezes and silences the cart; pressing it again resumes. There is no exit. A launcher holding 3145
+carts plays exactly one per boot.
+
+Worth recording: I had internalised this while scripting the screen captures — every capture run took the
+in-game shot **last**, because the board had to be reset afterwards — and never wrote it down as a defect. The
+constraint was visible in my own tooling for days.
+
+## 2. Two implementations that do not work, and why
+
+**A watcher task polling for the gesture.** `input_poll()` is **destructive** on the serial backend: it drains
+the UART / USB-JTAG buffer and decrements the per-key hold counters. A second caller would consume bytes the VM
+never sees, so a background watcher would silently eat input. (The touch backend would merely double the I²C
+traffic, but the serial one is fatal.)
+
+**Checking from the app.** `app_main` is blocked inside `GameLoop()`, which never returns, so there is nowhere
+in `main.cpp` for a per-frame check to live.
+
+That leaves exactly two per-frame code paths: `ESP32Host::scanInput()` — architecturally the *right* home, since
+the Host owns the device and a long-press is a device gesture, but it lives in the **fake-08 submodule** and so
+costs a separate repo PR plus a gitlink bump — and `input_poll()` itself, which is ours.
+
+## 3. Approach
+
+A shared helper in `components/input`, called from inside each backend's `input_poll()`, measuring how long
+`INPUT_PAUSE` has been held in **wall-clock** and rebooting past 1.2 s. The launcher is ~1.8 s from reset with
+the SD already mounted and the radio off, so **restart is the return path** — no VM unwind, no submodule
+change, no risk of half-torn-down state.
+
+(Wall-clock is the *corrected* design. This started as a count of consecutive held polls, which §4 explains was
+wrong in four of the five loops; a later review round then found that requiring the polls to be *consecutive*
+was wrong too — see §5a.)
+
+Long-press rather than a tap, deliberately: a tap must keep meaning PICO-8's pause.
+
+## 4. Built, and two things the first attempt got wrong
+
+**Armed in the wrong place.** `input_exit_enable(true)` first went in beside `vm->GameLoop()` — but `main.cpp`
+has **five** mutually-exclusive frame loops (`MEASURE_FPS` / `TELEMETRY` / `FB_DUMP` / `GC_MANUAL` / shipped),
+so the gesture existed only in the shipped build. That is the worst version of the bug: the dev builds are
+exactly where it gets exercised. Now armed **once, above the whole ladder** — "the cart owns the machine from
+here" is true of every branch.
+
+Caught only because the first hardware test ran the `FB_DUMP` loop rather than the shipped one: `-D` defines are
+**sticky in the CMake cache**, so a build asking for `LAUNCHER=1 INPUT_BACKEND=serial` still had `FB_DUMP=1`
+from an earlier capture run. `make fullclean` between config changes, as the Makefile's own note says.
+
+**A poll count was the wrong unit.** The threshold started as 72 consecutive polls ("~1.2 s at 60 Hz"), which
+silently changes length in any build whose loop is not 60 Hz — and four of the five are not. Now wall-clock via
+`esp_timer_get_time()`.
+
+## 5. Verified — and precisely how far
+
+```
+launch /sdcard/[Action-Adventure]/2-minute Picovania.p8.png
+entering GameLoop (hold MENU to return to the launcher)
+W input.exit: MENU held 30 ms — returning to the launcher (restart)
+rst:0xc (SW_CPU_RESET)
+carousel: carousel layout ...          <- back in the launcher
+```
+
+The full path works: armed at hand-off → gesture detected in the input layer → restart → carousel.
+
+**The 1.2 s duration itself is NOT verified on hardware, and cannot be over serial.** The USB-Serial-JTAG
+transport batches input at roughly 1 Hz here — sending `p` every 40 ms, the backend saw **5 bytes, ~1 s apart**,
+each giving a 6-frame hold. A held button is unrepresentable over that link, so the run above used a temporary
+30 ms threshold to prove the mechanism, and the real 1200 ms was restored afterwards. What is verified is
+detect → restart → launcher; what is not is the feel of the hold. That needs a finger on the deck with the
+touch backend, where a held press polls continuously — **an owner check, not something the bench can do.**
+
+Also unverified for the same reason: that a *short* tap still reaches the VM as PICO-8's pause rather than
+triggering the exit. The code path is the same `held & INPUT_PAUSE` the VM already consumes and the timer simply
+does not reach 1.2 s, but it is reasoning, not a measurement.
+
+## 5a. Review round (2026-08-08) — seven findings, all real
+
+The review pass on PR #35 found seven, and none were style. Four changed the code:
+
+**The host test stopped linking.** `components/input/host_test/run.sh` compiles `test_input_scheduled.c` as one
+translation unit against stub IDF headers; adding `input_exit_check()` to `input_scheduled.c` broke it with
+`undefined reference to input_exit_check`. It passed on `main` and fails on the branch — a test the repo ships
+and I never ran. Fixed with a stub definition in the test.
+
+**The gesture armed where there is no launcher to return to.** The carousel is gated on `LAUNCHER` *and*
+`sd_ret == ESP_OK`, but arming was unconditional. On a card-less boot of the shipped build, holding MENU
+rebooted into *the same cart from the top* while logging "returning to the launcher" — the user loses the
+session and gains nothing. Now gated on `launcher_is_boot_dest`.
+
+**A tap plus a stall could reboot the device.** The threshold compared two polls that happened to see MENU
+held, with no requirement that anything happened in between. One serial byte holds `INPUT_PAUSE` for
+`INPUT_HOLD_FRAMES` polls, so a tap followed by `carousel_fb_dump()`'s multi-second transfer (or a GC pause, or
+a slow SD read) landed a "held" poll >1.2 s after the first and rebooted. Fixed with
+`INPUT_EXIT_MAX_GAP_MS` (250 ms): held polls further apart than that restart the measurement.
+
+**`INPUT_EXIT_HOLD_MS` was unreachable.** `DEFS='-D X=Y'` only sets a CMake cache variable; every other tunable
+is plumbed with `target_compile_definitions`. So the documented escape hatch — `-D INPUT_EXIT_HOLD_MS=0` to
+compile the gesture out — silently built the 1200 ms default with a live gesture, and so did the 30 ms test
+threshold §5 describes. Now plumbed.
+
+The other three were comments and docs asserting things that were not true: that nothing is lost on exit (cart
+save state **is** discarded — `dset()` only pokes RAM, and the serialising paths are all bypassed by
+`esp_restart()`); that every backend calls the hook (`input_stub.c` and `input_i2c.c` did not — now they do,
+which matters because the i2c file is the IN-3 skeleton for the physical-button handheld); and the spec entry
+in the input doc, which described the **poll-counting** design this work deliberately rejected.
+
+## 5b. Second review round — the fix for one finding created a worse one
+
+Re-reviewing the seven fixes found five more, and the first is the most serious defect this feature has had.
+
+**The gesture would barely have fired on the hardware it ships on.** Closing the tap-plus-stall hole in §5a
+introduced `INPUT_EXIT_MAX_GAP_MS`, but the function still zeroed the run on **any single poll that did not
+report MENU**. That reads as harmless until you look at what the shipped P4 backend actually returns:
+`board_touch_read()` gives 0 on any GT911 I²C hiccup *and*, routinely, on every poll where the controller's
+buffer-ready bit (`0x814E:7`) is clear because it has not posted a new frame since the last read. At a 60 Hz
+poll that is constant, not exceptional — so across the ~72 consecutive polls a 1.2 s hold needs, the run would
+almost always be reset partway and the user would simply see the gesture "not work", with nothing logged.
+
+Two things about this are worth keeping:
+
+- It is **P4-only**. The S3's FT6236 read is level-based and unaffected. So the one board that could not be
+  driven over serial is the one board the bug lived on — which is exactly why "verified over serial" was never
+  the same as verified.
+- It was **created by fixing the previous finding**, and it is strictly worse than the bug it replaced. A false
+  positive that needs a multi-second stall to trigger is a nuisance; a false negative on the normal path means
+  the feature does not exist.
+
+Now a poll without MENU no longer ends a run on its own — only silence for longer than the gap does, which is
+the same tolerance already granted *between* held polls. Residual, and accepted deliberately: taps closer
+together than 250 ms keep one run alive, so mashing MENU at ~5/s for a solid 1.2 s trips the exit. That is a
+deliberate act, and it is the price of the dropout tolerance the sensor needs.
+
+The other four were smaller: `input_touch.c` and `input_scheduled.c` returned early on `!s_ok` **before** the
+hook, breaking the very invariant the previous round had bought by adding the call to the stub and i2c
+backends; §3 of this file still described the rejected poll-counting design (the previous round fixed that
+wording in the runtime doc but not here); the §6 file list had gone stale against its own §5a; and the branch
+committed an HTML render with no `index.html` card, which `.ai/AGENTS.md` requires.
+
+## 6. PARKED (2026-08-07) — state for whoever picks this up
+
+**Working, uncommitted, held out of the weekday no-commit window.** Everything below is in the tree, both
+targets build, and the mechanism is verified on the P4.
+
+Files:
+- `components/input/input_exit.c` (new) — the gesture; wall-clock threshold, armed via `input_exit_enable()`
+- `components/input/input.h` — declarations
+- `components/input/CMakeLists.txt` — compiles `input_exit.c` with **every** backend; `REQUIRES esp_system
+  esp_timer`; plumbs `INPUT_EXIT_HOLD_MS` / `INPUT_EXIT_MAX_GAP_MS` through `target_compile_definitions`
+- `components/input/input_{serial,touch,scheduled,stub,i2c}.c` — an `input_exit_check()` call on **every**
+  return path of each backend's `input_poll()`, the stub and i2c skeleton included (§5a says why)
+- `components/input/host_test/test_input_scheduled.c` — stubs the hook so the host test still links
+- `firmware/pico-e32-fake08/main/main.cpp` — `input_exit_enable(launcher_is_boot_dest)` **above** the five-way
+  loop ladder, so the gesture exists only when a reboot would actually reach the launcher
+- `docs/runtime/pico-e32-fake08-input.md` — the `IN-6` spec
+
+**To finish it:**
+1. Commit + PR (code change → branch, not `main`) and run a review pass.
+2. **The one test the bench cannot do:** flash a **touch** build, run a cart, and hold MENU on the deck for
+   ~1.2 s. Confirm it returns to the carousel, and that a *short* tap still pauses the cart instead of exiting.
+   Serial cannot stand in for this — see §5.
+3. Reflash both boards to shipping builds.
+
+**Board state as of the park:** the **S3 is known-good** — reflashed to the shipping launcher build and confirmed
+booting (`SD mounted at /sdcard` → `carousel layout`). The **P4 is not**: it dropped off USB (`/dev/ttyACM0` gone,
+no Espressif device on the bus) before it could be reflashed, so it still holds the **serial-input test build** from
+§5. Re-plug it and flash the shipping build before trusting anything it shows.
+
+**Also parked:** PR #34 (`wc2-case-colour`, 5 commits, MERGEABLE) — asked to merge at 09:24 Pacific, held for the
+same window rule. Three review passes run; the last pass's findings are fixed in `a7b7766` but that commit is
+itself unreviewed.
+
+**Known-good baseline if anything here is suspect:** `main` at `65c5001` — both boards ran that cleanly.

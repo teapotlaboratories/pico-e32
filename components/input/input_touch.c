@@ -32,7 +32,9 @@ esp_err_t input_init(void) {
 
 uint8_t input_poll(void) {
     static bool was = false;
-    if (!s_ok) return 0;
+    /* Route the failed-init path through the hook too, so "every backend calls input_exit_check() from its own
+     * input_poll()" holds as an invariant rather than only where it currently matters. */
+    if (!s_ok) { input_exit_check(0); return 0; }
     int xs[2], ys[2];
     int n = board_touch_read(xs, ys, 2);
     uint8_t held = 0;
@@ -43,6 +45,7 @@ uint8_t input_poll(void) {
             ESP_LOGI(TAG, "touch (%d,%d) -> 0x%02x", xs[i], ys[i], bit[i]);
     }
     was = (n > 0);
+    input_exit_check(held);   /* hold MENU -> back to the launcher (IN-6) */
     return held;
 }
 

@@ -160,7 +160,7 @@ esp_err_t input_init(void) {
 void input_set_frame(uint32_t fc) { s_apply_fc = fc; }
 
 uint8_t input_poll(void) {
-    if (!s_ok) return 0;
+    if (!s_ok) { input_exit_check(0); return 0; }   /* keep the IN-6 hook on every return path */
     uint32_t G = s_apply_fc;
 
     sched_cmd_t c;                                     /* drain the latch into the pending table */
@@ -185,6 +185,7 @@ uint8_t input_poll(void) {
             ++i;                                       /* still in the future */
         }
     }
+    input_exit_check(held);   /* hold MENU -> back to the launcher (IN-6) */
     return held;
 }
 

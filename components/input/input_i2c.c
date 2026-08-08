@@ -13,7 +13,9 @@ esp_err_t input_init(void) {
     ESP_LOGW(TAG, "I2C expander input backend not implemented yet (IN-3, parts-blocked) - no input");
     return ESP_OK;
 }
-uint8_t     input_poll(void)         { return 0; }
+/* The exit-gesture hook is already wired (IN-6) so that implementing IN-3 here is only about producing the
+ * mask: the hold-MENU-to-launcher path comes along for free rather than being forgotten on real hardware. */
+uint8_t     input_poll(void)         { uint8_t m = 0; input_exit_check(m); return m; }
 void        input_set_frame(uint32_t fc) { (void)fc; }   /* no-op: only the scheduled backend uses the fc */
 const char *input_backend_name(void) { return "i2c(stub)"; }
 

@@ -6,6 +6,7 @@
  * docs/runtime/pico-e32-fake08-input.md. Bits match fake-08's P8_KEY_* order (hostVmShared.h). */
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 #include "esp_err.h"
 
@@ -29,6 +30,19 @@ esp_err_t input_init(void);
 
 /* The currently-held button mask (INPUT_* bits). Called once per frame. Never blocks. */
 uint8_t input_poll(void);
+
+/* Hold MENU (INPUT_PAUSE) in a running cart to return to the launcher (IN-6). Each backend calls this from
+ * inside its own input_poll(), passing the mask it is about to return — that is the only per-frame path this
+ * component owns, because the app is blocked in GameLoop() and a second poller would steal input (input_poll
+ * is destructive on the serial backend). Reboots past the hold threshold; otherwise does nothing.
+ * A tap is untouched, so it still reaches the VM as PICO-8's pause. */
+void input_exit_check(uint8_t held);
+
+/* Arm the gesture. OFF by default so it exists only while a cart is running — in the launcher MENU is not an
+ * exit (those screens leave with X) and a thumb resting on the deck must not reboot the device. The app turns
+ * it on immediately before handing control to the VM. */
+void input_exit_enable(bool on);
+
 
 /* Hand the backend the frame clock (the telemetry `fc` this frame will emit), called by main.cpp before each
  * Step. Only the `scheduled` backend uses it (to apply fc-tagged commands on their exact frame); every other

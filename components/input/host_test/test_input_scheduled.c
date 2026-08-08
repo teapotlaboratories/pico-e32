@@ -7,6 +7,12 @@
 #include <string.h>
 #include <stdint.h>
 
+/* input_scheduled.c calls input_exit_check() (IN-6), which lives in input_exit.c and pulls in esp_timer +
+ * esp_system. This test deliberately compiles ONE translation unit against stub headers, so rather than drag
+ * those in, stub the hook: what is under test here is the ring/parser/apply-by-fc logic, and the exit gesture
+ * has no bearing on it. Without this the link fails with `undefined reference to input_exit_check`. */
+void input_exit_check(uint8_t held) { (void)held; }
+
 #include "input_scheduled.c"   /* found via -I .. (run.sh) */     /* pulls in the static feed_bytes/ring + the seam */
 
 #define L 1

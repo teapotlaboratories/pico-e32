@@ -223,6 +223,11 @@ extern "C" void app_main(void) {
     vm->SetCartList(carts);
 
     bool loaded = false;
+    /* Whether a reboot would actually land back in the launcher — the precondition for arming IN-6 below.
+     * Only the LAUNCHER build with a mounted card reaches the carousel (see the ladder), and restarting
+     * without one just replays the same cart from the top: a gesture that reports "returning to the launcher"
+     * and silently costs the session instead. */
+    bool launcher_is_boot_dest = false;
 #ifndef FORCE_FLASH_CART
 #ifdef LAUNCHER
     /* Launcher build (`-D LAUNCHER=1`): if the SD mounted, run the native cover-art carousel over the card
@@ -230,6 +235,7 @@ extern "C" void app_main(void) {
      * the user chose; we load that. If the user exits without choosing (or it errors), fall back to fake-08's
      * built-in text browser, then the flash cart. */
     if (sd_ret == ESP_OK) {
+        launcher_is_boot_dest = true;           /* a reboot from here comes back to this carousel */
         std::string pick = carousel_launcher_run(host, SD_MOUNT_POINT);
         if (!pick.empty()) {
             ESP_LOGI(TAG, "LAUNCHER: loading %s", pick.c_str());
@@ -358,6 +364,15 @@ extern "C" void app_main(void) {
     vm->ExecuteLua("begin_game() load_room(0,0)", "");
     ESP_LOGI(TAG, "CELESTE_START: begin_game + load_room(0,0) (skip title for fc-scheduled HITL)");
 #endif
+
+/* From here the cart owns the machine: every branch below is a frame loop that does not return. Arm the only
+ * way back — hold MENU to restart into the launcher (IN-6) — ONCE, above the ladder rather than inside one
+ * branch, because there are five (MEASURE_FPS / TELEMETRY / FB_DUMP / GC_MANUAL / shipped) and a gesture that
+ * works only in the shipped build is worse than none: the dev builds are where it gets exercised. Not armed
+ * before this point, since in the launcher MENU is not an exit — and not armed AT ALL unless a reboot would
+ * actually reach the launcher, so a card-less or non-LAUNCHER boot cannot lose a session to a gesture that
+ * would only replay the same cart. */
+input_exit_enable(launcher_is_boot_dest);
 
 #ifdef MEASURE_FPS
     /* Opt-in fps measurement (DEFS='-D MEASURE_FPS=1'). Run our own loop, paced to the target fps, and
@@ -635,7 +650,7 @@ extern "C" void app_main(void) {
         }
     }
 #else
-    ESP_LOGI(TAG, "entering GameLoop");
+    ESP_LOGI(TAG, "entering GameLoop (hold MENU to return to the launcher)");
     vm->GameLoop(); /* fake-08's own loop; never returns */
 #endif
 }

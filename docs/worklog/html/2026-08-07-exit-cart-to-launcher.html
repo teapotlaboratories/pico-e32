@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exit a running cart back to the launcher — pico-e32 worklog</title>
+<style>
+  :root{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;
+        --ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8;
+        --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;
+        --border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}}
+  :root[data-theme="light"]{--bg:#f6f8fb;--surface:#fff;--fg:#181c23;--muted:#5a6472;--border:#e1e6ee;--accent:#356ad4;--ok:#1a7f4b;--warn:#a86300;--bad:#c0392b;--codebg:#eef1f6;--line:#c4ccd8}
+  :root[data-theme="dark"]{--bg:#0d1117;--surface:#161b22;--fg:#e6edf3;--muted:#9aa5b1;--border:#2a323d;--accent:#5b8bf0;--ok:#3fb950;--warn:#d29922;--bad:#f0684a;--codebg:#1b2230;--line:#3a4553}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.2rem 4rem}
+  a{color:var(--accent)} .back{font-size:.9rem}
+  h1{letter-spacing:-.02em;margin:.4rem 0 .2rem;line-height:1.15}
+  .date{color:var(--muted);font-size:.9rem}
+  h2{letter-spacing:-.01em;margin:2.2rem 0 .6rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+  code{background:var(--codebg);padding:.12em .42em;border-radius:5px;font-size:.86em;font-family:var(--mono)}
+  pre{background:var(--codebg);border:1px solid var(--border);border-radius:9px;padding:.9rem 1.05rem;overflow-x:auto;font-size:.82rem;line-height:1.5;font-family:var(--mono)}
+  .tldr{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--ok);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  .nullres{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--warn);border-radius:10px;padding:.9rem 1.1rem;margin:1.2rem 0}
+  ul{padding-left:1.2rem} li{margin:.3rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.92rem;display:block;overflow-x:auto}
+  th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left;vertical-align:top}
+  th{background:var(--codebg);font-family:var(--mono);font-size:.82rem}
+  td.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .bad{color:var(--bad);font-weight:600} .ok{color:var(--ok);font-weight:600} .warn{color:var(--warn);font-weight:600}
+  .diag{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.3rem;margin:1.3rem 0}
+  .diag h3{margin:.1rem 0 .4rem;font-size:.95rem}
+  .diag .sub{color:var(--muted);font-size:.82rem;margin:0 0 1rem}
+  .legend{font-size:.78rem;color:var(--muted);margin-top:.7rem}
+  .foot{margin-top:2.6rem;padding-top:1rem;border-top:1px solid var(--border);color:var(--muted);font-size:.85rem}
+  svg{max-width:100%;height:auto;display:block}
+  .goal{display:grid;grid-template-columns:auto 1fr;gap:.6rem 1rem;align-items:start;margin:1rem 0}
+  .pill{font:600 .72rem/1.6 var(--mono);padding:.05rem .55rem;border-radius:999px;white-space:nowrap;text-align:center}
+  .p-no{background:rgba(192,57,43,.14);color:var(--bad)}
+  .p-yes{background:rgba(26,127,75,.14);color:var(--ok)}
+  .p-part{background:rgba(168,99,0,.14);color:var(--warn)}
+</style>
+</head><body><div class="wrap">
+<p class="back"><a href="index.html">← worklog index</a></p>
+<h1>Exit a running cart back to the launcher</h1>
+<p class="date">2026-08-07 · <code>IN-6</code> — making the cart launcher a launcher</p>
+<div class="tldr">Once a cart launched there was <b>no way back</b> short of power-cycling: <code>GameLoop()</code>
+never returns and MENU pauses without offering anything. Holding MENU now restarts into the carousel — restart
+<i>is</i> the return path, at ~1.8 s with the SD mounted and the radio off. Mechanism verified end to end; the
+hold duration itself needs a finger on the deck.</div>
+
+<h2>The gap, and how it surfaced</h2>
+<p>Found by being asked a plain product question — "when in the game, how do I exit to the main menu?" — and not
+knowing the answer. Reading the code rather than guessing:</p>
+<pre>main.cpp:639   vm-&gt;GameLoop(); /* fake-08's own loop; never returns */
+board.cpp:541  MENU -&gt; INPUT_PAUSE -&gt; Vm::togglePauseMenu()   flips a flag, pauses audio, renders nothing
+vm.cpp:1247    //todo: pause menu here, but for now just load bios     &lt;- upstream's intent, commented out</pre>
+<p>So MENU freezes and silences the cart; pressing it again resumes. There is no exit. A launcher holding 3145
+carts plays exactly one per boot.</p>
+<div class="nullres"><b class="warn">It was visible in my own tooling for days.</b> Every screen-capture script
+took the in-game shot <b>last</b>, because the board had to be reset afterwards. The constraint was internalised
+as a workflow quirk and never written down as a defect.</div>
+
+<h2>Two implementations that cannot work</h2>
+<ul>
+<li><b>A watcher task.</b> <code>input_poll()</code> is <b>destructive</b> on the serial backend — it drains the
+UART/USB-JTAG buffer and decrements hold counters — so a second caller would eat input the VM never sees.</li>
+<li><b>Checking from the app.</b> <code>app_main</code> is blocked inside <code>GameLoop()</code>, which never
+returns.</li>
+</ul>
+<p>That leaves two per-frame paths: <code>ESP32Host::scanInput()</code> — architecturally the right home, but in
+the <b>fake-08 submodule</b>, so a separate repo PR plus a gitlink bump — and <code>input_poll()</code>, which is
+ours. The gesture went in the input layer, called from inside each backend's poll.</p>
+<p><b>Restart is the return path.</b> The launcher is ~1.8 s from reset with the SD already mounted and the radio
+off, so rebooting beats unwinding a loop documented never to return.</p>
+
+<h2>Two things the first attempt got wrong</h2>
+<ul>
+<li><b>Armed in the wrong place.</b> <code>main.cpp</code> has <b>five</b> mutually-exclusive frame loops
+(<code>MEASURE_FPS</code> / <code>TELEMETRY</code> / <code>FB_DUMP</code> / <code>GC_MANUAL</code> / shipped) and
+the arm went inside one — so the gesture existed only in the shipped build, absent from exactly the dev builds
+where it gets exercised. Now armed once, above the ladder.</li>
+<li><b>A poll count was the wrong unit.</b> "72 polls ≈ 1.2 s at 60 Hz" silently changes length in any loop that
+is not 60 Hz — and four of the five are not. Now wall-clock.</li>
+</ul>
+<p>Caught only because a <b>sticky <code>-D</code> in the CMake cache</b> meant the first hardware test ran the
+<code>FB_DUMP</code> loop rather than the shipped one.</p>
+
+<h2>Verified — and precisely how far</h2>
+<pre>launch /sdcard/[Action-Adventure]/2-minute Picovania.p8.png
+entering GameLoop (hold MENU to return to the launcher)
+W input.exit: MENU held 30 ms — returning to the launcher (restart)
+rst:0xc (SW_CPU_RESET)
+carousel: carousel layout ...          <span style="color:var(--ok)">&lt;- back in the launcher</span></pre>
+<div class="nullres"><b class="warn">The 1.2 s duration is NOT verified, and cannot be over serial.</b> The
+USB-Serial-JTAG transport batches input at roughly 1 Hz here — sending <code>p</code> every 40 ms, the backend saw
+<b>5 bytes, ~1 s apart</b>. A held button is unrepresentable over that link, so the run above used a temporary
+30 ms threshold and the real 1200 ms was restored after. Detect → restart → launcher is measured; the feel of the
+hold, and that a short tap still reaches PICO-8's pause, need a finger on the deck with the touch backend.</div>
+
+<h2>Review round — seven findings, all real</h2>
+<p>The review on PR #35 found seven, none of them style. Four changed the code.</p>
+<div class="nullres"><b class="warn">The host test stopped linking.</b> <code>host_test/run.sh</code> compiles
+<code>test_input_scheduled.c</code> as one translation unit against stub IDF headers; adding
+<code>input_exit_check()</code> broke it with <code>undefined reference</code>. It passes on <code>main</code> and
+failed on the branch — a test the repo ships and I never ran.</div>
+<ul>
+<li><b>Armed where there is no launcher to return to.</b> The carousel needs <code>LAUNCHER</code> <i>and</i> a
+mounted card, but arming was unconditional. On a card-less boot, holding MENU rebooted into <b>the same cart from
+the top</b> while logging "returning to the launcher" — session lost, nothing gained. Now gated on
+<code>launcher_is_boot_dest</code>.</li>
+<li><b>A tap plus a stall could reboot the device.</b> The threshold compared two polls that saw MENU held, with
+nothing required in between. One serial byte holds PAUSE for several polls, so a tap followed by
+<code>carousel_fb_dump()</code>'s multi-second transfer landed a "held" poll &gt;1.2 s later and rebooted. Fixed
+with <code>INPUT_EXIT_MAX_GAP_MS</code> (250 ms).</li>
+<li><b><code>INPUT_EXIT_HOLD_MS</code> was unreachable.</b> <code>DEFS='-D X=Y'</code> only sets a CMake cache
+variable, so the documented escape hatch (<code>=0</code> to compile the gesture out) silently built the 1200 ms
+default with a live gesture. Now plumbed via <code>target_compile_definitions</code>.</li>
+</ul>
+<p>The other three were comments and docs asserting untrue things: that nothing is lost on exit (cart save state
+<b>is</b> discarded — <code>dset()</code> only pokes RAM and every serialising path is bypassed by
+<code>esp_restart()</code>); that every backend calls the hook (the stub and the i2c skeleton did not — now they
+do, which matters because that file is the IN-3 skeleton for the physical-button handheld); and the input spec,
+which described the <b>poll-counting</b> design this work deliberately rejected.</p>
+
+<h2>Second review round — the fix for one finding created a worse one</h2>
+<div class="nullres"><b class="warn">The gesture would barely have fired on the hardware it ships on.</b> Closing
+the tap-plus-stall hole added a gap window, but the function still zeroed the run on <b>any single poll that did
+not report MENU</b>. On the shipped P4 backend <code>board_touch_read()</code> returns 0 on any GT911 I²C hiccup
+<i>and</i>, routinely, on every poll where the buffer-ready bit is clear because the controller has not posted a
+new frame. At a 60&nbsp;Hz poll that is constant — so across the ~72 polls a 1.2&nbsp;s hold needs, the run was
+almost always reset partway and the user would just see the gesture "not work", with nothing logged.</div>
+<p>Two things worth keeping about it. It is <b>P4-only</b> — the S3's FT6236 read is level-based and unaffected —
+so the one board that could not be driven over serial is the board the bug lived on, which is precisely why
+"verified over serial" was never the same as verified. And it was <b>created by fixing the previous finding</b>,
+and is strictly worse than what it replaced: a false positive needing a multi-second stall is a nuisance; a false
+negative on the normal path means the feature does not exist.</p>
+<p>Now a MENU-less poll no longer ends a run on its own — only silence longer than the gap does, the same
+tolerance already granted between held polls. Accepted residual: taps closer than 250&nbsp;ms keep one run alive,
+so mashing MENU at ~5/s for a solid 1.2&nbsp;s trips the exit.</p>
+<p>The other four were smaller: two backends returned early on <code>!s_ok</code> <b>before</b> the hook, breaking
+the very invariant the previous round bought; the approach section still described the rejected poll-counting
+design; the file list had gone stale against its own review section; and the branch committed an HTML render with
+no index card, which the repo rules require.</p>
+
+<h2>Parked</h2>
+<p>Working and uncommitted, held out of the weekday no-commit window. To finish: commit on a branch, run a review,
+and do the one test the bench cannot — hold MENU on the deck for ~1.2 s with a touch build, and confirm a short
+tap still pauses instead of exiting.</p>
+
+<h2>Board state at the park</h2>
+<p>The <b>S3 is known-good</b> — reflashed to the shipping launcher and confirmed booting
+(<code>SD mounted at /sdcard</code> → <code>carousel layout</code>). The <b>P4 is not</b>: it dropped off USB
+before it could be reflashed (no <code>/dev/ttyACM0</code>, no Espressif device on the bus), so it still holds the
+<b>serial-input test build</b> above. Re-plug it and flash the shipping build before trusting anything it shows.</p>
+<p class="foot">pico-e32 worklog · source: <code>docs/worklog/2026-08-07-exit-cart-to-launcher.md</code></p>
+</div></body></html>
